@@ -60,4 +60,32 @@ final class DextrinTest extends TestCase
         $wrapped = DXNError::wrap($original, 'encode');
         self::assertSame($original, $wrapped);
     }
+
+    public function testDecodeBinaryEncodeBinaryRoundTrip(): void
+    {
+        $value = ['x' => 1, 'y' => 2];
+        $binary = Dextrin::encodeBinary($value);
+        self::assertSame('DX', substr($binary, 0, 2));
+        self::assertSame($value, Dextrin::decodeBinary($binary));
+    }
+
+    public function testDecodeBinaryThrowsDXNErrorWithBinaryStage(): void
+    {
+        try {
+            Dextrin::decodeBinary('not a dxnb document');
+            self::fail('expected DXNError');
+        } catch (DXNError $e) {
+            self::assertSame('binary', $e->stage);
+        }
+    }
+
+    public function testEncodeBinaryThrowsDXNErrorForUnrepresentableValue(): void
+    {
+        try {
+            Dextrin::encodeBinary(fn () => 1);
+            self::fail('expected DXNError');
+        } catch (DXNError $e) {
+            self::assertSame('binary', $e->stage);
+        }
+    }
 }

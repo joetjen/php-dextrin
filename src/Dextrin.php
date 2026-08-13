@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin;
 
+use JOetjen\Dextrin\Binary\Decoder;
+use JOetjen\Dextrin\Binary\Encoder;
 use JOetjen\Dextrin\Text\Formatter;
 use JOetjen\Dextrin\Text\Parser;
 use JOetjen\Dextrin\Text\Printer;
 
 /**
- * Public API entry point: `.dxn` text decode/encode. `.dxnb` binary
- * and `.dxns` schema support land in later phases.
+ * Public API entry point: `.dxn` text and `.dxnb` binary decode/
+ * encode. `.dxns` schema support lands in a later phase.
  */
 final class Dextrin
 {
@@ -48,6 +50,35 @@ final class Dextrin
             return $pretty ? Formatter::pretty($value, $indent) : Printer::print($value);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'encode');
+        }
+    }
+
+    /**
+     * Decodes a `.dxnb` binary string into a value -- the same value
+     * shapes as {@see self::decode()}. Throws {@see DXNError} on
+     * malformed input, including a missing/invalid envelope (`DX` +
+     * version byte).
+     */
+    public static function decodeBinary(string $bytes): mixed
+    {
+        try {
+            return Decoder::decode($bytes);
+        } catch (\Throwable $err) {
+            throw DXNError::wrap($err, 'binary');
+        }
+    }
+
+    /**
+     * Encodes a value to `.dxnb` binary, returning a raw binary
+     * string. Throws {@see DXNError} for a value with no DXN
+     * representation.
+     */
+    public static function encodeBinary(mixed $value): string
+    {
+        try {
+            return Encoder::encode($value);
+        } catch (\Throwable $err) {
+            throw DXNError::wrap($err, 'binary');
         }
     }
 }

@@ -63,3 +63,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public entry point (`JOetjen\Dextrin\Dextrin` facade class):
   `Dextrin::decode()`/`Dextrin::encode()`; `.dxnb` binary and `.dxns`
   schema support land in later phases.
+- `.dxnb` binary codec (`src/Binary/`, `Dextrin::decodeBinary()`/
+  `Dextrin::encodeBinary()`): a hand-rolled CBOR `Encoder`/`Decoder`
+  over raw PHP strings (no `Buffer`-equivalent needed — PHP strings
+  are already binary-safe), `Writer` (low-level header/item builders),
+  `Tags` (the private tag block, 200–214, plus regex-flags/duration
+  -bitmask byte<->array conversions), `BinaryError`. Verified against
+  `dxn/DXN.md` §3's own worked example, a by-type round-trip suite,
+  the same hand-rolled random-value generator the text codec's own
+  property test uses (now shared, `tests/Support/RandomValueGenerator.php`),
+  and a 500-iteration fuzz test (random bytes after a valid envelope,
+  plus every truncation of a real document) confirming malformed
+  input always fails as a clean `BinaryError`, never an uncaught
+  crash.
+  - **The one sharp edge this phase's own plan flagged in advance**:
+    CBOR major 0's argument can reach `2^64-1`, which exceeds
+    `PHP_INT_MAX` (`2^63-1` — PHP's `int` is signed 64-bit, unlike
+    the JS port's unbounded `bigint`). `Writer`/`Decoder` handle every
+    CBOR item-header size as a numeric string throughout, comparing
+    via `bccomp()` and only casting to a native `int` once a branch
+    has already proven the value small enough — verified directly at
+    the byte level, including right at the `PHP_INT_MAX` boundary
+    itself, not just via a round-trip that might not exercise it.
+  - Value sharing (`dxn/DXN.md` §2.5, tags 28/29) and string-reference
+    sharing (§2.4, tags 256/25) are decode-side only, same as the JS
+    port and for the same reason (spec-mandatory to *accept*, optional
+    to *produce*).
+  - `.dxnb` structs are always positional on the wire (§2.1) — a
+    keyed `DXNStruct` round-trips through binary with its field
+    *values* intact but not its keyed-ness or field names, a
+    spec-mandated asymmetry from the text codec (which preserves both
+    struct shapes exactly), not a bug.
+  - A `DXNDecimal` with a positive exponent — which has no distinct
+    text-literal form (see the text codec's own note) — round-trips
+    *exactly* through binary, since CBOR tag 4's `[exponent, mantissa]`
+    payload supports any signed exponent directly. The one place this
+    port's two codecs genuinely differ in fidelity, in binary's favor.
+- `MapBuilder` (`src/MapBuilder.php`): the map-key-coercion/collision
+  -detection logic factored out of `Text\Parser` so `Binary\Decoder`
+  can reuse it exactly for the untagged-map case — `@ordered`'s (text)
+  and `T_ORDERED`'s (binary) own map-shaped payloads both bypass it
+  deliberately, since `ordered-map`'s pairs can hold any key type
+  without needing PHP-array-key coercion at all.
