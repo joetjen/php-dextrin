@@ -19,9 +19,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * `dxn/DXN.md` §3's own worked example -- every construct in it is
- * fully specified by §1.2 + §1.3, and every field should round-trip
- * through this port's text codec without loss (binary round-trip
- * lands with the `.dxnb` phase).
+ * fully specified by §1.2 + §1.3, and every field round-trips through
+ * both this port's text and binary codecs without loss.
  */
 final class WorkedExampleTest extends TestCase
 {
@@ -81,5 +80,29 @@ final class WorkedExampleTest extends TestCase
         $value = Dextrin::decode(self::DOC);
         $pretty = Dextrin::encode($value, pretty: true);
         self::assertGreaterThan(1, substr_count($pretty, "\n"));
+    }
+
+    public function testBinaryEncodeDecodesBackToAnEqualValue(): void
+    {
+        $value = Dextrin::decode(self::DOC);
+        $binary = Dextrin::encodeBinary($value);
+        self::assertSame('DX', substr($binary, 0, 2));
+        $roundTripped = Dextrin::decodeBinary($binary);
+        self::assertTrue(Equality::dxnEquals($value, $roundTripped));
+    }
+
+    public function testBinaryEncodingIsStableAcrossReEncoding(): void
+    {
+        $value = Dextrin::decode(self::DOC);
+        $binary = Dextrin::encodeBinary($value);
+        $again = Dextrin::encodeBinary(Dextrin::decodeBinary($binary));
+        self::assertSame($binary, $again);
+    }
+
+    public function testTextAndBinaryDecodeToEqualValues(): void
+    {
+        $fromText = Dextrin::decode(self::DOC);
+        $fromBinary = Dextrin::decodeBinary(Dextrin::encodeBinary($fromText));
+        self::assertTrue(Equality::dxnEquals($fromText, $fromBinary));
     }
 }

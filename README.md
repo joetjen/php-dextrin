@@ -8,11 +8,10 @@ sharing one in-memory value representation and one extension
 mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
 the Node.js port of the same library.
 
-**Status: early port, in progress.** The value model (`src/Value/`)
-and the `.dxn` text codec (`Dextrin::decode()`/`Dextrin::encode()`)
-are implemented. Remaining: the `.dxnb` binary codec, the `.dxns`
-schema system, and polish. See `CHANGELOG.md` for exactly what's
-landed.
+**Status: early port, in progress.** The value model (`src/Value/`),
+the `.dxn` text codec, and the `.dxnb` binary codec are implemented.
+Remaining: the `.dxns` schema system and polish. See `CHANGELOG.md`
+for exactly what's landed.
 
 ## Why a port, and why this value model
 
@@ -74,6 +73,28 @@ Dextrin::encode($value, pretty: true);
 `decode()`/`encode()` throw `DXNError` on failure (a malformed
 document, or a value with no DXN representation) — idiomatic PHP
 from the start, not a tuple-returning API.
+
+## `.dxnb` binary
+
+```php
+$bytes = Dextrin::encodeBinary($value); // raw binary string, "DX" + version + CBOR
+Dextrin::decodeBinary($bytes);          // => the same value back
+```
+
+Hand-rolled CBOR over raw PHP strings (not built on a generic CBOR
+library — bignum precision, timestamp integer-only encoding, and the
+private tag block aren't things a generic library gets right by
+default; see `src/Binary/Encoder.php`'s own doc). `decodeBinary()`
+accepts documents using the spec's value-sharing extensions
+(`dxn/DXN.md` §2.4/§2.5) even though `encodeBinary()` doesn't produce
+them yet — accepting is spec-mandatory, producing is optional, and
+that asymmetry is deliberate for now (matches the JS port).
+
+One place `.dxnb` and `.dxn` genuinely differ: `.dxnb` structs are
+always positional on the wire, so a keyed `DXNStruct` round-trips
+through binary with its field values intact but not its keyed-ness or
+field names — a spec requirement, not a bug (`.dxn` text preserves
+both struct shapes exactly).
 
 ## Development
 

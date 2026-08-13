@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -21,7 +22,6 @@ use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
-use JOetjen\Dextrin\Value\Equality;
 
 /**
  * Hand-written recursive-descent `.dxn` parser -- the reverse of
@@ -317,58 +317,12 @@ final class Parser
     }
 
     /**
-     * Builds a `map` as a bare PHP array -- the project's own
-     * collections decision. Every key reduces to whatever PHP scalar
-     * it naturally coerces to (a `DXNKeyword` reduces to its bare
-     * name string, matching `map_entry`'s shorthand form exactly;
-     * everything else follows PHP's own int/string/bool/float/null
-     * array-key coercion). Two *distinct* DXN keys that would coerce
-     * to the same PHP slot (`1` and `"1"`; `:name` and `"name"`) is a
-     * decode error, not silent data loss -- ordinary duplicate keys
-     * (the same key appearing twice) still follow normal
-     * last-write-wins map semantics.
-     *
      * @param list<array{0: mixed, 1: mixed}> $pairs
      * @return array<int|string, mixed>
      */
     private function buildMap(array $pairs): array
     {
-        $result = [];
-        /** @var array<int|string, string> $seenIdentity */
-        $seenIdentity = [];
-        foreach ($pairs as [$dxnKey, $value]) {
-            $phpKey = $this->mapKeyToPhpKey($dxnKey);
-            $identity = Equality::canonicalKey($dxnKey);
-            if (isset($seenIdentity[$phpKey]) && $seenIdentity[$phpKey] !== $identity) {
-                throw new ParseError(
-                    "map keys collide once coerced to a PHP array key ({$this->describeKey($phpKey)}): "
-                    . 'two distinct DXN keys cannot share one map slot in this port',
-                );
-            }
-            $seenIdentity[$phpKey] = $identity;
-            $result[$phpKey] = $value;
-        }
-        return $result;
-    }
-
-    private function mapKeyToPhpKey(mixed $dxnKey): int|string
-    {
-        return match (true) {
-            $dxnKey instanceof DXNKeyword => $dxnKey->name,
-            is_string($dxnKey) => $dxnKey,
-            is_int($dxnKey) => $dxnKey,
-            is_bool($dxnKey) => $dxnKey ? 1 : 0,
-            is_float($dxnKey) => (int) $dxnKey,
-            $dxnKey === null => '',
-            default => throw new ParseError(
-                'map key of kind "' . Equality::kindOf($dxnKey) . '" has no PHP array-key representation',
-            ),
-        };
-    }
-
-    private function describeKey(int|string $phpKey): string
-    {
-        return is_string($phpKey) ? "\"{$phpKey}\"" : (string) $phpKey;
+        return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
     }
 
     private function structFieldName(mixed $key): string
