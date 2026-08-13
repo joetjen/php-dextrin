@@ -8,9 +8,10 @@ sharing one in-memory value representation and one extension
 mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
 the Node.js port of the same library.
 
-**Status: scaffold only.** Nothing is implemented yet — this is
-Phase 0 of a phased port. See `CHANGELOG.md` for what's actually
-landed as work progresses.
+**Status: early port, in progress.** The value model (`src/Value/`)
+is implemented. Remaining: the `.dxn` text codec, the `.dxnb` binary
+codec, the `.dxns` schema system, and polish. See `CHANGELOG.md` for
+exactly what's landed.
 
 ## Why a port, and why this value model
 
