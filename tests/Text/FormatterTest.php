@@ -1,0 +1,85 @@
+<?php
+
+declare(strict_types=1);
+
+namespace JOetjen\Dextrin\Tests\Text;
+
+use JOetjen\Dextrin\Text\Formatter;
+use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNOrderedMap;
+use JOetjen\Dextrin\Value\DXNSet;
+use JOetjen\Dextrin\Value\DXNStruct;
+use PHPUnit\Framework\TestCase;
+
+final class FormatterTest extends TestCase
+{
+    public function testScalarsAndEmptyCollectionsStaySingleLine(): void
+    {
+        self::assertSame('42', Formatter::pretty(42));
+        self::assertSame('[]', Formatter::pretty(new DXNList([])));
+        self::assertSame('@{}', Formatter::pretty(new DXNSet([])));
+        self::assertSame('@array[]', Formatter::pretty([]));
+        self::assertSame('@ordered %{}', Formatter::pretty(new DXNOrderedMap([])));
+    }
+
+    public function testListRendersOneItemPerLineIndented(): void
+    {
+        self::assertSame("[\n  1\n  2\n  3\n]", Formatter::pretty(new DXNList([1, 2, 3])));
+    }
+
+    public function testMapRendersOneEntryPerLineWithKeywordShorthand(): void
+    {
+        self::assertSame("%{\n  a: 1\n  b: 2\n}", Formatter::pretty(['a' => 1, 'b' => 2]));
+    }
+
+    public function testMapEntryWithNonIdentifierKeyUsesQuotedArrowForm(): void
+    {
+        self::assertSame("%{\n  :\"has space\" => 1\n}", Formatter::pretty(['has space' => 1]));
+    }
+
+    public function testNestedCollectionsIndentByDepth(): void
+    {
+        $value = new DXNList([new DXNList([1, 2])]);
+        self::assertSame("[\n  [\n    1\n    2\n  ]\n]", Formatter::pretty($value));
+    }
+
+    public function testCustomIndentSize(): void
+    {
+        self::assertSame("[\n    1\n]", Formatter::pretty(new DXNList([1]), 4));
+    }
+
+    public function testKeyedStructRendersLikeAMap(): void
+    {
+        $struct = DXNStruct::keyed('Point', [['x', 1], ['y', 2]]);
+        self::assertSame("%Point{\n  x: 1\n  y: 2\n}", Formatter::pretty($struct));
+    }
+
+    public function testPositionalStructRendersLikeAList(): void
+    {
+        $struct = DXNStruct::positional('Point', [1, 2]);
+        self::assertSame("%Point[\n  1\n  2\n]", Formatter::pretty($struct));
+    }
+
+    public function testOrderedMapPreservesOrderAndUsesTagPrefix(): void
+    {
+        $om = new DXNOrderedMap([[new DXNKeyword('b'), 2], [new DXNKeyword('a'), 1]]);
+        self::assertSame("@ordered %{\n  b: 2\n  a: 1\n}", Formatter::pretty($om));
+    }
+
+    public function testPlainObjectRendersLikeAKeyedStruct(): void
+    {
+        self::assertSame("%stdClass{\n  x: 1\n}", Formatter::pretty((object) ['x' => 1]));
+    }
+
+    public function testPrettyValueDecodesBackToTheSameValue(): void
+    {
+        $value = new DXNList([1, new DXNList([2, 3]), ['a' => 1]]);
+        $pretty = Formatter::pretty($value);
+        $compact = \JOetjen\Dextrin\Text\Printer::print($value);
+        self::assertEquals(
+            \JOetjen\Dextrin\Text\Parser::parse($compact),
+            \JOetjen\Dextrin\Text\Parser::parse($pretty),
+        );
+    }
+}
