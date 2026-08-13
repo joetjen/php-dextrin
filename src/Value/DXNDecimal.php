@@ -44,6 +44,25 @@ final class DXNDecimal implements DXNValueInterface
         return (float) $this->toString();
     }
 
+    /**
+     * Parses a decimal *literal* (`digits(.digits)?`, no trailing
+     * `M`, no sign handling beyond a leading `-`) exactly -- unlike
+     * {@see self::fromFloat()}, this never goes through a binary
+     * `float` at all, so it can't introduce the representation noise
+     * a literal like `19.99` would pick up by round-tripping through
+     * IEEE 754 first.
+     */
+    public static function fromString(string $text): self
+    {
+        if (!preg_match('/^(-?)([0-9]+)(?:\.([0-9]+))?$/', $text, $m)) {
+            throw new \InvalidArgumentException("invalid decimal literal \"{$text}\"");
+        }
+        $sign = $m[1] === '-' ? -1 : 1;
+        $fracPart = $m[3] ?? '';
+        $unscaled = $m[2] . $fracPart;
+        return new self($sign, $unscaled, -strlen($fracPart));
+    }
+
     public static function fromFloat(float $n): self
     {
         if (is_nan($n) || is_infinite($n)) {

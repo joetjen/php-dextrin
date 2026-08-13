@@ -46,6 +46,15 @@ final class DXNRationalTest extends TestCase
         new DXNRational('1', '0');
     }
 
+    public function testRejectsZeroDenominatorWithLeadingZeros(): void
+    {
+        // "00" passes the unsigned-digits-only regex but normalizes
+        // to zero just as much as "0" does -- must be checked after
+        // normalization, not before.
+        $this->expectException(\InvalidArgumentException::class);
+        new DXNRational('1', '00');
+    }
+
     public function testCompareToOrdersByValueAcrossDifferentDenominators(): void
     {
         $oneHalf = new DXNRational('1', '2');

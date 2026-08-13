@@ -24,11 +24,18 @@ final class DXNRational implements DXNValueInterface
         if (!preg_match('/^-?[0-9]+$/', $numerator)) {
             throw new \InvalidArgumentException("numerator must be a signed digit string: {$numerator}");
         }
-        if (!preg_match('/^[0-9]+$/', $denominator) || $denominator === '0') {
+        if (!preg_match('/^[0-9]+$/', $denominator)) {
+            throw new \InvalidArgumentException("denominator must be a positive digit string: {$denominator}");
+        }
+        $normalizedDenominator = self::normalize($denominator);
+        // Checked after normalization -- "00" is unsigned-digits-only
+        // per the regex above but denotes zero just as much as "0"
+        // does once leading zeros are stripped.
+        if ($normalizedDenominator === '0') {
             throw new \InvalidArgumentException("denominator must be a positive digit string: {$denominator}");
         }
         $this->numerator = self::normalize($numerator);
-        $this->denominator = self::normalize($denominator);
+        $this->denominator = $normalizedDenominator;
     }
 
     /** @return numeric-string */

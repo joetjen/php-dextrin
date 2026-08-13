@@ -9,9 +9,10 @@ mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
 the Node.js port of the same library.
 
 **Status: early port, in progress.** The value model (`src/Value/`)
-is implemented. Remaining: the `.dxn` text codec, the `.dxnb` binary
-codec, the `.dxns` schema system, and polish. See `CHANGELOG.md` for
-exactly what's landed.
+and the `.dxn` text codec (`Dextrin::decode()`/`Dextrin::encode()`)
+are implemented. Remaining: the `.dxnb` binary codec, the `.dxns`
+schema system, and polish. See `CHANGELOG.md` for exactly what's
+landed.
 
 ## Why a port, and why this value model
 
@@ -54,6 +55,25 @@ flexible native container (`array`) where JS had distinct
 Full mapping table, and the reasoning behind every choice, lives in
 this project's development plan for now and will move into this
 README as the port progresses.
+
+## `.dxn` text
+
+```php
+use JOetjen\Dextrin\Dextrin;
+
+$value = Dextrin::decode('%{x: 1, y: 2}');
+// => ['x' => 1, 'y' => 2]  -- map decodes as a bare PHP array
+
+Dextrin::encode($value);
+// => '%{x:1,y:2}'
+
+Dextrin::encode($value, pretty: true);
+// => "%{\n  x: 1\n  y: 2\n}"
+```
+
+`decode()`/`encode()` throw `DXNError` on failure (a malformed
+document, or a value with no DXN representation) — idiomatic PHP
+from the start, not a tuple-returning API.
 
 ## Development
 
