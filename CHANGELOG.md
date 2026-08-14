@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed the release branch from `master` to `main`, matching
+  `dextrin`'s and `node-dextrin`'s own convention (`AGENTS.md`,
+  `.github/workflows/ci.yml`'s push trigger).
 - `map`'s bare-PHP-array key representation now marks a genuinely
   string-typed key with a single leading NUL byte, distinguishing it
   from a `DXNKeyword` key with the same text (`MapBuilder`'s own new
@@ -93,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against this port's real API and output.
 - Project scaffold: `composer.json` (`joetjen/dextrin`, PSR-4
   `JOetjen\Dextrin\`), PHPUnit test setup, PHPStan (level 8) static
-  analysis, `.editorconfig`, git flow (`master`/`develop`), GitHub
+  analysis, `.editorconfig`, git flow (`main`/`develop`), GitHub
   Actions CI (PHP 8.2/8.3/8.4 matrix) and dependabot.
 - Core DXN value model (`src/Value/`): wrapper classes for every DXN
   type without a lossless native PHP equivalent (`DXNInteger`,

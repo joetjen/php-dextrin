@@ -49,8 +49,8 @@ Instructions for AI agents working in this PHP codebase.
 
 ## Git workflow
 
-- Use [git flow](https://nvie.com/posts/a-successful-git-branching-model/): `master` (releases), `develop` (integration), `feature/*`, `release/*`, `hotfix/*`, `support/*`.
-- No direct commits to `master` or `develop`. Branch, then merge/PR back. Base pull requests on `develop` unless you're specifically preparing a release.
+- Use [git flow](https://nvie.com/posts/a-successful-git-branching-model/): `main` (releases), `develop` (integration), `feature/*`, `release/*`, `hotfix/*`, `support/*`.
+- No direct commits to `main` or `develop`. Branch, then merge/PR back. Base pull requests on `develop` unless you're specifically preparing a release.
 - Before starting work, check out onto a git flow branch (`feature/*`, `release/*`, `hotfix/*`, `support/*`) — never work directly on `develop`, unless explicitly told to.
 
 ## Commits
