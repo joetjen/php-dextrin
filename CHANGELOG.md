@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Generated API documentation ([phpDocumentor](https://phpdoc.org/),
+  run via its official `phpdoc/phpdoc` Docker image against
+  `phpdoc.dist.xml` -- no source changes needed), published to GitHub
+  Pages via `.github/workflows/docs.yml` on every push to `main`,
+  mirroring `dextrin`'s own ExDoc/Hex Docs setup. `composer run docs`
+  builds it locally into `doc/` (gitignored); requires Docker.
 - `src/Dextrin.php`'s own class docblock now names its reference
   implementation and sibling port (`dextrin` on Hex.pm, `node-dextrin`
   on npm), alongside the existing README "Other language
