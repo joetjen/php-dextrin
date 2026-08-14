@@ -1,4 +1,4 @@
-# dextrin_php's standard library of named types -- common refinements
+# php-dextrin's standard library of named types -- common refinements
 # of the built-in primitives, so a schema author doesn't redefine "a
 # positive integer" or "a non-empty string" by hand. Every entry here
 # is built purely from the fixed type_expr vocabulary (refine's
@@ -7,7 +7,7 @@
 # nothing here needed a new form, and nothing here is PHP-specific: any
 # dextrin-compatible reader in any language can load this same file
 # and get the same types. Ported from dextrin's own
-# priv/schema/std.dxns verbatim (also matching dextrin_js's own copy).
+# priv/schema/std.dxns verbatim (also matching node-dextrin's own copy).
 #
 # Deliberately not included: anything domain-specific (email, phone
 # number, URL-shaped string, etc.) -- what counts as a valid one is an
