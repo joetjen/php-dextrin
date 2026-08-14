@@ -1,4 +1,4 @@
-# Contributing to dextrin_php
+# Contributing to php-dextrin
 
 Thanks for considering a contribution. This document covers what you
 need to know before opening an issue or a pull request.
@@ -7,7 +7,7 @@ need to know before opening an issue or a pull request.
 
 ```sh
 git clone <this repository>
-cd dextrin_php
+cd php-dextrin
 composer install
 composer test
 ```
@@ -39,7 +39,7 @@ bug in its own right.
 - `src/Schema.php` + `src/Schema/` — `.dxns` schema compilation and
   validation, including the schema-driven encode-time coercion
   (`Coercion.php`) that has no Elixir `dextrin` equivalent (ported
-  from `dextrin_js`).
+  from `node-dextrin`).
 - `src/Registry.php` — the shared struct/custom-tag/type-alias
   extension point, immutable-update-style (every `with*`/`put*`
   method returns a new `Registry`).

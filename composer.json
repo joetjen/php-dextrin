@@ -3,7 +3,7 @@
   "description": "DXN (Data eXchange Notation) for PHP -- .dxn text, .dxnb binary, and .dxns schema documents.",
   "keywords": ["dxn", "dextrin", "serialization", "cbor", "codec"],
   "type": "library",
-  "homepage": "http://github.com/joetjen/dextrin_php",
+  "homepage": "http://github.com/joetjen/php-dextrin",
   "minimum-stability": "stable",
   "license": "MIT",
   "authors": [
@@ -13,7 +13,7 @@
     }
   ],
   "support": {
-    "issues": "http://github.com/joetjen/dextrin_php/issues"
+    "issues": "http://github.com/joetjen/php-dextrin/issues"
   },
   "require": {
     "php": "^8.2",
