@@ -76,7 +76,11 @@ final class DecoderTest extends TestCase
     public function testDecodesUntaggedListAndMap(): void
     {
         self::assertEquals(new DXNList([1, 2]), Decoder::decode($this->envelope("\x82\x01\x02")));
-        self::assertSame(['a' => 1], Decoder::decode($this->envelope("\xa1\x61\x61\x01")));
+        // The map key here is an untagged CBOR text item ("a"), a
+        // genuine string -- not tag T_KEYWORD -- so it decodes marked
+        // with MapBuilder's own leading NUL byte, distinguishing it
+        // from a same-text keyword key (see MapBuilder's own doc).
+        self::assertSame(["\0a" => 1], Decoder::decode($this->envelope("\xa1\x61\x61\x01")));
     }
 
     public function testRejectsUnrecognizedTag(): void

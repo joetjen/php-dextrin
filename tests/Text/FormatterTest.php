@@ -41,6 +41,14 @@ final class FormatterTest extends TestCase
         self::assertSame("%{\n  :\"has space\" => 1\n}", Formatter::pretty(['has space' => 1]));
     }
 
+    public function testMapEntryWithAMarkedStringKeyPrintsAsAQuotedStringNotKeywordShorthand(): void
+    {
+        // MapBuilder's own leading-NUL marker for a genuinely
+        // string-typed key (see its doc) -- must render as a quoted
+        // string, not silently become a keyword on re-encode.
+        self::assertSame("%{\n  \"a\" => 1\n}", Formatter::pretty(["\0a" => 1]));
+    }
+
     public function testNestedCollectionsIndentByDepth(): void
     {
         $value = new DXNList([new DXNList([1, 2])]);
@@ -68,6 +76,17 @@ final class FormatterTest extends TestCase
     {
         $om = new DXNOrderedMap([[new DXNKeyword('b'), 2], [new DXNKeyword('a'), 1]]);
         self::assertSame("@ordered %{\n  b: 2\n  a: 1\n}", Formatter::pretty($om));
+    }
+
+    public function testOrderedMapWithAGenuineStringKeyPrintsAsAQuotedStringNotAKeyword(): void
+    {
+        // ordered-map pairs preserve their original key type directly
+        // (never bare-array-collapsed the way a plain map's keys are)
+        // -- a genuine string key here was never ambiguous with a
+        // keyword key to begin with, so it must render as a quoted
+        // string too, not the keyword shorthand.
+        $om = new DXNOrderedMap([['a', 1]]);
+        self::assertSame("@ordered %{\n  \"a\" => 1\n}", Formatter::pretty($om));
     }
 
     public function testPlainObjectRendersLikeAKeyedStruct(): void
