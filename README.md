@@ -8,10 +8,11 @@ sharing one in-memory value representation and one extension
 mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
 the Node.js port of the same library.
 
-**Status: early port, in progress.** The value model (`src/Value/`),
-the `.dxn` text codec, the `.dxnb` binary codec, and the `.dxns` schema
-system are implemented. Remaining: polish (CLI, guides). See
-`CHANGELOG.md` for exactly what's landed.
+**Status: feature-complete, pre-1.0.** The value model (`src/Value/`),
+the `.dxn` text codec, the `.dxnb` binary codec, the `.dxns` schema
+system, the CLI, and the guides are all implemented. See
+`CHANGELOG.md` for exactly what's landed, and the
+[Documentation](#documentation) section below to get started.
 
 ## Why a port, and why this value model
 
@@ -51,9 +52,9 @@ flexible native container (`array`) where JS had distinct
   class — `(object) ['x' => 1]` encodes as `%stdClass{x:1}` — without
   needing to build a `DXNStruct` by hand first.
 
-Full mapping table, and the reasoning behind every choice, lives in
-this project's development plan for now and will move into this
-README as the port progresses.
+Full mapping table in [CHEATSHEET.md](CHEATSHEET.md#value-type-cheatsheet);
+the reasoning behind each choice is documented at the point of
+difference throughout `src/Value/`.
 
 ## `.dxn` text
 
@@ -167,6 +168,30 @@ as `DXNKeyword` regardless, since PHP has no atom table or global
 symbol registry whose exhaustion untrusted input could threaten in the
 first place.
 
+## CLI
+
+```sh
+vendor/bin/dextrin decode data.dxnb                                  # -> pretty .dxn text on stdout
+vendor/bin/dextrin encode data.dxn --out data.dxnb
+vendor/bin/dextrin format data.dxn --mode pretty|condense [--in-place]
+vendor/bin/dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
+```
+
+## Documentation
+
+- [QUICKSTART.md](QUICKSTART.md) — install and decode/encode your
+  first value.
+- [TUTORIAL.md](TUTORIAL.md) — a guided walkthrough of this library's
+  features: custom tags, schemas, materializers, the standard library,
+  a config-loader example.
+- [EXAMPLES.md](EXAMPLES.md) — worked examples across common use cases.
+- [CHEATSHEET.md](CHEATSHEET.md) — quick reference once you know the
+  shape of things.
+- [dxn/DXN.md](dxn/DXN.md) — the DXN format itself (text grammar,
+  binary encoding), independent of this or any implementation, plus
+  its own [tutorial](dxn/TUTORIAL.md), [examples](dxn/DXN_EXAMPLES.md),
+  and [cheatsheet](dxn/DXN_CHEATSHEET.md).
+
 ## Development
 
 ```sh
@@ -187,7 +212,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
 composer require joetjen/dextrin
 ```
 
-(Not yet published — this is Phase 0, scaffold only.)
+(Not yet published to Packagist.)
 
 ## License
 

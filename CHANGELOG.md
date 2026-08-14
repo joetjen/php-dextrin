@@ -7,8 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Text\Printer`/`Text\Formatter`/`Binary\Encoder` now accept an
+  optional `Registry` and consult it before falling back to a
+  registered application class's own short PHP class name: a class
+  registered via `Registry::putStructModule()` under a schema name
+  that differs from its own class name now encodes as that schema
+  name (`%Point{...}`), not the class name (`%SomeAppSpecificPointImpl{...}`)
+  -- matching the JS port's own `print(value, { registry })`/
+  `Encoder.encode(value, { registry })` behavior. This was a gap left
+  over from the text/binary codecs (Phases 2/3) having been written
+  before the schema system (Phase 4) existed, caught while verifying
+  the tutorial's own worked examples actually run as documented.
+  `Dextrin::encode()`/`encodeBinary()` now thread their own `registry`
+  parameter through to these three classes for this purpose.
+- The same three classes also now check a class's registered tag
+  encoder (`Registry::putTagEncoder()`) before falling back to the
+  "any object -> struct" convenience: a class registered only as a
+  tag encoder (not a struct schema) now correctly encodes as
+  `@tag value`, not `%ClassName{...}` -- found and fixed alongside the
+  struct-name gap above, same root cause.
+
 ### Added
 
+- `bin/dextrin` CLI (`decode`/`encode`/`format`/`validate`
+  subcommands), the PHP analog of the JS port's `bin/dextrin.js` and
+  `dextrin`'s own `mix dextrin.*` tasks -- installed as the package's
+  Composer `bin` entry.
+- `dxn/` -- the implementation-independent DXN specification, ported
+  verbatim from `dextrin`/`dextrin_js` (`DXN.md`, `TUTORIAL.md`,
+  `DXN_EXAMPLES.md`, `DXN_CHEATSHEET.md`), with only its two
+  cross-references to "the JS-API-level equivalent" reworded for this
+  port's own `TUTORIAL.md`/`EXAMPLES.md`/`CHEATSHEET.md` instead.
+- This project's own `QUICKSTART.md`, `TUTORIAL.md`, `EXAMPLES.md`,
+  and `CHEATSHEET.md` -- every code sample verified to actually run
+  against this port's real API and output.
 - Project scaffold: `composer.json` (`joetjen/dextrin`, PSR-4
   `JOetjen\Dextrin\`), PHPUnit test setup, PHPStan (level 8) static
   analysis, `.editorconfig`, git flow (`master`/`develop`), GitHub

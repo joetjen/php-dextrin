@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Tests\Text;
 
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Compiled;
+use JOetjen\Dextrin\Schema\Field;
 use JOetjen\Dextrin\Text\Printer;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
@@ -165,5 +168,54 @@ final class PrinterTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         Printer::print(fn () => 1);
+    }
+
+    public function testPrintsARegisteredApplicationInstanceUnderItsSchemaNameNotItsClassName(): void
+    {
+        $point = new PrinterTestPoint(1, 2);
+        $compiled = new Compiled(fields: [new Field('x'), new Field('y')]);
+        $registry = (new Registry())
+            ->putStructModule('Point', PrinterTestPoint::class)
+            ->putStructSchema('Point', $compiled);
+
+        self::assertSame('%Point{x:1,y:2}', Printer::print($point, $registry));
+        // With no registry, or a registry that doesn't know this
+        // class, the class-name convenience still applies unchanged.
+        self::assertSame('%PrinterTestPoint{x:1,y:2}', Printer::print($point));
+        self::assertSame('%PrinterTestPoint{x:1,y:2}', Printer::print($point, new Registry()));
+    }
+
+    public function testPrintsARegisteredTagEncoderInstanceAsATagFormNotAStruct(): void
+    {
+        $money = new PrinterTestMoney(500);
+        $registry = (new Registry())->putTagEncoder(
+            PrinterTestMoney::class,
+            'my-app/money',
+            static fn (PrinterTestMoney $m): int => $m->cents,
+        );
+
+        self::assertSame('@my-app/money 500', Printer::print($money, $registry));
+        // A struct-schema match, if present, still takes priority over a tag encoder.
+        $compiled = new Compiled(fields: [new Field('cents')]);
+        $registryWithBoth = $registry
+            ->putStructModule('Money', PrinterTestMoney::class)
+            ->putStructSchema('Money', $compiled);
+        self::assertSame('%Money{cents:500}', Printer::print($money, $registryWithBoth));
+    }
+}
+
+final class PrinterTestMoney
+{
+    public function __construct(public int $cents)
+    {
+    }
+}
+
+final class PrinterTestPoint
+{
+    public function __construct(
+        public int $x,
+        public int $y,
+    ) {
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -40,6 +41,12 @@ use JOetjen\Dextrin\Value\DXNValueInterface;
  * built-in DXN-representable shape, including any plain object with
  * public properties (auto-encoded as `%ClassName{...}`, this port's
  * struct-encoding convenience), always succeeds.
+ *
+ * An optional `$registry` lets a genuine, registered application class
+ * instance be printed under its *schema's* name rather than its own
+ * PHP class name when the two differ ({@see self::printPlainObjectAsStruct()})
+ * -- the one place this class needs to know about a `Registry` at all,
+ * mirroring the JS port's own `print(value, { registry })`.
  */
 final class Printer
 {
@@ -49,7 +56,7 @@ final class Printer
     {
     }
 
-    public static function print(mixed $value): string
+    public static function print(mixed $value, ?Registry $registry = null): string
     {
         return match (true) {
             $value === null => 'nil',
@@ -65,12 +72,24 @@ final class Printer
             $value instanceof DXNSymbol => $value->name,
             $value instanceof DXNKeyword => ':' . self::keywordName($value->name),
             $value instanceof DXNBytes => self::tagForm('bytes', self::quoteString(base64_encode($value->data))),
-            $value instanceof DXNList => '[' . implode(' ', array_map(self::print(...), $value->items)) . ']',
-            $value instanceof DXNTuple => '{' . implode(' ', array_map(self::print(...), $value->items)) . '}',
-            $value instanceof DXNSet => '@{' . implode(' ', array_map(self::print(...), $value->items)) . '}',
-            $value instanceof DXNSortedSet => self::tagForm('sorted-set', '@{' . implode(' ', array_map(self::print(...), $value->items)) . '}'),
-            $value instanceof DXNOrderedMap => self::tagForm('ordered', '%{' . self::printOrderedEntries($value->pairs) . '}'),
-            $value instanceof DXNStruct => self::printStruct($value),
+            $value instanceof DXNList => '[' . implode(' ', array_map(
+                static fn (mixed $v): string => self::print($v, $registry),
+                $value->items,
+            )) . ']',
+            $value instanceof DXNTuple => '{' . implode(' ', array_map(
+                static fn (mixed $v): string => self::print($v, $registry),
+                $value->items,
+            )) . '}',
+            $value instanceof DXNSet => '@{' . implode(' ', array_map(
+                static fn (mixed $v): string => self::print($v, $registry),
+                $value->items,
+            )) . '}',
+            $value instanceof DXNSortedSet => self::tagForm('sorted-set', '@{' . implode(' ', array_map(
+                static fn (mixed $v): string => self::print($v, $registry),
+                $value->items,
+            )) . '}'),
+            $value instanceof DXNOrderedMap => self::tagForm('ordered', '%{' . self::printOrderedEntries($value->pairs, $registry) . '}'),
+            $value instanceof DXNStruct => self::printStruct($value, $registry),
             $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
             $value instanceof DXNTime => '~T[' . Temporal::formatTime($value) . ']',
             $value instanceof DXNTimestamp => '~U[' . Temporal::formatInstant($value) . ']',
@@ -79,15 +98,18 @@ final class Printer
             $value instanceof DXNUuid => self::tagForm('uuid', self::quoteString($value->toString())),
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
             $value instanceof DXNRegex => '~r/' . $value->pattern . '/' . self::printRegexFlags($value->flags),
-            $value instanceof DXNCustomTag => self::tagForm($value->name, self::print($value->value)),
-            is_array($value) && array_is_list($value) => self::tagForm('array', '[' . implode(' ', array_map(self::print(...), $value)) . ']'),
-            is_array($value) => '%{' . self::printMapEntries($value) . '}',
+            $value instanceof DXNCustomTag => self::tagForm($value->name, self::print($value->value, $registry)),
+            is_array($value) && array_is_list($value) => self::tagForm('array', '[' . implode(' ', array_map(
+                static fn (mixed $v): string => self::print($v, $registry),
+                $value,
+            )) . ']'),
+            is_array($value) => '%{' . self::printMapEntries($value, $registry) . '}',
             // A Closure is categorically code, not data -- letting it
             // fall through to the plain-object convenience would
             // silently print it as an empty struct (it has no public
             // properties) instead of failing the way it should for
             // "no DXN representation."
-            is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::printPlainObjectAsStruct($value),
+            is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::printPlainObjectAsStruct($value, $registry),
             default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
         };
     }
@@ -173,21 +195,21 @@ final class Printer
     }
 
     /** @param list<array{0: mixed, 1: mixed}> $pairs */
-    private static function printOrderedEntries(array $pairs): string
+    private static function printOrderedEntries(array $pairs, ?Registry $registry): string
     {
         $parts = [];
         foreach ($pairs as [$key, $value]) {
-            $parts[] = self::printEntry($key, $value);
+            $parts[] = self::printEntry($key, $value, $registry);
         }
         return implode(',', $parts);
     }
 
-    private static function printEntry(mixed $key, mixed $value): string
+    private static function printEntry(mixed $key, mixed $value, ?Registry $registry): string
     {
         if ($key instanceof DXNKeyword) {
-            return self::printKeywordEntry($key->name, $value);
+            return self::printKeywordEntry($key->name, $value, $registry);
         }
-        return self::print($key) . '=>' . self::print($value);
+        return self::print($key, $registry) . '=>' . self::print($value, $registry);
     }
 
     /**
@@ -200,49 +222,84 @@ final class Printer
      *
      * @param array<int|string, mixed> $map
      */
-    private static function printMapEntries(array $map): string
+    private static function printMapEntries(array $map, ?Registry $registry): string
     {
         $parts = [];
         foreach ($map as $key => $value) {
-            $parts[] = is_string($key) ? self::printKeywordEntry($key, $value) : "{$key}=>" . self::print($value);
+            $parts[] = is_string($key) ? self::printKeywordEntry($key, $value, $registry) : "{$key}=>" . self::print($value, $registry);
         }
         return implode(',', $parts);
     }
 
-    private static function printKeywordEntry(string $name, mixed $value): string
+    private static function printKeywordEntry(string $name, mixed $value, ?Registry $registry): string
     {
         if (self::isBareIdentifier($name)) {
-            return "{$name}:" . self::print($value);
+            return "{$name}:" . self::print($value, $registry);
         }
-        return ':' . self::quoteString($name) . '=>' . self::print($value);
+        return ':' . self::quoteString($name) . '=>' . self::print($value, $registry);
     }
 
-    private static function printStruct(DXNStruct $struct): string
+    private static function printStruct(DXNStruct $struct, ?Registry $registry): string
     {
         if ($struct->isKeyed()) {
             $parts = [];
             foreach ($struct->pairs() as [$name, $value]) {
-                $parts[] = self::printKeywordEntry($name, $value);
+                $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
             return "%{$struct->name}{" . implode(',', $parts) . '}';
         }
-        $items = implode(',', array_map(self::print(...), $struct->values()));
+        $items = implode(',', array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values()));
         return "%{$struct->name}[{$items}]";
     }
 
     /**
      * Any plain PHP object with public properties (`stdClass` or
-     * otherwise) auto-encodes as a keyed struct named after its own
-     * class, via `get_object_vars()` -- the project's own
+     * otherwise) auto-encodes as a keyed struct -- the project's own
      * struct-encoding convenience, a hand-build-a-`DXNStruct`-free way
      * to encode ad-hoc structured data.
+     *
+     * Reached only for a genuine application class instance (every
+     * built-in DXN shape is already handled above `self::print()`'s
+     * own dispatch). Three independent extension points, checked in
+     * order, mirroring the JS port's own `printViaRegistry`:
+     *
+     *   1. If `$registry` has this class registered under a schema
+     *      name ({@see Registry::putStructModule()}), print it as
+     *      that named struct via the schema's own field order -- the
+     *      name a `{form: 'reference', name}` check and a decoded
+     *      instance of the same schema would both expect, which may
+     *      differ from the class's own name.
+     *   2. Otherwise, if `$registry` has a tag encoder registered for
+     *      this class ({@see Registry::putTagEncoder()}), print it as
+     *      that `@tag value` form instead -- a scalar-wrapping
+     *      extension, not a struct one, so it never reaches the
+     *      struct-shaped fallback below.
+     *   3. Only when neither matches does this fall back to naming it
+     *      after its own short class name directly -- the PHP-specific
+     *      "any object is data" convenience with no Elixir/JS
+     *      equivalent (their default is to throw here instead, unless
+     *      a registry match is found).
      */
-    private static function printPlainObjectAsStruct(object $value): string
+    private static function printPlainObjectAsStruct(object $value, ?Registry $registry): string
     {
+        $name = $registry?->fetchSchemaNameForModule($value::class);
+        if ($name !== null) {
+            $found = $registry->fetchStructSchema($name);
+            if ($found !== null) {
+                return self::printStruct(DXNStruct::keyed($name, $found->compiled->fieldValues($value)), $registry);
+            }
+        }
+
+        $tagEncoder = $registry?->fetchTagEncoder($value::class);
+        if ($tagEncoder !== null) {
+            [$tagName, $encoder] = $tagEncoder;
+            return self::tagForm($tagName, self::print($encoder($value), $registry));
+        }
+
         $shortName = substr(strrchr('\\' . $value::class, '\\') ?: '', 1);
         $parts = [];
-        foreach (get_object_vars($value) as $name => $fieldValue) {
-            $parts[] = self::printKeywordEntry($name, $fieldValue);
+        foreach (get_object_vars($value) as $fieldName => $fieldValue) {
+            $parts[] = self::printKeywordEntry($fieldName, $fieldValue, $registry);
         }
         return "%{$shortName}{" . implode(',', $parts) . '}';
     }

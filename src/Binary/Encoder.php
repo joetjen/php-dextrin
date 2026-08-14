@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Binary;
 
+use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -44,6 +45,12 @@ use JOetjen\Dextrin\Value\DXNValueInterface;
  * written once, at {@see self::encode()} itself; everything below
  * that is {@see self::encodeItem()}, one recursive method keyed on
  * the PHP value's own shape.
+ *
+ * An optional `$registry` lets a genuine, registered application class
+ * instance be encoded as its *schema's* named struct rather than one
+ * named after its own PHP class, when the two differ -- see {@see
+ * \JOetjen\Dextrin\Text\Printer}'s own doc on the identical text-side
+ * behavior.
  */
 final class Encoder
 {
@@ -54,12 +61,12 @@ final class Encoder
     {
     }
 
-    public static function encode(mixed $value): string
+    public static function encode(mixed $value, ?Registry $registry = null): string
     {
-        return self::MAGIC . self::VERSION . self::encodeItem($value);
+        return self::MAGIC . self::VERSION . self::encodeItem($value, $registry);
     }
 
-    private static function encodeItem(mixed $value): string
+    private static function encodeItem(mixed $value, ?Registry $registry): string
     {
         return match (true) {
             $value === null => Writer::head(7, '22'),
@@ -79,16 +86,35 @@ final class Encoder
             $value instanceof DXNKeyword => Writer::tag(Tags::T_KEYWORD, Writer::textItem($value->name)),
             $value instanceof DXNBytes => Writer::bytesItem($value->data),
 
-            $value instanceof DXNList => Writer::arrayOf(array_map(self::encodeItem(...), $value->items)),
-            $value instanceof DXNTuple => Writer::tag(Tags::T_TUPLE, Writer::arrayOf(array_map(self::encodeItem(...), $value->items))),
-            $value instanceof DXNSet => Writer::tag(Tags::T_SET, Writer::arrayOf(array_map(self::encodeItem(...), $value->items))),
-            $value instanceof DXNSortedSet => Writer::tag(Tags::T_SORTED_SET, Writer::arrayOf(array_map(self::encodeItem(...), $value->items))),
-            $value instanceof DXNOrderedMap => Writer::tag(Tags::T_ORDERED, Writer::mapOf(self::encodePairs($value->pairs))),
+            $value instanceof DXNList => Writer::arrayOf(array_map(
+                static fn (mixed $v): string => self::encodeItem($v, $registry),
+                $value->items,
+            )),
+            $value instanceof DXNTuple => Writer::tag(Tags::T_TUPLE, Writer::arrayOf(array_map(
+                static fn (mixed $v): string => self::encodeItem($v, $registry),
+                $value->items,
+            ))),
+            $value instanceof DXNSet => Writer::tag(Tags::T_SET, Writer::arrayOf(array_map(
+                static fn (mixed $v): string => self::encodeItem($v, $registry),
+                $value->items,
+            ))),
+            $value instanceof DXNSortedSet => Writer::tag(Tags::T_SORTED_SET, Writer::arrayOf(array_map(
+                static fn (mixed $v): string => self::encodeItem($v, $registry),
+                $value->items,
+            ))),
+            $value instanceof DXNOrderedMap => Writer::tag(Tags::T_ORDERED, Writer::mapOf(self::encodePairs($value->pairs, $registry))),
 
-            is_array($value) && array_is_list($value) => Writer::tag(Tags::T_ARRAY, Writer::arrayOf(array_map(self::encodeItem(...), $value))),
-            is_array($value) => Writer::mapOf(self::encodeMapEntries($value)),
+            is_array($value) && array_is_list($value) => Writer::tag(Tags::T_ARRAY, Writer::arrayOf(array_map(
+                static fn (mixed $v): string => self::encodeItem($v, $registry),
+                $value,
+            ))),
+            is_array($value) => Writer::mapOf(self::encodeMapEntries($value, $registry)),
 
-            $value instanceof DXNStruct => self::encodeStruct($value->name, $value->isPositional() ? $value->values() : array_map(static fn (array $p) => $p[1], $value->pairs())),
+            $value instanceof DXNStruct => self::encodeStruct(
+                $value->name,
+                $value->isPositional() ? $value->values() : array_map(static fn (array $p) => $p[1], $value->pairs()),
+                $registry,
+            ),
 
             $value instanceof DXNDate => Writer::tag(Tags::T_DATE, Writer::integerItem(self::epochDays($value))),
             $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem(self::totalMicroseconds($value))),
@@ -105,18 +131,15 @@ final class Encoder
                 Writer::textItem($value->pattern),
                 Writer::integerItem(Tags::regexFlagsToByte($value->flags)),
             ])),
-            $value instanceof DXNCustomTag => Writer::tag(Tags::T_CUSTOM, Writer::arrayOf([Writer::textItem($value->name), self::encodeItem($value->value)])),
+            $value instanceof DXNCustomTag => Writer::tag(Tags::T_CUSTOM, Writer::arrayOf([Writer::textItem($value->name), self::encodeItem($value->value, $registry)])),
 
             // Any plain PHP object with public properties (not just
-            // stdClass) auto-encodes as a positional struct named
-            // after its own class -- the same encode-side convenience
-            // Text\Printer offers, extended to binary for consistency.
-            // A Closure is categorically code, not data, so it's
-            // excluded the same way Printer excludes it.
-            is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::encodeStruct(
-                self::shortClassName($value::class),
-                array_values(get_object_vars($value)),
-            ),
+            // stdClass) auto-encodes as a positional struct -- the
+            // same encode-side convenience Text\Printer offers,
+            // extended to binary for consistency. A Closure is
+            // categorically code, not data, so it's excluded the same
+            // way Printer excludes it.
+            is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::encodePlainObjectAsStruct($value, $registry),
             default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
         };
     }
@@ -125,20 +148,23 @@ final class Encoder
      * @param list<array{0: mixed, 1: mixed}> $pairs
      * @return list<array{0: string, 1: string}>
      */
-    private static function encodePairs(array $pairs): array
+    private static function encodePairs(array $pairs, ?Registry $registry): array
     {
-        return array_map(static fn (array $p): array => [self::encodeItem($p[0]), self::encodeItem($p[1])], $pairs);
+        return array_map(
+            static fn (array $p): array => [self::encodeItem($p[0], $registry), self::encodeItem($p[1], $registry)],
+            $pairs,
+        );
     }
 
     /**
      * @param array<int|string, mixed> $map
      * @return list<array{0: string, 1: string}>
      */
-    private static function encodeMapEntries(array $map): array
+    private static function encodeMapEntries(array $map, ?Registry $registry): array
     {
         $pairs = [];
         foreach ($map as $key => $value) {
-            $pairs[] = [self::encodeItem($key), self::encodeItem($value)];
+            $pairs[] = [self::encodeItem($key, $registry), self::encodeItem($value, $registry)];
         }
         return $pairs;
     }
@@ -150,14 +176,46 @@ final class Encoder
      * schema.
      * @param list<mixed> $values
      */
-    private static function encodeStruct(string $name, array $values): string
+    private static function encodeStruct(string $name, array $values, ?Registry $registry): string
     {
-        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf([Writer::textItem($name), ...array_map(self::encodeItem(...), $values)]));
+        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf([
+            Writer::textItem($name),
+            ...array_map(static fn (mixed $v): string => self::encodeItem($v, $registry), $values),
+        ]));
     }
 
     private static function shortClassName(string $className): string
     {
         return substr(strrchr('\\' . $className, '\\') ?: '', 1);
+    }
+
+    /**
+     * Same registry-first precedence as
+     * {@see \JOetjen\Dextrin\Text\Printer::printPlainObjectAsStruct()}'s
+     * own doc: a struct name registered for `$value`'s class takes
+     * priority (schema's own field order, not `$value`'s
+     * declared-property order); a registered tag encoder takes
+     * priority over the generic struct-by-class-name fallback next,
+     * since that's a scalar-wrapping extension, not a struct one.
+     */
+    private static function encodePlainObjectAsStruct(object $value, ?Registry $registry): string
+    {
+        $name = $registry?->fetchSchemaNameForModule($value::class);
+        if ($name !== null) {
+            $found = $registry->fetchStructSchema($name);
+            if ($found !== null) {
+                $values = array_map(static fn (array $p): mixed => $p[1], $found->compiled->fieldValues($value));
+                return self::encodeStruct($name, $values, $registry);
+            }
+        }
+
+        $tagEncoder = $registry?->fetchTagEncoder($value::class);
+        if ($tagEncoder !== null) {
+            [$tagName, $encoder] = $tagEncoder;
+            return Writer::tag(Tags::T_CUSTOM, Writer::arrayOf([Writer::textItem($tagName), self::encodeItem($encoder($value), $registry)]));
+        }
+
+        return self::encodeStruct(self::shortClassName($value::class), array_values(get_object_vars($value)), $registry);
     }
 
     private static function encodeDecimal(DXNDecimal $value): string

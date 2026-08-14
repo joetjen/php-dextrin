@@ -115,17 +115,17 @@ final class ProviderTest extends TestCase
 
     public function testEncodingARegisteredApplicationInstanceValidatesItAgainstItsSchema(): void
     {
-        // rebuildChecked() rebuilds a genuine application instance as
-        // itself (fields checked/coerced in place), not as a
-        // DXNStruct -- so the encoder's own "any plain object ->
-        // struct" convenience names the wire struct after the PHP
-        // class (`ProviderTestPoint`), not the schema name (`Point`)
-        // the provider registered it under. A struct named exactly
-        // after its schema on the wire needs an explicit DXNStruct.
+        // Printer/Encoder check the registry for a schema name
+        // registered against $point's own class before falling back
+        // to the class's own short name -- so this prints as
+        // `%Point{...}` (the schema name), not `%ProviderTestPoint{...}`
+        // (the PHP class name), even though rebuildChecked() rebuilds
+        // the value as a real ProviderTestPoint instance, not a
+        // DXNStruct.
         $registry = Schema::registerProvider(new Registry(), new ProviderTestPointProvider());
         $point = new ProviderTestPoint(1.0, 2.0);
         $text = Dextrin::encode($point, registry: $registry);
-        self::assertSame('%ProviderTestPoint{x:1.0,y:2.0}', $text);
+        self::assertSame('%Point{x:1.0,y:2.0}', $text);
     }
 
     public function testAMismatchedSchemaNameThrows(): void
