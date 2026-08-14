@@ -112,7 +112,7 @@ final class MapBuilder
     {
         return match (true) {
             $dxnKey instanceof DXNKeyword => $dxnKey->name,
-            is_string($dxnKey) => self::isCanonicalIntegerString($dxnKey) ? $dxnKey : self::STRING_KEY_MARKER . $dxnKey,
+            is_string($dxnKey) => self::markStringKey($dxnKey),
             is_int($dxnKey) => $dxnKey,
             is_bool($dxnKey) => $dxnKey ? 1 : 0,
             is_float($dxnKey) => (int) $dxnKey,
@@ -121,6 +121,29 @@ final class MapBuilder
                 'map key of kind "' . Equality::kindOf($dxnKey) . '" has no PHP array-key representation',
             ),
         };
+    }
+
+    /**
+     * Marks `$s` as a genuinely `string`-typed map key, the same rule
+     * `mapKeyToPhpKey()` applies to a decoded `string` key -- exposed
+     * for callers that build a map-shaped PHP array directly from a
+     * known-string source without going through `build()`'s DXN-value
+     * dispatch. The one caller today: {@see
+     * \JOetjen\Dextrin\Schema\Validator}'s default (no custom
+     * materializer registered) struct decode, which resolves a
+     * `DXNStruct`'s field *names* into a bare associative array --
+     * exactly the same "materialize a struct with no registered
+     * module/materializer into a generic map" shape Elixir's own
+     * default (`Atom.to_string/1` on each field name) and
+     * node-dextrin's default both produce, keyed by the field name as
+     * a genuine string, not a keyword. Left unmarked, those keys would
+     * silently re-encode as `keyword` instead on the way back out --
+     * diverging from what a schema-free reader of the same document in
+     * either of those other two languages would produce.
+     */
+    public static function markStringKey(string $s): string
+    {
+        return self::isCanonicalIntegerString($s) ? $s : self::STRING_KEY_MARKER . $s;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNList;
@@ -63,8 +64,34 @@ final class Validator
         self::checkClosed($compiled, $given);
         $resolved = self::resolveFields($compiled, $given, $registry, false);
         self::runRefineFn($compiled, $resolved);
-        $result = $materializer !== null ? $materializer($resolved) : $resolved;
+        $result = $materializer !== null ? $materializer($resolved) : self::markFieldNameKeys($resolved);
         return new Validated($compiled->name ?? '', $result);
+    }
+
+    /**
+     * The default (no custom materializer registered) decode result
+     * is a bare associative array keyed by field *name* -- this port's
+     * own representation of DXN `map`, same as Elixir's own default
+     * (`Atom.to_string/1` on each field name) and node-dextrin's. Each
+     * key is marked via {@see MapBuilder::markStringKey()} so it
+     * round-trips as a genuine `string` key on re-encode, not a
+     * `keyword` -- matching what a schema-free reader of the same
+     * document in either of those other two languages would decode a
+     * struct with no registered materializer into. Only this
+     * no-materializer path needs it: a *registered* materializer
+     * closure (like the one above) receives `$resolved` directly and
+     * expects ordinary, unmarked `$resolved['name']` access.
+     *
+     * @param array<string, mixed> $resolved
+     * @return array<int|string, mixed>
+     */
+    private static function markFieldNameKeys(array $resolved): array
+    {
+        $marked = [];
+        foreach ($resolved as $name => $value) {
+            $marked[MapBuilder::markStringKey($name)] = $value;
+        }
+        return $marked;
     }
 
     /** @return array<string, mixed> */

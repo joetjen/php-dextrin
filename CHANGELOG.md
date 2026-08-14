@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     string key PHP would already auto-coerce to an `int` key on its
     own is deliberately left unmarked, so it still collides with a
     bare `integer` key exactly as before.
+- `Schema\Validator`'s default struct materialization (decoding a
+  struct whose schema has no custom materializer registered) now
+  marks its resulting field-name keys as genuine `string` keys (via
+  `MapBuilder::markStringKey()`), matching Elixir's own default
+  (`Atom.to_string/1` on each field name) and node-dextrin's. Left
+  unmarked, those keys re-encoded as `keyword` instead of `string`,
+  diverging from what the same document decodes to in either of this
+  library's sibling ports -- found via the same cross-language
+  round-trip check as the fix above, once it moved past the first
+  inconsistency into schema-materialized values.
 
 ### Fixed
 

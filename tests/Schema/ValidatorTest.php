@@ -37,14 +37,18 @@ final class ValidatorTest extends TestCase
 
     public function testDecodeMaterializesAKeyedStructFillingInTheDefault(): void
     {
+        // Field names come back as MapBuilder-marked *string* keys, not
+        // keywords -- matching Elixir's own default materializer
+        // (`Atom.to_string/1` on each field name) and node-dextrin's,
+        // so the result re-encodes as `string`-keyed, not `keyword`.
         $value = Dextrin::decode('%Point{x: 1.5, y: 2.5}', $this->pointRegistry());
-        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'unlabeled'], $value);
+        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'unlabeled'], $value);
     }
 
     public function testDecodeMaterializesAPositionalStructInFieldOrder(): void
     {
         $value = Dextrin::decode('%Point[1.5, 2.5, "origin"]', $this->pointRegistry());
-        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'origin'], $value);
+        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'origin'], $value);
     }
 
     public function testDecodedTopLevelStructIsNotLeftWrappedInValidated(): void
@@ -61,7 +65,7 @@ final class ValidatorTest extends TestCase
         $registry = $this->pointRegistry();
         $binary = Dextrin::encodeBinary(DXNStruct::positional('Point', [1.5, 2.5, 'here']), validate: false);
         $value = Dextrin::decodeBinary($binary, $registry);
-        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'here'], $value);
+        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'here'], $value);
     }
 
     public function testUnregisteredStructNameStillDecodesToAnOpaqueDXNStruct(): void
