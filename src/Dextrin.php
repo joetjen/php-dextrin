@@ -14,6 +14,11 @@ use JOetjen\Dextrin\Text\Printer;
  * Public API entry point: `.dxn` text and `.dxnb` binary decode/
  * encode, plus `.dxns` schema-backed struct decoding and encode-time
  * validation via an optional {@see Registry}.
+ *
+ * This is a port of `dextrin` (Elixir, on Hex.pm), the reference
+ * implementation. A sibling of `node-dextrin` (Node.js, on npm) reads
+ * and writes the exact same `.dxn`/`.dxnb`/`.dxns` documents -- see
+ * the README's own "Other language implementations" section.
  */
 final class Dextrin
 {

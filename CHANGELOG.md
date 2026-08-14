@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `src/Dextrin.php`'s own class docblock now names its reference
+  implementation and sibling port (`dextrin` on Hex.pm, `node-dextrin`
+  on npm), alongside the existing README "Other language
+  implementations" section.
 - `bin/dextrin` CLI (`decode`/`encode`/`format`/`validate`
   subcommands), the PHP analog of the JS port's `bin/dextrin.js` and
   `dextrin`'s own `mix dextrin.*` tasks -- installed as the package's

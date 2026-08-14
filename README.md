@@ -1,5 +1,8 @@
 # php-dextrin
 
+[![CI](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml)
+[![Packagist](https://img.shields.io/packagist/v/joetjen/dextrin.svg)](https://packagist.org/packages/joetjen/dextrin)
+
 A PHP port of [`dextrin`](https://github.com/joetjen/dextrin), an
 Elixir implementation of DXN (Data eXchange Notation): a
 human-writable text format (`.dxn`), a compact binary format
@@ -212,7 +215,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, and
 composer require joetjen/dextrin
 ```
 
-(Not yet published to Packagist.)
+## Other language implementations
+
+DXN's format spec (`dxn/DXN.md`, ported from the Elixir project's own
+`guides/dxn/DXN.md`) is implementation-independent — this library,
+`dextrin` (Elixir), and `node-dextrin` all satisfy the same document,
+and stay close to `dextrin`'s own in-memory shape-per-type choices
+wherever their host language allows.
+
+| Language | Package | Source |
+| --- | --- | --- |
+| Elixir | [`dextrin` on Hex.pm](https://hex.pm/packages/dextrin) | [joetjen/dextrin](https://github.com/joetjen/dextrin) |
+| Node.js | [`dextrin` on npm](https://www.npmjs.com/package/dextrin) | [joetjen/node-dextrin](https://github.com/joetjen/node-dextrin) |
+| PHP (this project) | [`joetjen/dextrin` on Packagist](https://packagist.org/packages/joetjen/dextrin) | [joetjen/php-dextrin](https://github.com/joetjen/php-dextrin) |
 
 ## License
 
