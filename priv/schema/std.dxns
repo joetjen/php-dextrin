@@ -1,0 +1,34 @@
+# dextrin_php's standard library of named types -- common refinements
+# of the built-in primitives, so a schema author doesn't redefine "a
+# positive integer" or "a non-empty string" by hand. Every entry here
+# is built purely from the fixed type_expr vocabulary (refine's
+# existing min/max/exclusive-min/exclusive-max/multiple-of/
+# min-length/max-length/pattern/min-count/max-count constraints) --
+# nothing here needed a new form, and nothing here is PHP-specific: any
+# dextrin-compatible reader in any language can load this same file
+# and get the same types. Ported from dextrin's own
+# priv/schema/std.dxns verbatim (also matching dextrin_js's own copy).
+#
+# Deliberately not included: anything domain-specific (email, phone
+# number, URL-shaped string, etc.) -- what counts as a valid one is an
+# application decision, not something this library should guess at,
+# and DXN already has native uri/uuid primitives for the cases that
+# would otherwise tempt a regex reimplementation. pattern: is
+# available directly ({:refine :string %{pattern: ~r/.../}}) for
+# anything an application needs beyond what's listed here.
+
+%{
+  PositiveInteger:    {:refine :integer %{min: 1}}
+  NonNegativeInteger: {:refine :integer %{min: 0}}
+  NegativeInteger:    {:refine :integer %{max: -1}}
+  NonPositiveInteger: {:refine :integer %{max: 0}}
+
+  PositiveFloat:    {:refine :float %{exclusive-min: 0.0}}
+  NonNegativeFloat: {:refine :float %{min: 0.0}}
+  Percentage:       {:refine :float %{min: 0.0, max: 100.0}}
+
+  NonEmptyString: {:refine :string %{min-length: 1}}
+
+  NonEmptyList: {:refine :list %{min-count: 1}}
+  NonEmptySet:  {:refine :set %{min-count: 1}}
+}

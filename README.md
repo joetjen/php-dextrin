@@ -9,9 +9,9 @@ mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
 the Node.js port of the same library.
 
 **Status: early port, in progress.** The value model (`src/Value/`),
-the `.dxn` text codec, and the `.dxnb` binary codec are implemented.
-Remaining: the `.dxns` schema system and polish. See `CHANGELOG.md`
-for exactly what's landed.
+the `.dxn` text codec, the `.dxnb` binary codec, and the `.dxns` schema
+system are implemented. Remaining: polish (CLI, guides). See
+`CHANGELOG.md` for exactly what's landed.
 
 ## Why a port, and why this value model
 
@@ -95,6 +95,77 @@ always positional on the wire, so a keyed `DXNStruct` round-trips
 through binary with its field values intact but not its keyed-ness or
 field names — a spec requirement, not a bug (`.dxn` text preserves
 both struct shapes exactly).
+
+## `.dxns` schemas
+
+```php
+use JOetjen\Dextrin\Dextrin;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema;
+
+$schemaDoc = Dextrin::decode(<<<'DXN'
+    %{
+      Point: %schema{
+        fields: @ordered %{ x: :float, y: :float }
+      }
+    }
+    DXN);
+$registry = Schema::compile($schemaDoc, new Registry());
+
+Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
+// => ['x' => 1.0, 'y' => 2.0] -- schema-validated, decode-time enforcement
+
+Dextrin::encode(['x' => 1.0, 'y' => 2.0], registry: $registry, schema: 'Point');
+// => '%Point{x:1.0,y:2.0}'
+```
+
+A `struct`/tag with no matching registry entry still falls back to an
+opaque `DXNStruct`/`DXNCustomTag` — a registry only ever *adds*
+capability, never turns an otherwise-valid document into an error.
+
+`encode()`/`encodeBinary()` automatically validate every registered
+struct anywhere in a value by default (`validate: false` to skip), and
+a `schema:` name additionally validates — and, for a nameless bare
+array, *names* — the top-level value itself against one named schema.
+
+**Schema-driven coercion on encode** (`coerce:`, default `true`, no
+Elixir `dextrin` equivalent) lets a field whose value doesn't already
+match its declared type be coerced toward it first, reusing the same
+`DXN*::fromX()` conversion helpers documented above — a plain `float`
+becomes a `DXNRational` for a `:rational` field, a `\DateTimeImmutable`
+becomes a `DXNDate` for a `:date` field, and so on, recursively through
+`list-of`/`set-of`/`tuple-of`/`nilable`/`one-of` too. Pass
+`coerce: false` for strict validation with no silent conversion (see
+`src/Schema/Coercion.php`). One coercion the JS port has that this
+port omits: `symbol` from a native `symbol` value — PHP's `keyword`
+always decodes as `DXNKeyword`, with nothing analogous to JS's
+`Symbol.for` for such a coercion to apply to.
+
+Also included, each mirroring its `Dextrin.Schema.*` counterpart:
+`Schema::registerProvider()` (let a class's own library ship its
+schema without depending on this one, see `src/Schema/Provider.php`),
+`Std::registry()`'s standard library of common named types
+(`PositiveInteger`, `NonEmptyString`, ...), and
+`FileResolver::forPaths([...])`'s `Namespace/Name` → `.dxns`-file
+resolver for `Registry::putResolver()`:
+
+```php
+use JOetjen\Dextrin\Schema\FileResolver;
+use JOetjen\Dextrin\Schema\Std;
+
+$withStd = Std::registry(); // PositiveInteger, NonEmptyString, ...
+$registry = Schema::compile(Dextrin::decode('%{ Age: PositiveInteger }'), $withStd);
+
+$fileBackedRegistry = (new Registry())->putResolver(FileResolver::forPaths(['./schemas']));
+```
+
+**Deliberate omission vs. the Elixir and JS ports**: no
+`trusted`/`putTrusted` on `Registry`. Both mirror it purely to gate
+whether `keyword` decodes as an interned atom/`Symbol.for` (trusted)
+or a plain wrapper (untrusted); this port's `keyword` always decodes
+as `DXNKeyword` regardless, since PHP has no atom table or global
+symbol registry whose exhaustion untrusted input could threaten in the
+first place.
 
 ## Development
 

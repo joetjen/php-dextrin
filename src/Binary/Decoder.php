@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Binary;
 
 use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Validated;
+use JOetjen\Dextrin\Schema\Validator;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -51,6 +54,7 @@ final class Decoder
 {
     private readonly string $buf;
     private int $pos;
+    private ?Registry $registry;
 
     /** @var list<mixed> indexed by tag-28 registration order. */
     private array $sharedItems = [];
@@ -58,24 +62,27 @@ final class Decoder
     /** @var list<list<string>> innermost scope last. */
     private array $stringrefStack = [];
 
-    private function __construct(string $buf, int $pos)
+    private function __construct(string $buf, int $pos, ?Registry $registry)
     {
         $this->buf = $buf;
         $this->pos = $pos;
+        $this->registry = $registry;
     }
 
-    public static function decode(string $bytes): mixed
+    public static function decode(string $bytes, ?Registry $registry = null): mixed
     {
         if (strlen($bytes) < 3 || $bytes[0] !== 'D' || $bytes[1] !== 'X' || ord($bytes[2]) !== 1) {
             throw new BinaryError('missing or invalid .dxnb envelope (expected magic "DX" + version 1)');
         }
-        $decoder = new self($bytes, 3);
+        $decoder = new self($bytes, 3, $registry);
         $value = $decoder->decodeItem();
         if ($decoder->pos !== strlen($bytes)) {
             $trailing = strlen($bytes) - $decoder->pos;
             throw new BinaryError("trailing bytes after top-level value ({$trailing} left over)", $decoder->pos);
         }
-        return $value;
+        // The true top of decoding -- see Text\Parser::parse()'s
+        // identical stripping and its own doc for why.
+        return Validated::strip($value);
     }
 
     private function readByte(): int
@@ -447,8 +454,14 @@ final class Decoder
         return new DXNChar($i);
     }
 
-    /** `.dxnb` structs are always positional (`dxn/DXN.md` §2.1). */
-    private function buildStruct(mixed $value): DXNStruct
+    /**
+     * `.dxnb` structs are always positional (`dxn/DXN.md` §2.1).
+     * Decoded against a compiled schema when `$this->registry` has one
+     * for `$name` -- same as {@see \JOetjen\Dextrin\Text\Parser}'s own
+     * `materializeStruct()` -- falling back to an opaque `DXNStruct`
+     * when it doesn't.
+     */
+    private function buildStruct(mixed $value): mixed
     {
         if (!$value instanceof DXNList || $value->items === []) {
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
@@ -458,7 +471,18 @@ final class Decoder
         if (!is_string($name)) {
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
         }
-        return DXNStruct::positional($name, $items);
+        $struct = DXNStruct::positional($name, $items);
+
+        $found = $this->registry?->fetchStructSchema($name);
+        if ($found === null) {
+            return $struct;
+        }
+        $materializer = $found->registry->fetchMaterializer($name);
+        try {
+            return Validator::materialize($found->compiled, $struct, $materializer, $found->registry);
+        } catch (\Throwable $err) {
+            throw new BinaryError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
+        }
     }
 
     private function buildDate(mixed $value): DXNDate
@@ -529,7 +553,7 @@ final class Decoder
         return new DXNRegex($pattern, Tags::regexByteToFlags($flags));
     }
 
-    private function buildCustom(mixed $value): DXNCustomTag
+    private function buildCustom(mixed $value): mixed
     {
         if (!$value instanceof DXNList || count($value->items) !== 2) {
             throw new BinaryError('malformed custom tag (tag ' . Tags::T_CUSTOM . ') payload', $this->pos);
@@ -538,7 +562,15 @@ final class Decoder
         if (!is_string($name)) {
             throw new BinaryError('malformed custom tag (tag ' . Tags::T_CUSTOM . ') payload', $this->pos);
         }
-        return new DXNCustomTag($name, $inner);
+        $decoder = $this->registry?->fetchTag($name);
+        if ($decoder === null) {
+            return new DXNCustomTag($name, $inner);
+        }
+        try {
+            return $decoder($inner);
+        } catch (\Throwable $err) {
+            throw new BinaryError("custom tag \"{$name}\" decoder failed: {$err->getMessage()}", $this->pos);
+        }
     }
 
     /**
