@@ -35,7 +35,7 @@ Instructions for AI agents working in this PHP codebase.
 
 ## Parity across implementations
 
-- This project mirrors `dextrin` (Elixir) and `dextrin_js` (Node.js) — same DXN format, same governing principle of staying close to Elixir's in-memory shape wherever PHP allows it. A behavior change here that also applies to the format itself (not a PHP-specific implementation detail) is worth checking against the other two repos' behavior, though there's no automated cross-repo parity test — this is a judgment call, not a hard gate.
+- This project mirrors `dextrin` (Elixir) and `node-dextrin` (Node.js) — same DXN format, same governing principle of staying close to Elixir's in-memory shape wherever PHP allows it. A behavior change here that also applies to the format itself (not a PHP-specific implementation detail) is worth checking against the other two repos' behavior, though there's no automated cross-repo parity test — this is a judgment call, not a hard gate.
 
 ## Static analysis
 

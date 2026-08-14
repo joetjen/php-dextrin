@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dextrin`'s own `mix dextrin.*` tasks -- installed as the package's
   Composer `bin` entry.
 - `dxn/` -- the implementation-independent DXN specification, ported
-  verbatim from `dextrin`/`dextrin_js` (`DXN.md`, `TUTORIAL.md`,
+  verbatim from `dextrin`/`node-dextrin` (`DXN.md`, `TUTORIAL.md`,
   `DXN_EXAMPLES.md`, `DXN_CHEATSHEET.md`), with only its two
   cross-references to "the JS-API-level equivalent" reworded for this
   port's own `TUTORIAL.md`/`EXAMPLES.md`/`CHEATSHEET.md` instead.
@@ -160,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter.
   - **Schema-driven coercion on encode** (`src/Schema/Coercion.php`,
     `coerce:` parameter, default `true`) — a capability with no Elixir
-    `dextrin` equivalent, ported from `dextrin_js` because this port's
+    `dextrin` equivalent, ported from `node-dextrin` because this port's
     own `DXN*::fromX()` conversion helpers already make the coercion
     table trivial to build.
   - **Deliberate omission vs. the Elixir and JS ports**: no

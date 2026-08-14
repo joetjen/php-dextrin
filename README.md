@@ -1,11 +1,11 @@
-# dextrin_php
+# php-dextrin
 
 A PHP port of [`dextrin`](https://github.com/joetjen/dextrin), an
 Elixir implementation of DXN (Data eXchange Notation): a
 human-writable text format (`.dxn`), a compact binary format
 (`.dxnb`) built on CBOR, and a schema format (`.dxns`) — all three
 sharing one in-memory value representation and one extension
-mechanism. A sibling of [`dextrin_js`](https://github.com/joetjen/dextrin_js),
+mechanism. A sibling of [`node-dextrin`](https://github.com/joetjen/node-dextrin),
 the Node.js port of the same library.
 
 **Status: feature-complete, pre-1.0.** The value model (`src/Value/`),
@@ -26,7 +26,7 @@ story. `dxn/DXN.md` is the implementation-independent, normative
 spec; this library only needs to satisfy it.
 
 Where this library differs from the Elixir original — and from
-`dextrin_js`, its closest sibling — it's by design, documented at the
+`node-dextrin`, its closest sibling — it's by design, documented at the
 point of difference. PHP forces some genuinely different calls than
 JS did: no arbitrary-precision integer natively (no GMP extension
 assumed available; `bcmath` backs the overflow case), and exactly one
@@ -36,7 +36,7 @@ flexible native container (`array`) where JS had distinct
 - `integer` is a **hybrid**: native PHP `int` when a value fits in 64
   bits (the overwhelming common case — ordinary `+`/`-`/comparisons
   just work), a `DXNInteger` (bcmath-backed) wrapper only on genuine
-  overflow. Unlike `dextrin_js`, which always uses `BigInt` for
+  overflow. Unlike `node-dextrin`, which always uses `BigInt` for
   fidelity — PHP has no arithmetic operator overloading, so "always
   wrap" would tax everyday arithmetic project-wide for a magnitude
   that's rare in practice.

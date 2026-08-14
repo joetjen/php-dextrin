@@ -86,7 +86,7 @@ Two things worth noticing right away:
   bits (the overwhelming common case — ordinary `+`/`-`/comparisons
   just work), a `DXNInteger` (`bcmath`-backed) wrapper only on genuine
   overflow. This is a deliberate PHP-specific call, different from
-  `dextrin_js`'s "always wrap" choice — PHP has no arithmetic operator
+  `node-dextrin`'s "always wrap" choice — PHP has no arithmetic operator
   overloading, so wrapping every integer would tax ordinary arithmetic
   project-wide for a magnitude that's rare in practice.
 - **`keyword` always wraps as `DXNKeyword`**, with no `trusted:`-driven

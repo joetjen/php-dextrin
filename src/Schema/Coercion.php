@@ -21,7 +21,7 @@ use JOetjen\Dextrin\Value\DXNUuid;
 
 /**
  * Schema-driven type coercion on encode -- a capability with no Elixir
- * `dextrin` equivalent, ported from `dextrin_js` because the value
+ * `dextrin` equivalent, ported from `node-dextrin` because the value
  * model's own `DXN*::fromX()`/`::from*()` conversion helpers already
  * make the coercion table trivial to build: every class's documented
  * native-type converter doubles as an encode-time coercion, with no
