@@ -61,8 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DXNError`, not silent data loss — ordinary duplicate keys still
   follow normal last-write-wins map semantics.
 - Public entry point (`JOetjen\Dextrin\Dextrin` facade class):
-  `Dextrin::decode()`/`Dextrin::encode()`; `.dxnb` binary and `.dxns`
-  schema support land in later phases.
+  `Dextrin::decode()`/`Dextrin::encode()`.
 - `.dxnb` binary codec (`src/Binary/`, `Dextrin::decodeBinary()`/
   `Dextrin::encodeBinary()`): a hand-rolled CBOR `Encoder`/`Decoder`
   over raw PHP strings (no `Buffer`-equivalent needed — PHP strings
@@ -105,3 +104,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `T_ORDERED`'s (binary) own map-shaped payloads both bypass it
   deliberately, since `ordered-map`'s pairs can hold any key type
   without needing PHP-array-key coercion at all.
+- `.dxns` schema system (`src/Registry.php`, `src/Schema.php`,
+  `src/Schema/`): `Registry` (immutable-update-style extension point
+  for tags/struct schemas/materializers/type aliases/struct modules),
+  `Compiler` (a decoded `.dxns` document -> `Compiled` struct schemas
+  + named `TypeExpr` aliases, mirroring the fixed 12-form type_expr
+  vocabulary and `%schema{}`/`%field{}` grammar from `dxn/DXN.md` §4),
+  `TypeExpr::matches()` (shared by decode and encode-time checking),
+  `Validator` (`materialize()` for decode, `validateForEncode()`/
+  `validateTreeForEncode()` for encode), `Std` (the standard library of
+  common named types, `priv/schema/std.dxns`, ported verbatim from
+  `dextrin`'s own), `FileResolver` (`Namespace/Name` -> `.dxns`-file
+  convention for `Registry::putResolver()`), and `Provider`/
+  `DXNSchemaProvider`/`DXNSchemaMaterializingProvider` (lets a class's
+  own library ship its schema without depending on this one).
+  `Text\Parser`/`Binary\Decoder` now accept an optional `Registry` and
+  materialize/validate any struct they recognize a schema for, falling
+  back to an opaque `DXNStruct` otherwise as always; `Dextrin::encode()`/
+  `encodeBinary()` gained `registry`/`validate`/`coerce`/`schema`
+  parameters mirroring `decode()`/`decodeBinary()`'s own `registry`
+  parameter.
+  - **Schema-driven coercion on encode** (`src/Schema/Coercion.php`,
+    `coerce:` parameter, default `true`) — a capability with no Elixir
+    `dextrin` equivalent, ported from `dextrin_js` because this port's
+    own `DXN*::fromX()` conversion helpers already make the coercion
+    table trivial to build.
+  - **Deliberate omission vs. the Elixir and JS ports**: no
+    `trusted`/`putTrusted` on `Registry` — this port's `keyword` always
+    decodes as `DXNKeyword` regardless (see `DXNKeyword`'s own doc), so
+    there is no atom-table/`Symbol.for`-exhaustion risk to gate against
+    in the first place.
+  - **PHP-specific limitation**: rebuilding a registered application
+    class instance during encode-time validation writes coerced field
+    values back onto a clone via direct property assignment, which
+    throws for a `readonly` property — PHP has no generic "reconstruct
+    with these fields changed" for those the way a `DXNStruct` gets one,
+    unlike the JS port's always-mutable objects.

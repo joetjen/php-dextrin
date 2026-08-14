@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Text;
 
 use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Validated;
+use JOetjen\Dextrin\Schema\Validator;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -27,10 +30,12 @@ use JOetjen\Dextrin\Value\DXNUuid;
  * Hand-written recursive-descent `.dxn` parser -- the reverse of
  * {@see Printer}, built directly on {@see Lexer}'s token stream.
  *
- * No schema/registry support yet (added in a later phase, mirroring
- * the JS port's own phasing): a `struct` always decodes to an opaque
- * {@see DXNStruct}, and a non-built-in tag always decodes to
- * {@see DXNCustomTag} -- never a hard failure, matching
+ * A `struct` decodes against a compiled schema when `$registry` has
+ * one for that name ({@see Validator::materialize()}, same as the
+ * binary decoder); with no registry, or no schema registered for that
+ * name, it decodes to an opaque {@see DXNStruct}. Same story for a
+ * non-built-in tag against the registry's own tag table -- falls back
+ * to {@see DXNCustomTag} -- never a hard failure, matching
  * `dxn/DXN.md` §1.4's "opaque tagged value, not an error" contract.
  */
 final class Parser
@@ -43,17 +48,24 @@ final class Parser
     /** @var list<Token> */
     private readonly array $tokens;
     private int $pos = 0;
+    private ?Registry $registry;
 
     /** @param list<Token> $tokens */
-    private function __construct(array $tokens)
+    private function __construct(array $tokens, ?Registry $registry)
     {
         $this->tokens = $tokens;
+        $this->registry = $registry;
     }
 
-    public static function parse(string $text): mixed
+    public static function parse(string $text, ?Registry $registry = null): mixed
     {
-        $parser = new self(Lexer::tokenize($text));
-        return $parser->parseDocument();
+        $parser = new self(Lexer::tokenize($text), $registry);
+        // The true top of decoding -- a schema-registered struct
+        // decoded anywhere in the document (including the document's
+        // own top-level value) carries a `Validated` wrapper until
+        // whatever consumes it strips it; nothing else does that for
+        // the top-level result, so `parse()` itself must.
+        return Validated::strip($parser->parseDocument());
     }
 
     private function peek(): Token
@@ -281,10 +293,27 @@ final class Parser
                 fn (array $pair) => [$this->structFieldName($pair[0]), $pair[1]],
                 $this->parseEntries(),
             );
-            return DXNStruct::keyed($name, $pairs);
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs));
         }
         $values = $this->parseBracketedItems('LBRACKET', 'RBRACKET');
-        return DXNStruct::positional($name, $values);
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values));
+    }
+
+    private function materializeStruct(string $name, DXNStruct $struct): mixed
+    {
+        $found = $this->registry?->fetchStructSchema($name);
+        if ($found === null) {
+            return $struct;
+        }
+        $this->registry = $found->registry;
+        $materializer = $this->registry->fetchMaterializer($name);
+        try {
+            // Fail-fast, decode-time enforcement -- a schema violation
+            // is an ordinary parse error, same channel as bad syntax.
+            return Validator::materialize($found->compiled, $struct, $materializer, $this->registry);
+        } catch (\Throwable $err) {
+            throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
+        }
     }
 
     /**
@@ -349,6 +378,14 @@ final class Parser
     private function dispatchTag(string $name, int $offset): mixed
     {
         if (!isset(self::BUILT_IN_TAGS[$name])) {
+            $decoder = $this->registry?->fetchTag($name);
+            if ($decoder !== null) {
+                try {
+                    return $decoder($this->parseValue());
+                } catch (\Throwable $err) {
+                    throw new ParseError("tag \"{$name}\" decoder failed: {$err->getMessage()}", $offset);
+                }
+            }
             return new DXNCustomTag($name, $this->parseValue());
         }
 
