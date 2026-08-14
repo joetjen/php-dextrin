@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Binary;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
@@ -157,6 +158,13 @@ final class Encoder
     }
 
     /**
+     * A bare PHP array's own key already tells
+     * `MapBuilder::toDxnMapKey()` apart a `DXNKeyword` key from a
+     * `string` key with the same text (see that class's own doc) --
+     * a keyword-originated key encodes under `Tags::T_KEYWORD`, same
+     * as any other `DXNKeyword` value; a genuinely string-typed key
+     * encodes as a plain untagged text item, same as before.
+     *
      * @param array<int|string, mixed> $map
      * @return list<array{0: string, 1: string}>
      */
@@ -164,7 +172,11 @@ final class Encoder
     {
         $pairs = [];
         foreach ($map as $key => $value) {
-            $pairs[] = [self::encodeItem($key, $registry), self::encodeItem($value, $registry)];
+            $dxnKey = MapBuilder::toDxnMapKey($key);
+            $encodedKey = $dxnKey instanceof DXNKeyword
+                ? Writer::tag(Tags::T_KEYWORD, Writer::textItem($dxnKey->name))
+                : self::encodeItem($dxnKey, $registry);
+            $pairs[] = [$encodedKey, self::encodeItem($value, $registry)];
         }
         return $pairs;
     }

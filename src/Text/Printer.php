@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
@@ -213,12 +214,14 @@ final class Printer
     }
 
     /**
-     * A `map` decodes to a bare PHP array, which has already
-     * collapsed a `DXNKeyword` key and a `string` key with the same
-     * text into one PHP string key (this port's own documented
-     * limit) -- so encoding always produces the keyword form for
-     * every string key, consistently, rather than trying to guess
-     * which one the caller "meant."
+     * A `map` decodes to a bare PHP array, whose own key already
+     * tells `MapBuilder::toDxnMapKey()` apart a `DXNKeyword` key from
+     * a `string` key with the same text (see that class's own doc) --
+     * so a keyword-originated key prints via the keyword
+     * shorthand-or-arrow form, ergonomic and unchanged from before,
+     * while a genuinely string-typed key now prints as a quoted
+     * string on the arrow's left side instead, matching what
+     * `Binary\Encoder` already did for the same case.
      *
      * @param array<int|string, mixed> $map
      */
@@ -226,7 +229,10 @@ final class Printer
     {
         $parts = [];
         foreach ($map as $key => $value) {
-            $parts[] = is_string($key) ? self::printKeywordEntry($key, $value, $registry) : "{$key}=>" . self::print($value, $registry);
+            $dxnKey = MapBuilder::toDxnMapKey($key);
+            $parts[] = $dxnKey instanceof DXNKeyword
+                ? self::printKeywordEntry($dxnKey->name, $value, $registry)
+                : self::print($dxnKey, $registry) . '=>' . self::print($value, $registry);
         }
         return implode(',', $parts);
     }

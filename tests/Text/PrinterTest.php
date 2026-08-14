@@ -7,6 +7,7 @@ namespace JOetjen\Dextrin\Tests\Text;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Compiled;
 use JOetjen\Dextrin\Schema\Field;
+use JOetjen\Dextrin\Text\Parser;
 use JOetjen\Dextrin\Text\Printer;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
@@ -93,6 +94,20 @@ final class PrinterTest extends TestCase
     public function testPrintsIntegerKeyedMapEntryViaArrowForm(): void
     {
         self::assertSame('%{1=>"a"}', Printer::print([1 => 'a']));
+    }
+
+    public function testPrintsAMarkedStringMapKeyAsAQuotedArrowEntryNotKeywordShorthand(): void
+    {
+        // MapBuilder's own leading-NUL marker for a genuinely
+        // string-typed key (see its doc) -- must print as a quoted
+        // string, not silently become a keyword on re-encode.
+        self::assertSame('%{"a"=>1}', Printer::print(["\0a" => 1]));
+    }
+
+    public function testPrintedMarkedStringKeyDecodesBackToTheSameMarkedKey(): void
+    {
+        $value = ["\0a" => 1];
+        self::assertSame($value, Parser::parse(Printer::print($value)));
     }
 
     public function testPrintsOrderedMapAsTagForm(): void

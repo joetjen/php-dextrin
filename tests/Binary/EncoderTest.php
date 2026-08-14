@@ -65,8 +65,23 @@ final class EncoderTest extends TestCase
 
     public function testEncodesBareAssociativeArrayAsUntaggedMap(): void
     {
+        // An un-marked string key (MapBuilder's own convention, see
+        // its doc) is a keyword -- the ergonomic, overwhelmingly
+        // common case for a hand-built array too -- so it encodes
+        // under tag T_KEYWORD (202 = 0xd8 0xca), not as a plain text
+        // item.
         $bytes = Encoder::encode(['a' => 1]);
-        // major5 count1 (0xa1), key "a" (0x61 0x61), value 1 (0x01)
+        // major5 count1 (0xa1), tag 202 (0xd8 0xca), key "a" (0x61 0x61), value 1 (0x01)
+        self::assertSame($this->envelope("\xa1\xd8\xca\x61\x61\x01"), $bytes);
+    }
+
+    public function testEncodesAMarkedStringKeyAsAPlainTextItem(): void
+    {
+        // MapBuilder's own leading-NUL marker for a genuinely
+        // string-typed key (see its doc) -- encodes as a plain,
+        // untagged text item, distinct from the keyword case above.
+        $bytes = Encoder::encode(["\0a" => 1]);
+        // major5 count1 (0xa1), key "a" (0x61 0x61, no tag), value 1 (0x01)
         self::assertSame($this->envelope("\xa1\x61\x61\x01"), $bytes);
     }
 

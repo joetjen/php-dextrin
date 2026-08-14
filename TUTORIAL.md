@@ -28,16 +28,27 @@ Notice the value's keys: a `map`'s shorthand keys (`name:`) are
 themselves DXN `keyword`s, not bare strings — `%{name: "Ada"}` and
 `%{:name => "Ada"}` are the exact same value. This port decodes a
 `map` as a bare, native PHP `array`, with every key reduced to
-whatever PHP scalar it naturally coerces to (a `keyword` key reduces
-to its bare name string, exactly matching `name:`'s shorthand form) —
-the closest native fit PHP has, and the one place this port's
-collection strategy diverges from "wrap everything without a lossless
-native equivalent" (see the [cheatsheet](CHEATSHEET.md) for the full
-value-type table).
+whatever PHP scalar it naturally coerces to — the closest native fit
+PHP has, and the one place this port's collection strategy diverges
+from "wrap everything without a lossless native equivalent" (see the
+[cheatsheet](CHEATSHEET.md) for the full value-type table). A
+`keyword` key reduces to its bare name string, exactly matching
+`name:`'s shorthand form and keeping the overwhelmingly common case —
+a keyword-keyed map — as ergonomic to access as `$value['name']`. A
+genuinely *string*-typed key with the same text is marked internally
+(a single leading NUL byte, `MapBuilder`'s own doc has the details) so
+it doesn't collide with a same-text keyword key, and re-encodes back
+as a quoted string rather than silently turning into a keyword:
 
-Two *distinct* DXN keys that would coerce to the same PHP array slot
-(`1` and `"1"`; `:name` and `"name"`) is a decode-time error, not
-silent data loss:
+```php
+Dextrin::decode('%{name: 1, "name" => 2}');
+// => ['name' => 1, "\0name" => 2] -- two distinct entries, not a collision
+```
+
+A DXN `integer` key and a `string` key PHP itself would already coerce
+to that same `int` array key (e.g. `1` and `"1"`) is a different,
+still-unresolved kind of collision — that one *is* a decode-time
+error, not silent data loss:
 
 ```php
 Dextrin::decode('%{1 => "a", "1" => "b"}');

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
@@ -65,8 +66,8 @@ final class Formatter
             // array_is_list([]) is true, so the array_is_list branch
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
-            is_array($value) => self::bracketedEntries('%{', self::mapToPairs($value), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => "%{$value->name}" . self::bracketedEntries('{', $value->pairs(), '}', $depth, $indentSize, $registry),
+            is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => "%{$value->name}" . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
             $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => "%{$value->name}" . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
             // Every scalar, every empty collection, and any
             // struct-shaped extended type Printer already handles
@@ -77,16 +78,39 @@ final class Formatter
     }
 
     /**
+     * A bare PHP array's own key already tells
+     * `MapBuilder::toDxnMapKey()` apart a `DXNKeyword` key from a
+     * `string` key with the same text (see that class's own doc) --
+     * this converts every pair to that unambiguous form before
+     * `renderEntry()` ever sees it, so `renderEntry()` itself never
+     * has to guess.
+     *
      * @param array<int|string, mixed> $map
-     * @return list<array{0: int|string, 1: mixed}>
+     * @return list<array{0: DXNKeyword|int|string, 1: mixed}>
      */
-    private static function mapToPairs(array $map): array
+    private static function mapToDxnPairs(array $map): array
     {
         $pairs = [];
         foreach ($map as $key => $value) {
-            $pairs[] = [$key, $value];
+            $pairs[] = [MapBuilder::toDxnMapKey($key), $value];
         }
         return $pairs;
+    }
+
+    /**
+     * Struct field names and plain-object property names are always
+     * genuinely keyword-shaped (`DXN.md` §1.2's `map_entry` grammar
+     * applies to `%Name{...}`'s body too) -- never ambiguous with a
+     * string-typed key the way a bare `map`'s own key can be, so they
+     * get wrapped as `DXNKeyword` unconditionally, up front, rather
+     * than leaving `renderEntry()` to guess from a bare string alone.
+     *
+     * @param list<array{0: string, 1: mixed}> $pairs
+     * @return list<array{0: DXNKeyword, 1: mixed}>
+     */
+    private static function keywordPairs(array $pairs): array
+    {
+        return array_map(static fn (array $p): array => [new DXNKeyword($p[0]), $p[1]], $pairs);
     }
 
     /**
@@ -114,7 +138,7 @@ final class Formatter
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                $pairs = $found->compiled->fieldValues($value);
+                $pairs = self::keywordPairs($found->compiled->fieldValues($value));
                 return $pairs === [] ? "%{$name}{}" : "%{$name}" . self::bracketedEntries('{', $pairs, '}', $depth, $indentSize, $registry);
             }
         }
@@ -125,7 +149,7 @@ final class Formatter
 
         $pairs = [];
         foreach (get_object_vars($value) as $key => $fieldValue) {
-            $pairs[] = [$key, $fieldValue];
+            $pairs[] = [new DXNKeyword($key), $fieldValue];
         }
         if ($pairs === []) {
             return Printer::print($value, $registry);
@@ -165,19 +189,23 @@ final class Formatter
         return "{$open}\n{$body}\n{$outerIndent}{$close}";
     }
 
-    /** Same colon-shorthand-vs-arrow-form rule as {@see Printer}'s own entry printing. */
+    /**
+     * Same colon-shorthand-vs-arrow-form rule as {@see Printer}'s own
+     * `printEntry()`/`printKeywordEntry()`: only a genuine
+     * `DXNKeyword` key gets the shorthand-or-keyword-arrow treatment.
+     * Every other key (`ordered-map`'s own preserved key type, or a
+     * bare `map`'s already-disambiguated `MapBuilder::toDxnMapKey()`
+     * result) renders through the generic value printer on the
+     * arrow's left side -- correctly quoting a genuinely string-typed
+     * key instead of guessing it was a keyword.
+     */
     private static function renderEntry(mixed $key, mixed $value, int $depth, int $indentSize, ?Registry $registry): string
     {
-        $name = match (true) {
-            is_string($key) => $key,
-            $key instanceof DXNKeyword => $key->name,
-            default => null,
-        };
-        if ($name !== null) {
-            if (Printer::isBareIdentifier($name)) {
-                return "{$name}: " . self::render($value, $depth, $indentSize, $registry);
+        if ($key instanceof DXNKeyword) {
+            if (Printer::isBareIdentifier($key->name)) {
+                return "{$key->name}: " . self::render($value, $depth, $indentSize, $registry);
             }
-            return ':' . Printer::quoteString($name) . ' => ' . self::render($value, $depth, $indentSize, $registry);
+            return ':' . Printer::quoteString($key->name) . ' => ' . self::render($value, $depth, $indentSize, $registry);
         }
         return Printer::print($key, $registry) . ' => ' . self::render($value, $depth, $indentSize, $registry);
     }

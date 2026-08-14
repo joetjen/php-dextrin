@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `map`'s bare-PHP-array key representation now marks a genuinely
+  string-typed key with a single leading NUL byte, distinguishing it
+  from a `DXNKeyword` key with the same text (`MapBuilder`'s own new
+  `toDxnMapKey()`, the reverse of its existing key-coercion). A
+  keyword-derived key (the overwhelmingly common case, e.g. `%{x: 1}`)
+  stays exactly as ergonomic as before -- unprefixed, `$map['x']` --
+  but a genuine string key with the same text (`%{"x" => 1}`) no
+  longer collapses onto it. This closes a real cross-encoder
+  inconsistency: `Text\Printer`/`Text\Formatter` used to *guess*
+  "keyword" for any identifier-shaped string key on encode, while
+  `Binary\Encoder` always assumed "string" -- meaning the exact same
+  decoded PHP value could produce a `.dxn` and a `.dxnb` that decoded
+  back to two different things (found via a cross-language round-trip
+  check against `node-dextrin`/`php-dextrin`'s sibling ports). Both
+  encoders now agree, using the mark to tell the two apart correctly
+  instead of guessing.
+  - A `keyword` key and a same-text `string` key no longer collide at
+    decode time either (they land in distinct PHP array slots now) --
+    `%{name: 1, "name" => 2}` decodes to
+    `['name' => 1, "\0name" => 2]` instead of throwing.
+  - `MapBuilder`'s existing `integer`-vs-canonical-numeric-`string`
+    key collision (`%{1 => "a", "1" => "b"}`) is unaffected -- a
+    string key PHP would already auto-coerce to an `int` key on its
+    own is deliberately left unmarked, so it still collides with a
+    bare `integer` key exactly as before.
+
 ### Fixed
 
 - `Text\Printer`/`Text\Formatter`/`Binary\Encoder` now accept an

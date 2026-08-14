@@ -108,10 +108,13 @@ final class ParserTest extends TestCase
         Parser::parse('%{1 => "a", "1" => "b"}');
     }
 
-    public function testMapKeywordVsStringKeyCollisionThrows(): void
+    public function testMapKeywordAndSameTextStringKeyCoexistDistinctly(): void
     {
-        $this->expectException(ParseError::class);
-        Parser::parse('%{name: 1, "name" => 2}');
+        // A keyword key and a same-text string key no longer collide
+        // -- MapBuilder marks the string one (a leading NUL byte, see
+        // its own doc), so `name:` and `"name"` land in distinct PHP
+        // array slots instead of being forced to share one.
+        self::assertSame(['name' => 1, "\0name" => 2], Parser::parse('%{name: 1, "name" => 2}'));
     }
 
     public function testMapNonScalarKeyThrows(): void
