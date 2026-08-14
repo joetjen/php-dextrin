@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Tests\Text;
 
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Compiled;
+use JOetjen\Dextrin\Schema\Field;
 use JOetjen\Dextrin\Text\Formatter;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
@@ -81,5 +84,45 @@ final class FormatterTest extends TestCase
             \JOetjen\Dextrin\Text\Parser::parse($compact),
             \JOetjen\Dextrin\Text\Parser::parse($pretty),
         );
+    }
+
+    public function testRegisteredApplicationInstanceRendersUnderItsSchemaName(): void
+    {
+        $point = new FormatterTestPoint(1, 2);
+        $compiled = new Compiled(fields: [new Field('x'), new Field('y')]);
+        $registry = (new Registry())
+            ->putStructModule('Point', FormatterTestPoint::class)
+            ->putStructSchema('Point', $compiled);
+
+        self::assertSame("%Point{\n  x: 1\n  y: 2\n}", Formatter::pretty($point, registry: $registry));
+        self::assertSame("%FormatterTestPoint{\n  x: 1\n  y: 2\n}", Formatter::pretty($point));
+    }
+
+    public function testRegisteredTagEncoderInstanceStaysSingleLineNotAStruct(): void
+    {
+        $money = new FormatterTestMoney(500);
+        $registry = (new Registry())->putTagEncoder(
+            FormatterTestMoney::class,
+            'my-app/money',
+            static fn (FormatterTestMoney $m): int => $m->cents,
+        );
+
+        self::assertSame('@my-app/money 500', Formatter::pretty($money, registry: $registry));
+    }
+}
+
+final class FormatterTestMoney
+{
+    public function __construct(public int $cents)
+    {
+    }
+}
+
+final class FormatterTestPoint
+{
+    public function __construct(
+        public int $x,
+        public int $y,
+    ) {
     }
 }

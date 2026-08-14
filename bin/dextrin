@@ -1,0 +1,266 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * `dextrin` CLI -- one executable, four subcommands (`decode`,
+ * `encode`, `format`, `validate`), the PHP analog of both the JS
+ * port's `bin/dextrin.js` and `dextrin`'s own `mix dextrin.*` tasks.
+ * One bin with subcommands rather than a separate script per task,
+ * matching how CLIs are conventionally shaped (`git <subcommand>`),
+ * not a mechanical per-file port of the Mix task layout.
+ *
+ * Two Mix tasks have no analog here, deliberately, for the same
+ * reasons the JS port omits them:
+ *   - `mix dextrin.gen.unicode` regenerates a generated grammar's
+ *     Unicode identifier ranges from UCD data -- this port's lexer
+ *     uses PCRE's own `\p{L}`/similar Unicode property escapes
+ *     directly instead, so there is no generated-ranges file to
+ *     regenerate.
+ *   - `mix dextrin.gen.schema` scaffolds a `.dxns` file from an
+ *     existing Elixir struct via `Map.from_struct/1` reflection -- a
+ *     PHP class has no built-in field-reflection-to-schema mechanism
+ *     to scaffold from either (though `get_object_vars()` could in
+ *     principle drive one; not built, matching the JS port's own
+ *     scope decision here).
+ *
+ * `mix dextrin.encode`'s `--share` flag also has no analog: the
+ * `.dxnb` encoder doesn't produce `dxn/DXN.md` §2.5 value-sharing
+ * output yet (decode-only for now, see `src/Binary/Encoder.php`'s own
+ * note).
+ */
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use JOetjen\Dextrin\Dextrin;
+use JOetjen\Dextrin\DXNError;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema;
+
+const USAGE = <<<'USAGE'
+    usage: dextrin <command> [options]
+
+    Commands:
+      decode PATH [--out PATH]                    Decode .dxnb binary to .dxn text (pretty-printed)
+      encode PATH [--out PATH]                     Encode .dxn text to .dxnb binary
+      format PATH [--mode pretty|condense] [--in-place]
+                                                    Reformat a .dxn file
+      validate PATH [--format text|binary] [--schema PATH --as NAME]
+                                                    Validate a .dxn/.dxnb file, optionally against a schema
+
+    Run with no PATH, or an unrecognized command, to see this message.
+    USAGE;
+
+/** @param list<string> $argv */
+function main(array $argv): int
+{
+    $command = $argv[0] ?? null;
+    $rest = array_slice($argv, 1);
+    return match ($command) {
+        'decode' => run(static fn () => cmdDecode($rest)),
+        'encode' => run(static fn () => cmdEncode($rest)),
+        'format' => run(static fn () => cmdFormat($rest)),
+        'validate' => run(static fn () => cmdValidate($rest)),
+        default => printUsageAndExit($command),
+    };
+}
+
+function printUsageAndExit(?string $command): int
+{
+    fwrite(STDOUT, USAGE . "\n");
+    return $command === null ? 0 : 1;
+}
+
+/**
+ * Runs one subcommand, catching anything it throws (a bad `PATH`, a
+ * `DXNError`, a schema violation, a plain usage error) and reporting
+ * it uniformly -- every command's own body can just `throw` and let
+ * this be the one place that turns that into a clean message and a
+ * non-zero exit code, rather than each command repeating the same
+ * try/catch shape.
+ *
+ * @param \Closure(): void $fn
+ */
+function run(\Closure $fn): int
+{
+    try {
+        $fn();
+        return 0;
+    } catch (\Throwable $err) {
+        fwrite(STDERR, describeError($err) . "\n");
+        return 1;
+    }
+}
+
+function describeError(\Throwable $err): string
+{
+    if ($err instanceof DXNError && $err->offset !== null) {
+        $unit = $err->stage === 'binary' ? 'byte offset' : 'offset';
+        return "{$err->getMessage()} (at {$unit} {$err->offset})";
+    }
+    return $err->getMessage();
+}
+
+/**
+ * Hand-rolled, dependency-free argv parsing -- the CLI's own option
+ * surface is small and fixed per subcommand, so a parser-generator
+ * library would be an unneeded dependency for what a few `match`
+ * arms already do plainly.
+ *
+ * @param list<string> $argv
+ * @param list<string> $flagNames
+ * @param list<string> $optionNames
+ * @return array{positional: list<string>, flags: array<string, bool>, options: array<string, string>}
+ */
+function parseArgs(array $argv, array $flagNames = [], array $optionNames = []): array
+{
+    $positional = [];
+    $flags = [];
+    $options = [];
+
+    $count = count($argv);
+    for ($i = 0; $i < $count; $i++) {
+        $arg = $argv[$i];
+        $name = str_starts_with($arg, '--') ? substr($arg, 2) : null;
+        if ($name !== null && in_array($name, $flagNames, true)) {
+            $flags[$name] = true;
+        } elseif ($name !== null && in_array($name, $optionNames, true)) {
+            $i++;
+            $options[$name] = $argv[$i] ?? throw new \RuntimeException("--{$name} requires a value");
+        } else {
+            $positional[] = $arg;
+        }
+    }
+    return ['positional' => $positional, 'flags' => $flags, 'options' => $options];
+}
+
+function writeText(string $text, ?string $outPath): void
+{
+    if ($outPath !== null) {
+        file_put_contents($outPath, $text);
+    } else {
+        fwrite(STDOUT, $text . "\n");
+    }
+}
+
+function writeBinary(string $bytes, ?string $outPath): void
+{
+    if ($outPath !== null) {
+        file_put_contents($outPath, $bytes);
+    } else {
+        fwrite(STDOUT, $bytes);
+    }
+}
+
+function readFileContents(string $path): string
+{
+    $contents = file_get_contents($path);
+    if ($contents === false) {
+        throw new \RuntimeException("failed to read {$path}");
+    }
+    return $contents;
+}
+
+/** @param list<string> $argv */
+function cmdDecode(array $argv): void
+{
+    ['positional' => $positional, 'options' => $options] = parseArgs($argv, optionNames: ['out']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin decode PATH [--out PATH]');
+    }
+    $value = Dextrin::decodeBinary(readFileContents($positional[0]));
+    writeText(Dextrin::encode($value, pretty: true), $options['out'] ?? null);
+}
+
+/** @param list<string> $argv */
+function cmdEncode(array $argv): void
+{
+    ['positional' => $positional, 'options' => $options] = parseArgs($argv, optionNames: ['out']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin encode PATH [--out PATH]');
+    }
+    $value = Dextrin::decode(readFileContents($positional[0]));
+    writeBinary(Dextrin::encodeBinary($value), $options['out'] ?? null);
+}
+
+/** @param list<string> $argv */
+function cmdFormat(array $argv): void
+{
+    ['positional' => $positional, 'flags' => $flags, 'options' => $options] =
+        parseArgs($argv, flagNames: ['in-place'], optionNames: ['mode']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin format PATH [--mode pretty|condense] [--in-place]');
+    }
+    [$path] = $positional;
+    $mode = $options['mode'] ?? 'pretty';
+    if ($mode !== 'pretty' && $mode !== 'condense') {
+        throw new \RuntimeException("unrecognized --mode \"{$mode}\" -- expected \"pretty\" or \"condense\"");
+    }
+    $value = Dextrin::decode(readFileContents($path));
+    $text = Dextrin::encode($value, pretty: $mode === 'pretty');
+    if ($flags['in-place'] ?? false) {
+        file_put_contents($path, $text . "\n");
+    } else {
+        fwrite(STDOUT, $text . "\n");
+    }
+}
+
+/** @param list<string> $argv */
+function cmdValidate(array $argv): void
+{
+    ['positional' => $positional, 'options' => $options] =
+        parseArgs($argv, optionNames: ['format', 'schema', 'as']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin validate PATH [--format text|binary] [--schema PATH --as NAME]');
+    }
+    [$path] = $positional;
+    $format = detectFormat($path, $options['format'] ?? null);
+
+    $registry = new Registry();
+    if (isset($options['schema'])) {
+        try {
+            $schemaDoc = Dextrin::decode(readFileContents($options['schema']));
+        } catch (\Throwable $err) {
+            throw new \RuntimeException("failed to compile schema {$options['schema']}: " . describeError($err));
+        }
+        $registry = Schema::compile($schemaDoc, $registry);
+    }
+
+    try {
+        $value = $format === 'binary'
+            ? Dextrin::decodeBinary(readFileContents($path), $registry)
+            : Dextrin::decode(readFileContents($path), $registry);
+    } catch (\Throwable $err) {
+        throw new \RuntimeException("{$path}: " . describeError($err));
+    }
+
+    $suffix = $format === 'binary' ? 'b' : '';
+    if (!isset($options['as'])) {
+        fwrite(STDOUT, "OK: {$path} is valid .dxn{$suffix}\n");
+        return;
+    }
+
+    // Deliberately Schema::validateEncode, not Schema::validate:
+    // `$value` has already gone through decode's own automatic,
+    // registry-driven materialization -- validateEncode accepts any
+    // shape (struct, materialized field map, or a real registered
+    // class instance), which is what "does this decoded value satisfy
+    // schema NAME" needs here.
+    try {
+        Schema::validateEncode($value, $registry, $options['as']);
+    } catch (\Throwable $err) {
+        throw new \RuntimeException("{$path} does not satisfy schema {$options['as']}: " . describeError($err));
+    }
+    fwrite(STDOUT, "OK: {$path} is valid .dxn{$suffix} and satisfies schema {$options['as']}\n");
+}
+
+function detectFormat(string $path, ?string $forced): string
+{
+    if ($forced === 'text' || $forced === 'binary') {
+        return $forced;
+    }
+    return str_ends_with($path, '.dxnb') ? 'binary' : 'text';
+}
+
+exit(main(array_slice($argv, 1)));

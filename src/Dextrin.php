@@ -79,7 +79,7 @@ final class Dextrin
     ): string {
         try {
             $validated = self::maybeValidateEncode($value, $registry, $validate, $coerce, $schema);
-            return $pretty ? Formatter::pretty($validated, $indent) : Printer::print($validated);
+            return $pretty ? Formatter::pretty($validated, $indent, $registry) : Printer::print($validated, $registry);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'encode');
         }
@@ -116,7 +116,7 @@ final class Dextrin
     ): string {
         try {
             $validated = self::maybeValidateEncode($value, $registry, $validate, $coerce, $schema);
-            return Encoder::encode($validated);
+            return Encoder::encode($validated, $registry);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'binary');
         }

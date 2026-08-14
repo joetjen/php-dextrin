@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Tests\Binary;
 
 use JOetjen\Dextrin\Binary\Encoder;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Compiled;
+use JOetjen\Dextrin\Schema\Field;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -150,5 +153,52 @@ final class EncoderTest extends TestCase
         } finally {
             fclose($handle);
         }
+    }
+
+    public function testEncodesARegisteredApplicationInstanceUnderItsSchemaNameNotItsClassName(): void
+    {
+        $point = new EncoderTestPoint(1, 2);
+        $compiled = new Compiled(fields: [new Field('x'), new Field('y')]);
+        $registry = (new Registry())
+            ->putStructModule('Point', EncoderTestPoint::class)
+            ->putStructSchema('Point', $compiled);
+
+        $viaRegistry = Encoder::encode($point, $registry);
+        $viaExplicitStruct = Encoder::encode(DXNStruct::positional('Point', [1, 2]));
+        self::assertSame($viaExplicitStruct, $viaRegistry);
+
+        $viaClassNameOnly = Encoder::encode($point);
+        self::assertNotSame($viaRegistry, $viaClassNameOnly);
+        self::assertSame(Encoder::encode(DXNStruct::positional('EncoderTestPoint', [1, 2])), $viaClassNameOnly);
+    }
+
+    public function testEncodesARegisteredTagEncoderInstanceAsACustomTagNotAStruct(): void
+    {
+        $money = new EncoderTestMoney(500);
+        $registry = (new Registry())->putTagEncoder(
+            EncoderTestMoney::class,
+            'my-app/money',
+            static fn (EncoderTestMoney $m): int => $m->cents,
+        );
+
+        $viaRegistry = Encoder::encode($money, $registry);
+        $viaExplicitCustomTag = Encoder::encode(new DXNCustomTag('my-app/money', 500));
+        self::assertSame($viaExplicitCustomTag, $viaRegistry);
+    }
+}
+
+final class EncoderTestMoney
+{
+    public function __construct(public int $cents)
+    {
+    }
+}
+
+final class EncoderTestPoint
+{
+    public function __construct(
+        public int $x,
+        public int $y,
+    ) {
     }
 }
