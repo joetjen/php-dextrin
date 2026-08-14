@@ -110,7 +110,8 @@ final class ProviderTest extends TestCase
         $registry = Schema::registerProvider(new Registry(), new ProviderTestNonMaterializingProvider());
         self::assertNull($registry->fetchMaterializer('Point'));
         $value = Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
-        self::assertSame(['x' => 1.0, 'y' => 2.0], $value);
+        // Marked string keys, not keywords -- see MapBuilder::markStringKey().
+        self::assertSame(["\0x" => 1.0, "\0y" => 2.0], $value);
     }
 
     public function testEncodingARegisteredApplicationInstanceValidatesItAgainstItsSchema(): void
