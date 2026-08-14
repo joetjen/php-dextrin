@@ -4,3 +4,5 @@ composer.phar
 .phpstan.cache/
 *.log
 .DS_Store
+/doc/
+/.phpdoc/
