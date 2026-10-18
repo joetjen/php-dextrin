@@ -214,11 +214,14 @@ final class ParserTest extends TestCase
         Parser::parse('42 43');
     }
 
-    public function testStructFieldNameMustResolveToString(): void
+    public function testAStructEntryWhoseKeyIsNotANameIsAnExtraField(): void
     {
-        // Arrow-form struct field key using a non-string, non-keyword value.
-        $this->expectException(ParseError::class);
-        Parser::parse('%Point{1 => 2}');
+        // An arrow-form struct entry keyed by a non-name is an extra field
+        // (DXN.md §4.7), not a field and not an error.
+        $value = Parser::parse('%Point{1 => 2}');
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNStruct::class, $value);
+        self::assertSame([], $value->pairs());
+        self::assertSame([[1, 2]], $value->extra);
     }
 
     public function testOrderedRequiresAMapLiteralArgument(): void

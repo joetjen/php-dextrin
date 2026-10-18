@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Text;
 
 use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\MapKey;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
@@ -294,14 +295,58 @@ final class Parser
         $name = $this->next('IDENTIFIER')->value;
         $version = $this->parseStructVersion();
         if ($this->at('LBRACE')) {
-            $pairs = array_map(
-                fn (array $pair) => [$this->structFieldName($pair[0]), $pair[1]],
-                $this->parseEntries(),
-            );
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version));
+            // Entries keyed by a name are the struct's fields; any other
+            // map key (DXN.md §1.6) is an extra field's (§4.7).
+            $entries = $this->parseEntries();
+            MapKey::checkPairs($entries);
+            $pairs = [];
+            $extra = [];
+            foreach ($entries as [$key, $value]) {
+                $field = DXNStruct::extraKey($key);
+                if (is_string($field)) {
+                    $pairs[] = [$field, $value];
+                } else {
+                    $extra[] = [$key, $value];
+                }
+            }
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra));
         }
-        $values = $this->parseBracketedItems('LBRACKET', 'RBRACKET');
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version));
+        [$values, $extra] = $this->parsePositionalBody();
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra));
+    }
+
+    /**
+     * `[items... entries...]`: a positional struct's items, then its extra
+     * fields as entries (DXN.md §4.7). An item is a value not followed by
+     * `=>`; once an entry has begun, an item is a syntax error.
+     *
+     * @return array{0: list<mixed>, 1: list<array{0: mixed, 1: mixed}>}
+     */
+    private function parsePositionalBody(): array
+    {
+        $this->next('LBRACKET');
+        $values = [];
+        $entries = [];
+        while (!$this->at('RBRACKET')) {
+            if ($this->at('MAP_KEY')) {
+                $key = new DXNKeyword($this->next('MAP_KEY')->value);
+                $entries[] = [$key, $this->parseValue()];
+                continue;
+            }
+            $start = $this->peek()->start;
+            $value = $this->parseValue();
+            if ($this->at('ARROW')) {
+                $this->next('ARROW');
+                $entries[] = [$value, $this->parseValue()];
+            } elseif ($entries !== []) {
+                throw new ParseError("a positional struct's items come before its extra fields", $start);
+            } else {
+                $values[] = $value;
+            }
+        }
+        $this->next('RBRACKET');
+        MapKey::checkPairs($entries);
+        return [$values, array_map(static fn (array $entry): array => [DXNStruct::extraKey($entry[0]), $entry[1]], $entries)];
     }
 
     /**
@@ -383,16 +428,6 @@ final class Parser
     private function buildMap(array $pairs): array|\JOetjen\Dextrin\Value\DXNMap
     {
         return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
-    }
-
-    private function structFieldName(mixed $key): string
-    {
-        return match (true) {
-            $key instanceof DXNKeyword => $key->name,
-            $key instanceof DXNSymbol => $key->name,
-            is_string($key) => $key,
-            default => throw new ParseError('struct field name must be an identifier or string'),
-        };
     }
 
     /** `@{...}` (set), or `@identifier value` (tag_form). Discard is already stripped in {@see self::parseValue()}. */

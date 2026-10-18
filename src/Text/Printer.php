@@ -250,15 +250,23 @@ final class Printer
     private static function printStruct(DXNStruct $struct, ?Registry $registry): string
     {
         $head = self::writtenHead($struct, $registry);
+        $extra = array_map(
+            static fn (array $pair): string => is_string($pair[0])
+                ? self::printKeywordEntry($pair[0], $pair[1], $registry)
+                : self::printEntry($pair[0], $pair[1], $registry),
+            $struct->extra,
+        );
         if ($struct->isKeyed()) {
             $parts = [];
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
-            return $head . '{' . implode(',', $parts) . '}';
+            return $head . '{' . implode(',', [...$parts, ...$extra]) . '}';
         }
-        $items = implode(',', array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values()));
-        return $head . "[{$items}]";
+        // A positional struct's items, then its extra fields as entries
+        // (DXN.md §1.2).
+        $items = array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values());
+        return $head . '[' . implode(',', [...$items, ...$extra]) . ']';
     }
 
     /**

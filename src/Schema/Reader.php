@@ -121,17 +121,72 @@ final class Reader
      */
     private static function materialized(Registry $registry, Compiled $reading, Compiled $latest, DXNStruct $struct): array
     {
+        [$struct, $extra] = self::separated($reading, $struct);
+        if ($registry->isStrict() && $extra !== []) {
+            $key = is_scalar($extra[0][0]) ? (string) $extra[0][0] : get_debug_type($extra[0][0]);
+            throw new DXNError(
+                "struct \"{$struct->name}\" carries \"{$key}\", which its schema does not declare",
+                stage: 'schema',
+                category: 'schema/undeclared-field',
+            );
+        }
         $pairs = Validator::resolve($reading, $struct, $registry);
         $materializer = $registry->fetchMaterializer($struct->name);
         $value = $materializer === null
-            ? DXNStruct::keyed($struct->name, $pairs, $latest->version)
-            : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs);
+            ? DXNStruct::keyed($struct->name, $pairs, $latest->version, $extra)
+            : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs, $extra);
         return [new Validated($struct->name, $value), $registry];
     }
 
     /**
-     * @param \Closure(string, int, array<string, mixed>): mixed $materializer
+     * `$struct` with only the fields `$reading` declares, and its extra
+     * fields apart (DXN.md §4.7): a keyed struct's undeclared names join
+     * the extras. A name given twice -- a declared field and an extra of
+     * the same name, or a keyed field written twice -- is refused: an extra
+     * never shadows a declared field. A positional struct gives every
+     * declared name, by position.
+     *
+     * @return array{0: DXNStruct, 1: list<array{0: mixed, 1: mixed}>}
+     */
+    private static function separated(Compiled $reading, DXNStruct $struct): array
+    {
+        $declared = array_flip($reading->fieldNames());
+        $names = $reading->fieldNames();
+        $undeclared = [];
+        if ($struct->isKeyed()) {
+            $mine = [];
+            foreach ($struct->pairs() as [$key, $value]) {
+                if (isset($declared[$key])) {
+                    $mine[] = [$key, $value];
+                } else {
+                    $undeclared[] = [$key, $value];
+                }
+            }
+            $names = array_map(static fn (array $pair): string => $pair[0], $mine);
+            $struct = $struct->withPairs($mine);
+        }
+        $extra = [...$undeclared, ...$struct->extra];
+        $seen = [];
+        foreach ([...$names, ...array_map(static fn (array $pair): mixed => $pair[0], $extra)] as $key) {
+            if (!is_string($key) && !is_int($key)) {
+                continue;
+            }
+            if (isset($seen[$key])) {
+                throw new DXNError(
+                    "struct \"{$struct->name}\" names \"{$key}\" twice: an extra field never shadows a declared one",
+                    stage: 'schema',
+                    category: 'schema/shadowed-field',
+                );
+            }
+            $seen[$key] = true;
+        }
+        return [$struct, $extra];
+    }
+
+    /**
+     * @param \Closure(string, int, array<int|string, mixed>): mixed $materializer
      * @param list<array{0: string, 1: mixed}> $pairs
+     * @param list<array{0: mixed, 1: mixed}> $extra
      */
     private static function built(
         Registry $registry,
@@ -140,10 +195,13 @@ final class Reader
         Compiled $reading,
         Compiled $latest,
         array $pairs,
+        array $extra,
     ): mixed {
         $fields = [];
-        foreach ($pairs as [$field, $value]) {
-            $fields[$field] = $value;
+        foreach ([...$pairs, ...$extra] as [$field, $value]) {
+            // A PHP array key is a string or an integer; an extra keyed by
+            // any other map key is keyed by its canonical text.
+            $fields[is_string($field) || is_int($field) ? $field : \JOetjen\Dextrin\Canonical::print($field)] = $value;
         }
         try {
             $value = $materializer($name, $reading->version, $fields);

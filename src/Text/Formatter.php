@@ -70,8 +70,13 @@ final class Formatter
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
             is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => Printer::writtenHead($value, $registry) . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => Printer::writtenHead($value, $registry) . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isKeyed() && ($value->pairs() !== [] || $value->extra !== [])
+                => Printer::writtenHead($value, $registry)
+                    . self::bracketedEntries('{', [...self::keywordPairs($value->pairs()), ...self::extraPairs($value)], '}', $depth, $indentSize, $registry),
+            // A positional struct's items, then its extra fields as
+            // entries, one per line like the items (DXN.md §1.2).
+            $value instanceof DXNStruct && $value->isPositional() && ($value->values() !== [] || $value->extra !== [])
+                => Printer::writtenHead($value, $registry) . self::bracketedItemsAndEntries($value, $depth, $indentSize, $registry),
             // Every scalar, every empty collection, and any
             // struct-shaped extended type Printer already handles
             // directly (Regex, Date, Decimal, DXNUuid, ...) needs no
@@ -178,6 +183,35 @@ final class Formatter
             $items,
         ));
         return "{$open}\n{$body}\n{$outerIndent}{$close}";
+    }
+
+    /**
+     * A struct's extra fields as entries: a name like a field name, any
+     * other map key as itself.
+     *
+     * @return list<array{0: mixed, 1: mixed}>
+     */
+    private static function extraPairs(DXNStruct $value): array
+    {
+        return array_map(
+            static fn (array $pair): array => [is_string($pair[0]) ? new DXNKeyword($pair[0]) : $pair[0], $pair[1]],
+            $value->extra,
+        );
+    }
+
+    private static function bracketedItemsAndEntries(DXNStruct $value, int $depth, int $indentSize, ?Registry $registry): string
+    {
+        $innerDepth = $depth + 1;
+        $innerIndent = self::indentStr($innerDepth, $indentSize);
+        $lines = [
+            ...array_map(static fn (mixed $item): string => self::render($item, $innerDepth, $indentSize, $registry), $value->values()),
+            ...array_map(
+                static fn (array $pair): string => self::renderEntry($pair[0], $pair[1], $innerDepth, $indentSize, $registry),
+                self::extraPairs($value),
+            ),
+        ];
+        $body = implode("\n", array_map(static fn (string $line): string => $innerIndent . $line, $lines));
+        return "[\n{$body}\n" . self::indentStr($depth, $indentSize) . ']';
     }
 
     /** @param list<array{0: mixed, 1: mixed}> $pairs */

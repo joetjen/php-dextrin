@@ -191,6 +191,16 @@ final class Validator
 
     private static function checkCompiled(Compiled $compiled, mixed $value, Registry $registry, bool $coerce): Validated
     {
+        // An extra field never shadows a declared one (DXN.md §4.7), on
+        // the way out as on the way in.
+        if ($value instanceof DXNStruct) {
+            $declared = array_flip($compiled->fieldNames());
+            foreach ($value->extra as [$key, $unusedValue]) {
+                if (is_string($key) && isset($declared[$key])) {
+                    throw new SchemaValidationError("extra field \"{$key}\" shadows a declared field");
+                }
+            }
+        }
         $given = self::toNameMapForEncode($compiled, $value);
         $wrappedGiven = self::wrapGiven($given, $registry, $coerce);
         $resolved = self::resolveFields($compiled, $wrappedGiven, $registry, $coerce);

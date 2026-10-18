@@ -49,7 +49,7 @@ final class Registry
     /** @var array<string, array<int, Compiled>> struct name -> version -> compiled schema. */
     private array $structs = [];
 
-    /** @var array<string, \Closure(string, int, array<string, mixed>): mixed> struct name -> materializer. */
+    /** @var array<string, \Closure(string, int, array<int|string, mixed>): mixed> struct name -> materializer. */
     private array $materializers = [];
 
     /** @var (\Closure(string): ?Compiled)|null */
@@ -64,6 +64,29 @@ final class Registry
     private function clone(): self
     {
         return clone $this;
+    }
+
+    /** Whether this registry decodes strictly ({@see putStrict()}). */
+    private bool $strict = false;
+
+    /**
+     * Marks this registry as decoding *strictly*: a schema-backed struct
+     * that carries a field its schema does not declare is refused
+     * (`schema/undeclared-field`, DXN.md §4.7) instead of keeping it as an
+     * extra field. A config loader decodes strictly; a message consumer
+     * does not. {@see \JOetjen\Dextrin\Dextrin::decode()} and
+     * `decodeBinary()` take it as `strict: true`.
+     */
+    public function putStrict(bool $strict): self
+    {
+        $copy = $this->clone();
+        $copy->strict = $strict;
+        return $copy;
+    }
+
+    public function isStrict(): bool
+    {
+        return $this->strict;
     }
 
     /**
@@ -174,7 +197,7 @@ final class Registry
      * it answers the application's latest-version value, which is checked
      * against the latest schema, or throws.
      *
-     * @param \Closure(string, int, array<string, mixed>): mixed $materializer
+     * @param \Closure(string, int, array<int|string, mixed>): mixed $materializer
      */
     public function putStructMaterializer(string $name, \Closure $materializer): self
     {
@@ -235,7 +258,7 @@ final class Registry
         return $found === null ? $struct : $struct->withVersion($found->compiled->version);
     }
 
-    /** @return (\Closure(string, int, array<string, mixed>): mixed)|null */
+    /** @return (\Closure(string, int, array<int|string, mixed>): mixed)|null */
     public function fetchMaterializer(string $name): ?\Closure
     {
         return $this->materializers[$name] ?? null;

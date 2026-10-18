@@ -14,6 +14,6 @@ namespace JOetjen\Dextrin\Schema;
  */
 interface DXNSchemaMaterializingProvider extends DXNSchemaProvider
 {
-    /** @param array<string, mixed> $fields */
+    /** @param array<int|string, mixed> $fields */
     public function dxnMaterialize(string $name, int $version, array $fields): mixed;
 }

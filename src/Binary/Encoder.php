@@ -194,10 +194,16 @@ final class Encoder
     private static function encodeStruct(DXNStruct $struct, ?Registry $registry): string
     {
         $written = $registry?->asWritten($struct) ?? $struct;
-        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf([
+        $items = [
             Writer::textItem(DXNStruct::typeName($written->name, $written->version)),
             ...array_map(static fn (mixed $v): string => self::encodeItem($v, $registry), self::positionalValues($struct, $registry)),
-        ]));
+        ];
+        // Extra fields, when there are any, as one trailing tag-215 map in
+        // the order they were written (DXN.md §2.3).
+        if ($struct->extra !== []) {
+            $items[] = Writer::tag(Tags::T_EXTRA, Writer::mapOf(self::encodePairs($struct->extra, $registry)));
+        }
+        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf($items));
     }
 
     /**

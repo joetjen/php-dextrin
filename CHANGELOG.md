@@ -64,6 +64,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional field that was absent stays absent instead of becoming `null`.
 - `Validator::materialize()` is replaced by `resolve()`; building the value
   is `Schema\Reader`'s job.
+- **A struct may carry extra fields** (DXN.md §4.7), kept in
+  `DXNStruct`'s new `extra` list and written back with it: in text as
+  entries -- after a positional struct's items,
+  `%User(3)["a" "a@x" nick: "b"]` -- and in `.dxnb` as one trailing map
+  under the new private tag 215. A keyed struct's undeclared names, and any
+  entry keyed by something other than a name, are extras. An extra never
+  shadows a declared field (`schema/shadowed-field`); the materializer
+  receives extras with the declared fields; `Dextrin::decode(..., strict:
+  true)` refuses them (`schema/undeclared-field`,
+  `Registry::putStrict()`).
+- A keyed struct entry whose key is not a name -- `%Point{1 => 2}` -- is an
+  extra field instead of an error.
 
 ### Changed
 

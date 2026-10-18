@@ -19,6 +19,12 @@ namespace JOetjen\Dextrin\Value;
  * `%Name(3){...}`, DXN.md §4.8 -- or `null` when it was written
  * without one.
  *
+ * `extra` holds the fields a struct carries beyond its declared ones
+ * (DXN.md §4.7), as `[key, value]` pairs in the order they were written:
+ * a name for a named field, any other map key (§1.6) as itself. In text
+ * they are entries after the fields or the items; in `.dxnb`, one
+ * trailing tag-215 map.
+ *
  * @phpstan-type Pair array{0: string, 1: mixed}
  */
 final class DXNStruct implements DXNValueInterface
@@ -28,6 +34,8 @@ final class DXNStruct implements DXNValueInterface
     public readonly string $name;
     public readonly string $kind;
     public readonly ?int $version;
+    /** @var list<array{0: mixed, 1: mixed}> */
+    public readonly array $extra;
     /** @var list<Pair> */
     private readonly array $pairs;
     /** @var list<mixed> */
@@ -36,26 +44,47 @@ final class DXNStruct implements DXNValueInterface
     /**
      * @param list<Pair> $pairs
      * @param list<mixed> $values
+     * @param list<array{0: mixed, 1: mixed}> $extra
      */
-    private function __construct(string $name, string $kind, array $pairs, array $values, ?int $version)
+    private function __construct(string $name, string $kind, array $pairs, array $values, ?int $version, array $extra)
     {
         $this->name = $name;
         $this->kind = $kind;
         $this->pairs = $pairs;
         $this->values = $values;
         $this->version = $version;
+        $this->extra = $extra;
     }
 
-    /** @param array<Pair> $pairs */
-    public static function keyed(string $name, array $pairs, ?int $version = null): self
+    /**
+     * @param array<Pair> $pairs
+     * @param array<array{0: mixed, 1: mixed}> $extra
+     */
+    public static function keyed(string $name, array $pairs, ?int $version = null, array $extra = []): self
     {
-        return new self($name, 'keyed', array_values($pairs), [], $version);
+        return new self($name, 'keyed', array_values($pairs), [], $version, array_values($extra));
     }
 
-    /** @param array<mixed> $values */
-    public static function positional(string $name, array $values, ?int $version = null): self
+    /**
+     * @param array<mixed> $values
+     * @param array<array{0: mixed, 1: mixed}> $extra
+     */
+    public static function positional(string $name, array $values, ?int $version = null, array $extra = []): self
     {
-        return new self($name, 'positional', [], array_values($values), $version);
+        return new self($name, 'positional', [], array_values($values), $version, array_values($extra));
+    }
+
+    /**
+     * An entry's key as an extra field's key: a keyword, symbol or string
+     * is a name (its text); any other map key (DXN.md §1.6) is kept as
+     * itself.
+     */
+    public static function extraKey(mixed $key): mixed
+    {
+        return match (true) {
+            $key instanceof DXNKeyword, $key instanceof DXNSymbol => $key->name,
+            default => $key,
+        };
     }
 
     /**
@@ -97,7 +126,7 @@ final class DXNStruct implements DXNValueInterface
     /** This struct carrying `$version` instead, and otherwise unchanged. */
     public function withVersion(?int $version): self
     {
-        return new self($this->name, $this->kind, $this->pairs, $this->values, $version);
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $version, $this->extra);
     }
 
     /**
@@ -109,7 +138,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withPairs(array $pairs): self
     {
-        return self::keyed($this->name, $pairs, $this->version);
+        return self::keyed($this->name, $pairs, $this->version, $this->extra);
     }
 
     /**
@@ -120,7 +149,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withValues(array $values): self
     {
-        return self::positional($this->name, $values, $this->version);
+        return self::positional($this->name, $values, $this->version, $this->extra);
     }
 
     public function isKeyed(): bool
@@ -163,8 +192,14 @@ final class DXNStruct implements DXNValueInterface
             || $this->name !== $other->name
             || $this->kind !== $other->kind
             || $this->version !== $other->version
+            || count($this->extra) !== count($other->extra)
         ) {
             return false;
+        }
+        foreach ($this->extra as $i => [$key, $value]) {
+            if (!Equality::dxnEquals($key, $other->extra[$i][0]) || !Equality::dxnEquals($value, $other->extra[$i][1])) {
+                return false;
+            }
         }
         if ($this->isPositional()) {
             if (count($this->values) !== count($other->values)) {

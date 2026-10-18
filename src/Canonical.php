@@ -164,18 +164,28 @@ final class Canonical
         return implode(' ', array_map(static fn (array $row): string => $row[1], $rows));
     }
 
+    /**
+     * A keyed struct's extra fields follow its declared ones in the order
+     * they were written; a positional struct's follow its items in
+     * canonical order of their keys (DXN.md §1.5).
+     */
     private static function struct(DXNStruct $value): string
     {
+        $entry = static fn (mixed $key, mixed $field): string => !is_string($key)
+            ? self::text($key) . ' => ' . self::text($field)
+            : (Printer::isBareIdentifier($key) ? "{$key}: " . self::text($field) : self::quoted($key) . ' => ' . self::text($field));
+        $head = DXNStruct::head($value->name, $value->version);
         if ($value->isKeyed()) {
-            $written = [];
-            foreach ($value->pairs() as [$name, $field]) {
-                $written[] = Printer::isBareIdentifier($name)
-                    ? "{$name}: " . self::text($field)
-                    : self::quoted($name) . ' => ' . self::text($field);
-            }
-            return DXNStruct::head($value->name, $value->version) . '{' . implode(' ', $written) . '}';
+            $written = array_map(static fn (array $pair): string => $entry($pair[0], $pair[1]), [...$value->pairs(), ...$value->extra]);
+            return $head . '{' . implode(' ', $written) . '}';
         }
-        return DXNStruct::head($value->name, $value->version) . '[' . self::items($value->values()) . ']';
+        $byKey = [];
+        foreach ($value->extra as [$key, $field]) {
+            $byKey[self::text($key)] = $entry($key, $field);
+        }
+        $extras = array_map(static fn (string $key): string => $byKey[$key], self::sorted(array_map('strval', array_keys($byKey))));
+        $body = array_values(array_filter([self::items($value->values()), ...$extras], static fn (string $part): bool => $part !== ''));
+        return $head . '[' . implode(' ', $body) . ']';
     }
 
     private static function keyword(string $name): string

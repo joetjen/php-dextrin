@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Binary;
 
 use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\MapKey;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
@@ -104,7 +105,11 @@ final class Decoder
         return $out;
     }
 
-    /** @return array{0: int, 1: numeric-string} */
+    /**
+     * @return array{0: int, 1: numeric-string}
+     *
+     * @phpstan-impure
+     */
     private function readHead(): array
     {
         $first = $this->readByte();
@@ -198,7 +203,11 @@ final class Decoder
         return $raw;
     }
 
-    /** @return list<mixed> */
+    /**
+     * @return list<mixed>
+     *
+     * @phpstan-impure
+     */
     private function decodeNItems(int $count): array
     {
         $items = [];
@@ -227,6 +236,7 @@ final class Decoder
             Tags::T_SHARED_REF => $this->decodeSharedRef(),
             Tags::T_STRINGREF_NAMESPACE => $this->decodeStringrefNamespace(),
             Tags::T_STRINGREF => $this->decodeStringref(),
+            Tags::T_STRUCT => $this->decodeStruct(),
             // Read as raw pairs, bypassing MapBuilder -- see this
             // class's own doc for why.
             Tags::T_ORDERED => self::orderedMap($this->decodeOrderedPairs()),
@@ -347,7 +357,6 @@ final class Decoder
             Tags::T_ARRAY => $this->buildFromList($value, $tag, 'array', static fn (array $items): array => $items),
             Tags::T_SET => $this->buildFromList($value, $tag, 'set', static fn (array $items): DXNSet => new DXNSet($items)),
             Tags::T_SORTED_SET => $this->buildFromList($value, $tag, 'sorted-set', static fn (array $items): DXNSortedSet => DXNSortedSet::fromArray($items)),
-            Tags::T_STRUCT => $this->buildStruct($value),
             Tags::T_DATE => $this->buildDate($value),
             Tags::T_TIME => $this->buildTime($value),
             Tags::T_DATETIME_OFFSET => $this->buildDatetimeOffset($value),
@@ -462,12 +471,62 @@ final class Decoder
      * `materializeStruct()` -- falling back to an opaque `DXNStruct`
      * when it doesn't.
      */
-    private function buildStruct(mixed $value): mixed
+    /**
+     * A struct's payload, `[type-name, field..., extras?]`, read item by
+     * item so its last item may be its extra fields: a tag-215 map
+     * (DXN.md §2.3), legal nowhere else -- anywhere else it is an
+     * unrecognized tag. Read in order, so the extras keep the order they
+     * were written in.
+     */
+    private function decodeStruct(): mixed
     {
-        if (!$value instanceof DXNList || $value->items === []) {
+        if ($this->pos >= strlen($this->buf) || (ord($this->buf[$this->pos]) >> 5) !== 4) {
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
         }
-        $items = $value->items;
+        $count = (int) $this->readHead()[1];
+        if ($count === 0) {
+            throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
+        }
+        $items = $this->decodeNItems($count - 1);
+        $extra = [];
+        if ($count > 1 && $this->atTag(Tags::T_EXTRA)) {
+            $this->readHead();
+            if ($this->pos >= strlen($this->buf) || (ord($this->buf[$this->pos]) >> 5) !== 5) {
+                throw new BinaryError('extra fields (tag ' . Tags::T_EXTRA . ') require a map payload', $this->pos);
+            }
+            $pairs = $this->decodeMapPairsRaw((int) $this->readHead()[1]);
+            MapKey::checkPairs($pairs);
+            $extra = array_map(static fn (array $pair): array => [DXNStruct::extraKey($pair[0]), $pair[1]], $pairs);
+        } else {
+            $items[] = $this->decodeItem();
+        }
+        return $this->buildStruct($items, $extra);
+    }
+
+    /**
+     * Whether the next item is a tag of `$number`, without consuming it.
+     *
+     * @phpstan-impure
+     */
+    private function atTag(int $number): bool
+    {
+        $start = $this->pos;
+        try {
+            if ($this->pos >= strlen($this->buf) || (ord($this->buf[$this->pos]) >> 5) !== 6) {
+                return false;
+            }
+            return (int) $this->readHead()[1] === $number;
+        } finally {
+            $this->pos = $start;
+        }
+    }
+
+    /**
+     * @param list<mixed> $items the type name, then the fields.
+     * @param list<array{0: mixed, 1: mixed}> $extra
+     */
+    private function buildStruct(array $items, array $extra): mixed
+    {
         $typeName = array_shift($items);
         if (!is_string($typeName)) {
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
@@ -482,7 +541,7 @@ final class Decoder
             );
         }
         [$name, $version] = $parsed;
-        $struct = DXNStruct::positional($name, $items, $version);
+        $struct = DXNStruct::positional($name, $items, $version, $extra);
 
         if ($this->registry === null) {
             return $struct;

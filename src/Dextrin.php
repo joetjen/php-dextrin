@@ -39,10 +39,10 @@ final class Dextrin
      * entry falls back to an opaque `DXNStruct`/`DXNCustomTag`, never a
      * hard failure.
      */
-    public static function decode(string $text, ?Registry $registry = null): mixed
+    public static function decode(string $text, ?Registry $registry = null, ?bool $strict = null): mixed
     {
         try {
-            return Parser::parse($text, $registry);
+            return Parser::parse($text, self::strictly($registry, $strict));
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'parse');
         }
@@ -96,10 +96,10 @@ final class Dextrin
      * {@see DXNError} on malformed input, including a missing/invalid
      * envelope (`DX` + version byte) or a schema violation.
      */
-    public static function decodeBinary(string $bytes, ?Registry $registry = null): mixed
+    public static function decodeBinary(string $bytes, ?Registry $registry = null, ?bool $strict = null): mixed
     {
         try {
-            return Decoder::decode($bytes, $registry);
+            return Decoder::decode($bytes, self::strictly($registry, $strict));
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'binary');
         }
@@ -154,5 +154,14 @@ final class Dextrin
             $result = Schema::validateEncode($result, $registry, $schema, $coerce);
         }
         return $result;
+    }
+
+    /**
+     * `$registry` marked strict when `$strict` is given -- a strict decode
+     * refuses extra fields on schema-backed structs (DXN.md §4.7).
+     */
+    private static function strictly(?Registry $registry, ?bool $strict): ?Registry
+    {
+        return $strict === null ? $registry : ($registry ?? new Registry())->putStrict($strict);
     }
 }

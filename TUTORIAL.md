@@ -321,6 +321,27 @@ the registry you need through a chain of these calls (as above) or by
 reassigning, not by expecting an earlier reference to change under
 you.
 
+
+### Fields a schema does not declare
+
+A struct guarantees the fields its schema declares and may carry more.
+A field the schema does not know is kept as an **extra field**, in the
+struct's `extra` list, and written back with it — so a newer producer's
+fields pass through an older reader instead of being lost:
+
+```php
+Dextrin::decode('%Point{x: 1, y: 2, label: "origin"}', $registry)->extra;
+// => [['label', 'origin']]
+```
+
+A positional struct writes its extras as entries after its items,
+`%Point[1 2 label: "origin"]`, and `.dxnb` as one trailing map. An extra
+never shadows a declared field — `%Point{x: 1, "x" => 2}` is refused —
+and a materializer receives the extras with the declared fields. Pass
+`strict: true` to `Dextrin::decode()` to refuse every extra field
+instead (`schema/undeclared-field`): right for a config file written by
+hand, where an unknown field is a typo.
+
 ## 8. Named types and the standard library
 
 Any `.dxns` entry that *isn't* a `%schema{}` defines a reusable named
