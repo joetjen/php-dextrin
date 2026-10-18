@@ -41,15 +41,12 @@ final class Schema
 
     /**
      * Compiles a decoded `.dxns` document into `$baseRegistry` -- a
-     * struct schema for each `%schema{}` entry, and a reusable named
-     * type for every other entry. `$predicates` resolves any
-     * `refine-fn:` names used in the document.
-     *
-     * @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates
+     * struct schema for each `%schema(N){}` entry, and a reusable named
+     * type for every other entry.
      */
-    public static function compile(mixed $schemaDoc, Registry $baseRegistry, array $predicates = []): Registry
+    public static function compile(mixed $schemaDoc, Registry $baseRegistry): Registry
     {
-        return Compiler::compile($schemaDoc, $baseRegistry, $predicates);
+        return Compiler::compile($schemaDoc, $baseRegistry);
     }
 
     /**

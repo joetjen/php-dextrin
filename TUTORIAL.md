@@ -208,9 +208,7 @@ use JOetjen\Dextrin\Schema;
 
 $schemaDoc = Dextrin::decode(<<<'DXN'
     %{
-      Point: %schema{
-        fields: @ordered %{ x: :integer, y: :integer }
-      }
+      Point: %schema{ x: :integer, y: :integer }
     }
     DXN);
 
@@ -220,8 +218,8 @@ Dextrin::decode('%Point{x: 1, y: 2}', $registry);
 // => ['x' => 1, 'y' => 2]
 ```
 
-Field enforcement (required/optional, closed/forbidden fields,
-refinements) happens automatically at decode time, in both `decode()`
+Field enforcement (required/optional fields, refinements) happens
+automatically at decode time, in both `decode()`
 and `decodeBinary()` — a violation comes back as an ordinary thrown
 `DXNError`, indistinguishable by shape from a syntax error:
 
@@ -301,7 +299,7 @@ type instead — purely data, composing the fixed type_expr vocabulary:
 $doc = Dextrin::decode(<<<'DXN'
     %{
       PositiveInt: {:refine :integer %{min: 1}}
-      Point: %schema{ fields: @ordered %{ x: PositiveInt, y: :integer } }
+      Point: %schema{ x: PositiveInt, y: :integer }
     }
     DXN);
 ```
@@ -340,7 +338,7 @@ final class LibPointProvider implements DXNSchemaMaterializingProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :integer, y: :integer } } }';
+        return '%{ Point: %schema{ x: :integer, y: :integer } }';
     }
 
     public function dxnSchemaName(): string { return 'Point'; }
@@ -376,11 +374,9 @@ other schema with no materializer produces.
 $schemaSource = <<<'DXN'
     %{
       Server: %schema{
-        fields: @ordered %{
-          host:  NonEmptyString
-          port:  {:refine :integer %{min: 1, max: 65535}}
-          tags?: {:list-of :symbol}
-        }
+        host:  NonEmptyString
+        port:  {:refine :integer %{min: 1, max: 65535}}
+        tags?: {:list-of :symbol}
       }
     }
     DXN;

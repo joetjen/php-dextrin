@@ -131,15 +131,20 @@ $registry
 ## Registry: schemas
 
 ```php
-$registry = Schema::compile(mixed $schemaDoc, Registry $baseRegistry, array $predicates = []);
+$registry = Schema::compile(mixed $schemaDoc, Registry $baseRegistry);
 
 $registry
+    ->addStructSchema(string $name, Compiled $compiled)      // a new version; throws schema/duplicate-version if loaded
+    ->replaceStructSchema(string $name, Compiled $compiled)  // hot-swap a loaded version; throws schema/not-loaded otherwise
     ->putStructMaterializer(string $name, \Closure $materializer)
     ->putStructModule(string $name, string $class)          // for {form: 'reference', name} checks on hand-built instances
     ->putResolver(\Closure $resolver);   // lazy/on-demand schema loading, (string $name): ?Compiled
 ```
 
-`FileResolver::forPaths(array $paths, array $predicates = [])` builds
+`$registry->fetchStructSchema($name)` answers the latest version, and
+`fetchStructSchema($name, $version)` exactly that one.
+
+`FileResolver::forPaths(array $paths)` builds
 a ready-made resolver for `Namespace/Name -> paths/Namespace.dxns`.
 
 ## Registry: third-party classes (`DXNSchemaProvider`)
@@ -182,7 +187,7 @@ Address                        bare symbol -- a struct name or a named type
 {:all-of A B}                  intersection -- matches all
 {:nilable T}                   sugar for {:one-of :nil T}
 {:refine T %{constraints}}     base type + refine constraints (below)
-%schema{fields: @ordered %{}}  struct/record shape
+%schema(N){field: T, ...}      struct/record shape, version N (1 without a header)
 ```
 
 ## `refine` constraints
@@ -193,20 +198,19 @@ min-length / max-length / pattern                          -- string
 min-count / max-count                                      -- list/set/tuple/sorted-set
 ```
 
-## Struct schema options
+## Struct schemas
 
 ```
-%schema{
-  closed:    true              # no field outside `fields` may be present at all
-  forbidden: [legacy_field]    # explicit deny-list, reported by name
-  refine-fn: ns/predicate-name # cross-field/whole-value check, resolved from $predicates
-  fields: @ordered %{
-    required_field:  :integer
-    optional_field?: :string             # trailing `?` = optional
-    with_default:    %field{type: :integer, default: 0, description: "..."}
-  }
+%schema(2){
+  required_field:  :integer
+  optional_field?: :string             # trailing `?` = optional
+  with_default:    %field{type: :integer, default: 0, description: "..."}
 }
 ```
+
+The body is the fields, in order -- that order is the positional order.
+`(2)` is the version; a schema without one is version 1. A struct can
+say which version it was written with: `%Name(2){...}`.
 
 ## Standard named types (`Std`)
 

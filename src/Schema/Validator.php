@@ -17,7 +17,7 @@ use JOetjen\Dextrin\Value\DXNValueInterface;
 
 /**
  * Checks a value's fields against a {@see Compiled} schema
- * (required/closed/forbidden/refine) -- shared by decode ({@see
+ * (required fields and their types) -- shared by decode ({@see
  * self::materialize()}, which also produces a materialized result) and
  * encode-time validation ({@see self::validateForEncode()}/{@see
  * self::validateTreeForEncode()}). Both directions reuse the exact
@@ -60,10 +60,7 @@ final class Validator
     public static function materialize(Compiled $compiled, DXNStruct $struct, ?\Closure $materializer, Registry $registry): Validated
     {
         $given = self::toNameMap($compiled, $struct);
-        self::checkForbidden($compiled, $given);
-        self::checkClosed($compiled, $given);
         $resolved = self::resolveFields($compiled, $given, $registry, false);
-        self::runRefineFn($compiled, $resolved);
         $result = $materializer !== null ? $materializer($resolved) : self::markFieldNameKeys($resolved);
         return new Validated($compiled->name ?? '', $result);
     }
@@ -116,30 +113,6 @@ final class Validator
         return $result;
     }
 
-    /** @param array<string, mixed> $given */
-    private static function checkForbidden(Compiled $compiled, array $given): void
-    {
-        foreach ($compiled->forbidden as $name) {
-            if (array_key_exists($name, $given)) {
-                throw new SchemaValidationError("field \"{$name}\" is forbidden");
-            }
-        }
-    }
-
-    /** @param array<string, mixed> $given */
-    private static function checkClosed(Compiled $compiled, array $given): void
-    {
-        if (!$compiled->closed) {
-            return;
-        }
-        $allowed = array_flip($compiled->fieldNames());
-        foreach (array_keys($given) as $name) {
-            if (!isset($allowed[$name])) {
-                throw new SchemaValidationError("unknown field \"{$name}\" (schema is closed)");
-            }
-        }
-    }
-
     /**
      * @param array<string, mixed> $given
      * @return array<string, mixed>
@@ -189,18 +162,6 @@ final class Validator
         throw new SchemaValidationError("field \"{$name}\" does not match its declared type");
     }
 
-    /** @param array<string, mixed> $resolved */
-    private static function runRefineFn(Compiled $compiled, array $resolved): void
-    {
-        if ($compiled->refineFn === null) {
-            return;
-        }
-        $result = ($compiled->refineFn)($resolved);
-        if ($result !== true) {
-            throw new SchemaValidationError(is_string($result) ? $result : 'refine-fn rejected this value');
-        }
-    }
-
     // ---- encode-time validation -----------------------------------------------
     //
     // The mirror image of materialize(), for data on its way *out*:
@@ -246,10 +207,7 @@ final class Validator
     {
         $given = self::toNameMapForEncode($compiled, $value);
         $wrappedGiven = self::wrapGiven($given, $registry, $coerce);
-        self::checkForbidden($compiled, $wrappedGiven);
-        self::checkClosed($compiled, $wrappedGiven);
         $resolved = self::resolveFields($compiled, $wrappedGiven, $registry, $coerce);
-        self::runRefineFn($compiled, $resolved);
         return new Validated($compiled->name ?? '', self::rebuildChecked($value, $compiled, $resolved));
     }
 
@@ -286,12 +244,12 @@ final class Validator
     {
         if ($value instanceof DXNStruct) {
             if ($value->isKeyed()) {
-                return DXNStruct::keyed($value->name, array_map(
+                return $value->withPairs(array_map(
                     static fn (array $p): array => [$p[0], $resolved[$p[0]] ?? null],
                     $value->pairs(),
                 ));
             }
-            return DXNStruct::positional($value->name, array_map(
+            return $value->withValues(array_map(
                 static fn (string $name): mixed => $resolved[$name] ?? null,
                 $compiled->fieldNames(),
             ));
@@ -436,11 +394,11 @@ final class Validator
         }
         if ($value instanceof DXNStruct) {
             return $value->isKeyed()
-                ? DXNStruct::keyed($value->name, array_map(
+                ? $value->withPairs(array_map(
                     static fn (array $p): array => [$p[0], self::wrapAndCheck($p[1], $registry, $coerce)],
                     $value->pairs(),
                 ))
-                : DXNStruct::positional($value->name, array_map(
+                : $value->withValues(array_map(
                     static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce),
                     $value->values(),
                 ));

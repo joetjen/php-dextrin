@@ -110,9 +110,7 @@ use JOetjen\Dextrin\Schema;
 
 $schemaDoc = Dextrin::decode(<<<'DXN'
     %{
-      Point: %schema{
-        fields: @ordered %{ x: :float, y: :float }
-      }
+      Point: %schema{ x: :float, y: :float }
     }
     DXN);
 $registry = Schema::compile($schemaDoc, new Registry());

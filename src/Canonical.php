@@ -173,9 +173,9 @@ final class Canonical
                     ? "{$name}: " . self::text($field)
                     : self::quoted($name) . ' => ' . self::text($field);
             }
-            return "%{$value->name}{" . implode(' ', $written) . '}';
+            return DXNStruct::head($value->name, $value->version) . '{' . implode(' ', $written) . '}';
         }
-        return "%{$value->name}[" . self::items($value->values()) . ']';
+        return DXNStruct::head($value->name, $value->version) . '[' . self::items($value->values()) . ']';
     }
 
     private static function keyword(string $name): string

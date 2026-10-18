@@ -280,7 +280,10 @@ final class Parser
         return $items;
     }
 
-    /** `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct). */
+    /**
+     * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct), the struct
+     * optionally carrying the version it was written with: `%Name(3){...}`.
+     */
     private function parsePercent(): mixed
     {
         $this->next('PERCENT');
@@ -288,15 +291,36 @@ final class Parser
             return $this->buildMap($this->parseEntries());
         }
         $name = $this->next('IDENTIFIER')->value;
+        $version = $this->parseStructVersion();
         if ($this->at('LBRACE')) {
             $pairs = array_map(
                 fn (array $pair) => [$this->structFieldName($pair[0]), $pair[1]],
                 $this->parseEntries(),
             );
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs));
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version));
         }
         $values = $this->parseBracketedItems('LBRACKET', 'RBRACKET');
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values));
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version));
+    }
+
+    /**
+     * The `(3)` of `%Name(3){...}` -- the schema version a struct was
+     * written with (DXN.md §4.8), a positive integer -- or `null` when
+     * there is none.
+     */
+    private function parseStructVersion(): ?int
+    {
+        if (!$this->at('LPAREN')) {
+            return null;
+        }
+        $this->next('LPAREN');
+        $tok = $this->next('INTEGER');
+        $version = filter_var($tok->value, FILTER_VALIDATE_INT);
+        if ($version === false || $version <= 0) {
+            throw new ParseError("a struct version is a positive integer, got {$tok->value}", $tok->start);
+        }
+        $this->next('RPAREN');
+        return $version;
     }
 
     private function materializeStruct(string $name, DXNStruct $struct): mixed

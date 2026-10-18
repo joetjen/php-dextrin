@@ -70,8 +70,8 @@ final class Formatter
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
             is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => "%{$value->name}" . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => "%{$value->name}" . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => DXNStruct::head($value->name, $value->version) . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => DXNStruct::head($value->name, $value->version) . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
             // Every scalar, every empty collection, and any
             // struct-shaped extended type Printer already handles
             // directly (Regex, Date, Decimal, DXNUuid, ...) needs no

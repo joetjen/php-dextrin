@@ -254,10 +254,10 @@ final class Printer
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
-            return "%{$struct->name}{" . implode(',', $parts) . '}';
+            return DXNStruct::head($struct->name, $struct->version) . '{' . implode(',', $parts) . '}';
         }
         $items = implode(',', array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values()));
-        return "%{$struct->name}[{$items}]";
+        return DXNStruct::head($struct->name, $struct->version) . "[{$items}]";
     }
 
     /**

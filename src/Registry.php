@@ -45,7 +45,7 @@ final class Registry
     /** @var array<class-string, array{0: string, 1: \Closure(object): mixed}> class -> [tag name, encoder]. */
     private array $tagEncoders = [];
 
-    /** @var array<string, Compiled> struct name -> compiled schema. */
+    /** @var array<string, array<int, Compiled>> struct name -> version -> compiled schema. */
     private array $structs = [];
 
     /** @var array<string, \Closure(array<string, mixed>): mixed> struct name -> materializer. */
@@ -107,11 +107,63 @@ final class Registry
         return $this->tagEncoders[$class] ?? null;
     }
 
+    /**
+     * `$compiled` as version `$compiled->version` of the schema `$name`,
+     * whether or not that version was loaded already -- the unchecked
+     * setter a resolver's answer goes through. Loading a document's
+     * schemas goes through {@see addStructSchema()}, a hot swap through
+     * {@see replaceStructSchema()}.
+     */
     public function putStructSchema(string $name, Compiled $compiled): self
     {
         $copy = $this->clone();
-        $copy->structs[$name] = $compiled;
+        $copy->structs[$name][$compiled->version] = $compiled;
         return $copy;
+    }
+
+    /**
+     * Loads `$compiled` as a new version of the schema `$name`. A version
+     * that is already loaded is refused as `schema/duplicate-version`
+     * (DXN.md §4.8): two documents both claiming to be `User` v3 is a
+     * mistake, not an update.
+     *
+     * @throws DXNError
+     */
+    public function addStructSchema(string $name, Compiled $compiled): self
+    {
+        if ($this->isLoaded($name, $compiled->version)) {
+            throw new DXNError(
+                "schema \"{$name}\" version {$compiled->version} is already loaded",
+                stage: 'schema',
+                category: 'schema/duplicate-version',
+            );
+        }
+        return $this->putStructSchema($name, $compiled);
+    }
+
+    /**
+     * Replaces version `$compiled->version` of the schema `$name` -- the
+     * hot swap of a running system. **Replace only replaces**: a version
+     * that is not loaded is refused as `schema/not-loaded`, so a typo in
+     * a hot swap never quietly adds a version instead.
+     *
+     * @throws DXNError
+     */
+    public function replaceStructSchema(string $name, Compiled $compiled): self
+    {
+        if (!$this->isLoaded($name, $compiled->version)) {
+            throw new DXNError(
+                "schema \"{$name}\" version {$compiled->version} is not loaded, so there is nothing to replace",
+                stage: 'schema',
+                category: 'schema/not-loaded',
+            );
+        }
+        return $this->putStructSchema($name, $compiled->withName($name));
+    }
+
+    private function isLoaded(string $name, int $version): bool
+    {
+        return isset($this->structs[$name][$version]);
     }
 
     /** @param \Closure(array<string, mixed>): mixed $materializer */
@@ -131,19 +183,24 @@ final class Registry
     }
 
     /**
-     * Looks up a compiled schema by struct name, consulting the lazy
-     * resolver (if any) on a miss and caching the result. Whether
+     * Looks up a compiled schema by struct name: the latest version, or
+     * with `$version` exactly that one. Only the latest consults the
+     * lazy resolver (if any) on a miss, caching the result. Whether
      * schemas are all compiled up front or resolved on demand (a
      * resolver reading a file, calling a schema service, ...) is
-     * entirely the caller's choice -- this is what makes both paths
-     * look identical to everything else, which never needs to know
-     * which one is in play.
+     * entirely the caller's choice -- this is what makes both paths look
+     * identical to everything else. **A named version never falls back
+     * to another**: a struct is only ever read with the schema it was
+     * written against.
      */
-    public function fetchStructSchema(string $name): ?FetchedSchema
+    public function fetchStructSchema(string $name, ?int $version = null): ?FetchedSchema
     {
-        $cached = $this->structs[$name] ?? null;
-        if ($cached !== null) {
-            return new FetchedSchema($cached, $this);
+        $versions = $this->structs[$name] ?? [];
+        if ($version !== null) {
+            return isset($versions[$version]) ? new FetchedSchema($versions[$version], $this) : null;
+        }
+        if ($versions !== []) {
+            return new FetchedSchema($versions[max(array_keys($versions))], $this);
         }
         if ($this->resolver === null) {
             return null;

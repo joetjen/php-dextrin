@@ -15,6 +15,10 @@ namespace JOetjen\Dextrin\Value;
  * also accepted directly (see {@see Equality::kindOf()}) without
  * needing to be built into a `DXNStruct` by hand first.
  *
+ * `version` is the schema version the struct was written with --
+ * `%Name(3){...}`, DXN.md §4.8 -- or `null` when it was written
+ * without one.
+ *
  * @phpstan-type Pair array{0: string, 1: mixed}
  */
 final class DXNStruct implements DXNValueInterface
@@ -23,6 +27,7 @@ final class DXNStruct implements DXNValueInterface
 
     public readonly string $name;
     public readonly string $kind;
+    public readonly ?int $version;
     /** @var list<Pair> */
     private readonly array $pairs;
     /** @var list<mixed> */
@@ -32,24 +37,57 @@ final class DXNStruct implements DXNValueInterface
      * @param list<Pair> $pairs
      * @param list<mixed> $values
      */
-    private function __construct(string $name, string $kind, array $pairs, array $values)
+    private function __construct(string $name, string $kind, array $pairs, array $values, ?int $version)
     {
         $this->name = $name;
         $this->kind = $kind;
         $this->pairs = $pairs;
         $this->values = $values;
+        $this->version = $version;
     }
 
     /** @param array<Pair> $pairs */
-    public static function keyed(string $name, array $pairs): self
+    public static function keyed(string $name, array $pairs, ?int $version = null): self
     {
-        return new self($name, 'keyed', array_values($pairs), []);
+        return new self($name, 'keyed', array_values($pairs), [], $version);
     }
 
     /** @param array<mixed> $values */
-    public static function positional(string $name, array $values): self
+    public static function positional(string $name, array $values, ?int $version = null): self
     {
-        return new self($name, 'positional', [], array_values($values));
+        return new self($name, 'positional', [], array_values($values), $version);
+    }
+
+    /**
+     * How a struct literal opens: `%Name`, or `%Name(3)` when it carries
+     * a version. Shared by every writer, so they agree.
+     */
+    public static function head(string $name, ?int $version = null): string
+    {
+        return $version === null ? "%{$name}" : "%{$name}({$version})";
+    }
+
+    /**
+     * This struct holding `$pairs` instead, and otherwise unchanged --
+     * what every walk over a keyed struct's fields goes through, so a
+     * walk never rebuilds a struct from its name and loses its version.
+     *
+     * @param array<Pair> $pairs
+     */
+    public function withPairs(array $pairs): self
+    {
+        return self::keyed($this->name, $pairs, $this->version);
+    }
+
+    /**
+     * This struct holding `$values` instead, and otherwise unchanged --
+     * the positional counterpart of {@see withPairs()}.
+     *
+     * @param array<mixed> $values
+     */
+    public function withValues(array $values): self
+    {
+        return self::positional($this->name, $values, $this->version);
     }
 
     public function isKeyed(): bool
@@ -87,7 +125,12 @@ final class DXNStruct implements DXNValueInterface
 
     public function equals(mixed $other): bool
     {
-        if (!$other instanceof self || $this->name !== $other->name || $this->kind !== $other->kind) {
+        if (
+            !$other instanceof self
+            || $this->name !== $other->name
+            || $this->kind !== $other->kind
+            || $this->version !== $other->version
+        ) {
             return false;
         }
         if ($this->isPositional()) {

@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its keys compared by canonical form (DXN.md §1.6). `MapKey` holds the
   map-key rule.
 
+- **Versioned schemas** (DXN.md §4.8). `%schema(3){...}` is version 3
+  of its name, and one with no header is version 1. A registry keeps every
+  loaded version side by side: `addStructSchema()` refuses a version that
+  is already loaded (`schema/duplicate-version`), `replaceStructSchema()`
+  hot-swaps one that is loaded and refuses one that is not
+  (`schema/not-loaded`), and `fetchStructSchema($name)` answers the
+  latest, `fetchStructSchema($name, $version)` exactly that one.
+- **A struct literal carries its version**: `%User(3){...}` and
+  `%User(3)[...]` decode to a `DXNStruct` whose `version` is 3, and are
+  written back with it. A version of zero or less is refused.
+- `DXNStruct::head()`, `DXNStruct::withPairs()` and `withValues()`.
+
 ### Changed
 
 - **A map key must be one of the eight types of DXN.md §1.6** (string,
@@ -36,12 +48,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   empty map, or one keyed `0..n-1`. These used to fail to decode, collide
   as an error, or -- for `"5"` and the empty map -- come back as a
   different value. A map of ordinary keys is still a native array.
+- **A schema's body is its fields, in order**:
+  `User: %schema(3){name: :string, email: :string, id?: :uuid}`. The
+  `fields: @ordered %{...}` wrapper is gone, and so are `closed:`,
+  `forbidden:` and `refine-fn:`; `Schema::compile()`,
+  `Compiler::compile()` and `FileResolver::forPaths()` lose their
+  `$predicates` argument. `SchemaCompileError` carries the category
+  `schema/compile`.
+- Two structs are equal only when their versions are too.
 
 ### Fixed
 
 - A float, boolean or `nil` map key is refused instead of being silently
   turned into another key: `1.5` became `1`, `true` became `1` and `nil`
   became `:""`.
+- A walk over a struct's fields -- stripping the schema marker, the
+  check on the way out, and the binary decoder's own copying -- rebuilt
+  the struct from its name and fields; it now changes only the fields,
+  so nothing else the struct carries is lost.
 
 ## [0.1.0] - 2026-08-14
 

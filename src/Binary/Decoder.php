@@ -596,11 +596,11 @@ final class Decoder
                 $value->pairs,
             )),
             $value instanceof DXNStruct => $value->isKeyed()
-                ? DXNStruct::keyed($value->name, array_map(
+                ? $value->withPairs(array_map(
                     static fn (array $p): array => [$p[0], self::deepClone($p[1])],
                     $value->pairs(),
                 ))
-                : DXNStruct::positional($value->name, array_map(self::deepClone(...), $value->values())),
+                : $value->withValues(array_map(self::deepClone(...), $value->values())),
             $value instanceof DXNCustomTag => new DXNCustomTag($value->name, self::deepClone($value->value)),
             default => $value,
         };

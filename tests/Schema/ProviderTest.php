@@ -31,7 +31,7 @@ final class ProviderTestPointProvider implements DXNSchemaMaterializingProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }';
+        return '%{ Point: %schema{ x: :float, y: :float } }';
     }
 
     public function dxnSchemaName(): string
@@ -54,7 +54,7 @@ final class ProviderTestNonMaterializingProvider implements DXNSchemaProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }';
+        return '%{ Point: %schema{ x: :float, y: :float } }';
     }
 
     public function dxnSchemaName(): string
@@ -72,7 +72,7 @@ final class ProviderTestMismatchedNameProvider implements DXNSchemaProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float } } }';
+        return '%{ Point: %schema{ x: :float } }';
     }
 
     public function dxnSchemaName(): string

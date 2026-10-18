@@ -19,11 +19,9 @@ final class ValidatorTest extends TestCase
     private const POINT_SCHEMA = <<<'DXN'
         %{
           Point: %schema{
-            fields: @ordered %{
-              x: :float
-              y: :float
-              label?: %field{type: :string, default: "unlabeled"}
-            }
+            x: :float
+            y: :float
+            label?: %field{type: :string, default: "unlabeled"}
           }
         }
         DXN;
@@ -92,56 +90,6 @@ final class ValidatorTest extends TestCase
         Dextrin::decode('%Point[1.0]', $this->pointRegistry());
     }
 
-    public function testClosedSchemaRejectsUnknownFields(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Strict: %schema{
-                closed: true
-                fields: @ordered %{ name: :string }
-              }
-            }
-            DXN;
-        $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
-        $this->expectException(DXNError::class);
-        Dextrin::decode('%Strict{name: "a", extra: 1}', $registry);
-    }
-
-    public function testForbiddenFieldIsRejectedEvenWhenNotClosed(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Strict: %schema{
-                forbidden: [password]
-                fields: @ordered %{ name: :string }
-              }
-            }
-            DXN;
-        $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
-        $this->expectException(DXNError::class);
-        Dextrin::decode('%Strict{name: "a", password: "hunter2"}', $registry);
-    }
-
-    public function testRefineFnRejectionSurfacesItsOwnMessage(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Range: %schema{
-                refine-fn: valid-range
-                fields: @ordered %{ low: :integer, high: :integer }
-              }
-            }
-            DXN;
-        $predicate = static fn (array $r): bool|string => $r['low'] <= $r['high'] ? true : 'low must not exceed high';
-        $registry = Compiler::compile(Dextrin::decode($doc), new Registry(), ['valid-range' => $predicate]);
-        try {
-            Dextrin::decode('%Range{low: 5, high: 1}', $registry);
-            self::fail('expected a schema violation');
-        } catch (DXNError $e) {
-            self::assertStringContainsString('low must not exceed high', $e->getMessage());
-        }
-    }
-
     public function testMaterializerProducesTheCustomShapeInsteadOfThePlainFieldMap(): void
     {
         $registry = $this->pointRegistry()->putStructMaterializer(
@@ -205,7 +153,7 @@ final class ValidatorTest extends TestCase
     {
         $doc = <<<'DXN'
             %{
-              Fraction: %schema{ fields: @ordered %{ value: :rational } }
+              Fraction: %schema{ value: :rational }
             }
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
@@ -217,7 +165,7 @@ final class ValidatorTest extends TestCase
     {
         $doc = <<<'DXN'
             %{
-              Fraction: %schema{ fields: @ordered %{ value: :rational } }
+              Fraction: %schema{ value: :rational }
             }
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
@@ -236,7 +184,7 @@ final class ValidatorTest extends TestCase
     {
         $doc = <<<'DXN'
             %{
-              Fraction: %schema{ fields: @ordered %{ value: :rational } }
+              Fraction: %schema{ value: :rational }
             }
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
@@ -258,7 +206,7 @@ final class ValidatorTest extends TestCase
     {
         $doc = <<<'DXN'
             %{
-              ReadonlyPoint: %schema{ fields: @ordered %{ x: :float, y: :float } }
+              ReadonlyPoint: %schema{ x: :float, y: :float }
             }
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry())

@@ -20,8 +20,8 @@ final class FileResolverTest extends TestCase
             $this->dir . '/Geometry.dxns',
             <<<'DXN'
                 %{
-                  Point: %schema{ fields: @ordered %{ x: :float, y: :float } }
-                  Circle: %schema{ fields: @ordered %{ radius: :float } }
+                  Point: %schema{ x: :float, y: :float }
+                  Circle: %schema{ radius: :float }
                 }
                 DXN,
         );
@@ -45,7 +45,7 @@ final class FileResolverTest extends TestCase
 
     public function testABareNameResolvesToTheFileOfTheSameName(): void
     {
-        file_put_contents($this->dir . '/Standalone.dxns', '%{ Standalone: %schema{ fields: @ordered %{ n: :integer } } }');
+        file_put_contents($this->dir . '/Standalone.dxns', '%{ Standalone: %schema{ n: :integer } }');
         $resolver = FileResolver::forPaths([$this->dir]);
         $compiled = $resolver('Standalone');
         self::assertNotNull($compiled);
@@ -73,7 +73,7 @@ final class FileResolverTest extends TestCase
             // second defines Point -- forPaths() must keep trying
             // remaining paths past a same-named-file-but-wrong-entry
             // miss, not stop at the first file it finds.
-            file_put_contents($otherDir . '/Geometry.dxns', '%{ Square: %schema{ fields: @ordered %{ side: :float } } }');
+            file_put_contents($otherDir . '/Geometry.dxns', '%{ Square: %schema{ side: :float } }');
             $resolver = FileResolver::forPaths([$otherDir, $this->dir]);
             self::assertNotNull($resolver('Geometry/Square'), 'defined in the first path');
             self::assertNotNull($resolver('Geometry/Point'), 'only defined in the second path');
@@ -81,18 +81,6 @@ final class FileResolverTest extends TestCase
             unlink($otherDir . '/Geometry.dxns');
             rmdir($otherDir);
         }
-    }
-
-    public function testPredicatesAreForwardedForRefineFnResolution(): void
-    {
-        file_put_contents(
-            $this->dir . '/WithPredicate.dxns',
-            '%{ Checked: %schema{ refine-fn: always-ok, fields: @ordered %{ n: :integer } } }',
-        );
-        $resolver = FileResolver::forPaths([$this->dir], ['always-ok' => static fn (array $unusedResolved): bool => true]);
-        $compiled = $resolver('WithPredicate/Checked');
-        self::assertNotNull($compiled);
-        self::assertNotNull($compiled->refineFn);
     }
 
     public function testCompiledSchemasResolvedThisWayWorkWithRegistryPutResolver(): void
