@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
-use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNList;
@@ -47,48 +46,27 @@ final class Validator
     }
 
     /**
-     * Validates and materializes `$struct`'s fields against `$compiled`,
-     * using `$materializer` if given. On success, the result is wrapped
-     * in a {@see Validated} (name: `$compiled->name`) -- internal
-     * bookkeeping so an *outer* schema's `{form: 'reference', name}`
-     * field can verify this value's origin even after materialization;
-     * callers that aren't another schema check must call {@see
-     * Validated::strip()} on the final result.
+     * `$struct`'s fields checked against `$compiled`: every declared
+     * field, in the schema's own order, as `[name, value]` pairs. A
+     * required field that is missing, or a value that does not match its
+     * declared type, is an error; an optional field that is missing takes
+     * its default, or stays absent when it has none -- DXN tells an absent
+     * field from one written `nil`. What is built from the result is
+     * {@see Reader}'s job. Never coerces.
      *
-     * @param (\Closure(array<string, mixed>): mixed)|null $materializer
+     * @return list<array{0: string, 1: mixed}>
      */
-    public static function materialize(Compiled $compiled, DXNStruct $struct, ?\Closure $materializer, Registry $registry): Validated
+    public static function resolve(Compiled $compiled, DXNStruct $struct, Registry $registry): array
     {
         $given = self::toNameMap($compiled, $struct);
-        $resolved = self::resolveFields($compiled, $given, $registry, false);
-        $result = $materializer !== null ? $materializer($resolved) : self::markFieldNameKeys($resolved);
-        return new Validated($compiled->name ?? '', $result);
-    }
-
-    /**
-     * The default (no custom materializer registered) decode result
-     * is a bare associative array keyed by field *name* -- this port's
-     * own representation of DXN `map`, same as Elixir's own default
-     * (`Atom.to_string/1` on each field name) and node-dextrin's. Each
-     * key is marked via {@see MapBuilder::markStringKey()} so it
-     * round-trips as a genuine `string` key on re-encode, not a
-     * `keyword` -- matching what a schema-free reader of the same
-     * document in either of those other two languages would decode a
-     * struct with no registered materializer into. Only this
-     * no-materializer path needs it: a *registered* materializer
-     * closure (like the one above) receives `$resolved` directly and
-     * expects ordinary, unmarked `$resolved['name']` access.
-     *
-     * @param array<string, mixed> $resolved
-     * @return array<int|string, mixed>
-     */
-    private static function markFieldNameKeys(array $resolved): array
-    {
-        $marked = [];
-        foreach ($resolved as $name => $value) {
-            $marked[MapBuilder::markStringKey($name)] = $value;
+        $pairs = [];
+        foreach ($compiled->fields as $field) {
+            $value = self::resolveField($field, $given, $registry, false);
+            if (!$value instanceof Absent) {
+                $pairs[] = [$field->name, $value];
+            }
         }
-        return $marked;
+        return $pairs;
     }
 
     /** @return array<string, mixed> */
@@ -121,12 +99,20 @@ final class Validator
     {
         $resolved = [];
         foreach ($compiled->fields as $field) {
-            $resolved[$field->name] = self::resolveField($field, $given, $registry, $coerce);
+            // An absent optional field still holds its position when a
+            // value goes out, as null.
+            $value = self::resolveField($field, $given, $registry, $coerce);
+            $resolved[$field->name] = $value instanceof Absent ? null : $value;
         }
         return $resolved;
     }
 
-    /** @param array<string, mixed> $given */
+    /**
+     * The checked value of `$field`, or {@see Absent} for an optional
+     * field that was not given and has no default.
+     *
+     * @param array<string, mixed> $given
+     */
     private static function resolveField(Field $field, array $given, Registry $registry, bool $coerce): mixed
     {
         if (array_key_exists($field->name, $given)) {
@@ -138,7 +124,7 @@ final class Validator
         if ($field->required) {
             throw new SchemaValidationError("missing required field \"{$field->name}\"");
         }
-        return null;
+        return Absent::instance();
     }
 
     private static function checkType(string $name, mixed $value, TypeExpr $type, Registry $registry, bool $coerce): mixed
@@ -164,7 +150,7 @@ final class Validator
 
     // ---- encode-time validation -----------------------------------------------
     //
-    // The mirror image of materialize(), for data on its way *out*:
+    // The mirror image of resolve(), for data on its way *out*:
     // `$value` here is ordinary PHP data about to be encoded -- a
     // DXNStruct (the one shape that round-trips to `%Name{...}` wire
     // syntax), a bare PHP array (this port's own `map`), or a real

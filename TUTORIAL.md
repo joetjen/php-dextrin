@@ -215,8 +215,12 @@ $schemaDoc = Dextrin::decode(<<<'DXN'
 $registry = Schema::compile($schemaDoc, new Registry());
 
 Dextrin::decode('%Point{x: 1, y: 2}', $registry);
-// => ['x' => 1, 'y' => 2]
+// => DXNStruct{name: 'Point', version: 1, pairs: [['x', 1], ['y', 2]]}
 ```
+
+With no materializer registered, a checked struct comes back as a
+generic `DXNStruct` at its schema's latest version, its fields in the
+schema's order — which encodes back to exactly the text it came from.
 
 Field enforcement (required/optional fields, refinements) happens
 automatically at decode time, in both `decode()`
@@ -260,7 +264,13 @@ final class Point
     public function __construct(public mixed $x, public mixed $y) {}
 }
 
-$registry2 = $registry->putStructMaterializer('Point', fn (array $f): Point => new Point($f['x'], $f['y']));
+// One materializer per schema, called for every decoded struct of it,
+// with the schema's name, the version the struct was written with and
+// its fields; what it answers is checked against the latest schema.
+$registry2 = $registry->putStructMaterializer(
+    'Point',
+    fn (string $name, int $version, array $f): Point => new Point($f['x'], $f['y']),
+);
 
 Dextrin::decode('%Point{x: 1, y: 2}', $registry2);
 // => Point{x: 1, y: 2}
@@ -366,9 +376,9 @@ final class LibPointProvider implements DXNSchemaMaterializingProvider
 
     public function dxnClass(): string { return LibPoint::class; }
 
-    public function dxnMaterialize(array $resolved): LibPoint
+    public function dxnMaterialize(string $name, int $version, array $fields): LibPoint
     {
-        return new LibPoint($resolved['x'], $resolved['y']);
+        return new LibPoint($fields['x'], $fields['y']);
     }
 }
 ```
@@ -386,7 +396,7 @@ Dextrin::encode(new LibPoint(1.0, 2.0), registry: $registry5);
 ```
 
 Implementing only `DXNSchemaProvider` (without `dxnMaterialize()`) is
-fine too — decoding then falls back to the same plain field array any
+fine too — decoding then falls back to the same generic `DXNStruct` any
 other schema with no materializer produces.
 
 ## 10. Putting it together: a small config loader
@@ -433,11 +443,11 @@ separately check for.
 
 ```php
 loadConfig('config.dxn');
-// => [
-//      'host' => 'localhost',
-//      'port' => 4000,
-//      'tags' => DXNList{items: [DXNSymbol{name: 'dev'}, DXNSymbol{name: 'local'}]},
-//    ]
+// => DXNStruct{name: 'Server', version: 1, pairs: [
+//      ['host', 'localhost'],
+//      ['port', 4000],
+//      ['tags', DXNList{items: [DXNSymbol{name: 'dev'}, DXNSymbol{name: 'local'}]}],
+//    ]}
 ```
 
 `tags` decodes as a `DXNList`, not a bare PHP `array` — DXN's `list`

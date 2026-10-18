@@ -12,6 +12,7 @@ use JOetjen\Dextrin\Schema\Compiler;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNStruct;
+use JOetjen\Dextrin\Tests\Support\DecodedFields;
 use PHPUnit\Framework\TestCase;
 
 final class ValidatorTest extends TestCase
@@ -35,18 +36,17 @@ final class ValidatorTest extends TestCase
 
     public function testDecodeMaterializesAKeyedStructFillingInTheDefault(): void
     {
-        // Field names come back as MapBuilder-marked *string* keys, not
-        // keywords -- matching Elixir's own default materializer
-        // (`Atom.to_string/1` on each field name) and node-dextrin's,
-        // so the result re-encodes as `string`-keyed, not `keyword`.
+        // With no materializer the struct comes back as a generic
+        // DXNStruct at the schema's latest version, a missing field
+        // filled from its default.
         $value = Dextrin::decode('%Point{x: 1.5, y: 2.5}', $this->pointRegistry());
-        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'unlabeled'], $value);
+        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'unlabeled'], DecodedFields::of($value));
     }
 
     public function testDecodeMaterializesAPositionalStructInFieldOrder(): void
     {
         $value = Dextrin::decode('%Point[1.5, 2.5, "origin"]', $this->pointRegistry());
-        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'origin'], $value);
+        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'origin'], DecodedFields::of($value));
     }
 
     public function testDecodedTopLevelStructIsNotLeftWrappedInValidated(): void
@@ -55,7 +55,7 @@ final class ValidatorTest extends TestCase
         // decoding -- regression coverage for exactly that.
         $value = Dextrin::decode('%Point{x: 1.0, y: 2.0}', $this->pointRegistry());
         self::assertNotInstanceOf(Validated::class, $value);
-        self::assertIsArray($value);
+        self::assertInstanceOf(DXNStruct::class, $value);
     }
 
     public function testBinaryDecodeAlsoMaterializesAndStrips(): void
@@ -63,7 +63,7 @@ final class ValidatorTest extends TestCase
         $registry = $this->pointRegistry();
         $binary = Dextrin::encodeBinary(DXNStruct::positional('Point', [1.5, 2.5, 'here']), validate: false);
         $value = Dextrin::decodeBinary($binary, $registry);
-        self::assertSame(["\0x" => 1.5, "\0y" => 2.5, "\0label" => 'here'], $value);
+        self::assertSame(['x' => 1.5, 'y' => 2.5, 'label' => 'here'], DecodedFields::of($value));
     }
 
     public function testUnregisteredStructNameStillDecodesToAnOpaqueDXNStruct(): void
@@ -90,14 +90,24 @@ final class ValidatorTest extends TestCase
         Dextrin::decode('%Point[1.0]', $this->pointRegistry());
     }
 
-    public function testMaterializerProducesTheCustomShapeInsteadOfThePlainFieldMap(): void
+    public function testMaterializerProducesTheCustomShapeInsteadOfTheGenericStruct(): void
     {
         $registry = $this->pointRegistry()->putStructMaterializer(
             'Point',
-            static fn (array $r): string => "({$r['x']}, {$r['y']})",
+            static fn (string $name, int $version, array $r): array => ['x' => $r['x'], 'y' => $r['y'], 'origin' => false],
         );
         $value = Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
-        self::assertSame('(1, 2)', $value);
+        self::assertSame(['x' => 1.0, 'y' => 2.0, 'origin' => false], $value);
+    }
+
+    public function testAMaterializerResultTheSchemaRejectsIsRefused(): void
+    {
+        $registry = $this->pointRegistry()->putStructMaterializer(
+            'Point',
+            static fn (string $name, int $version, array $r): string => "({$r['x']}, {$r['y']})",
+        );
+        $this->expectException(DXNError::class);
+        Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
     }
 
     // ---- encode-side (validateEncode / validateEncodeTree / coercion) --------

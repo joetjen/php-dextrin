@@ -27,6 +27,16 @@ use JOetjen\Dextrin\Value\DXNStruct;
  *   would be a guess.
  * - **Older and not loaded:** refused, `schema/unknown-version`, even
  *   with a materializer, which would receive no field names.
+ *
+ * **What is built from the fields:** the schema's materializer, when one
+ * is registered, is called for every struct of its schema, whatever the
+ * version, as `$materializer($name, $version, $fields)` -- `$version`
+ * being the one the fields were read with, `$fields` an array keyed by
+ * field name. Its result is checked against the latest schema; a throw,
+ * or a result the latest schema rejects, is `schema/materializer`.
+ * Without a materializer the latest version comes back as a
+ * {@see DXNStruct} at that version, its fields in the schema's order.
+ * Nested structs are built first.
  */
 final class Reader
 {
@@ -54,10 +64,10 @@ final class Reader
         $version = $struct->version;
 
         if ($version === null || $version === $latest->version) {
-            return self::materialized($current, $latest, $struct);
+            return self::materialized($current, $latest, $latest, $struct);
         }
         if ($version > $latest->version) {
-            return self::materialized($current, $latest, self::forward($latest, $struct));
+            return self::materialized($current, $latest, $latest, self::forward($latest, $struct));
         }
 
         $older = $current->fetchStructSchema($struct->name, $version);
@@ -76,7 +86,7 @@ final class Reader
                 category: 'schema/no-materializer',
             );
         }
-        return self::materialized($current, $older->compiled, $struct);
+        return self::materialized($current, $older->compiled, $latest, $struct);
     }
 
     /**
@@ -100,10 +110,59 @@ final class Reader
         return DXNStruct::keyed($struct->name, $pairs, $struct->version);
     }
 
-    /** @return array{0: mixed, 1: Registry} */
-    private static function materialized(Registry $registry, Compiled $compiled, DXNStruct $struct): array
+    /**
+     * The fields read with `$reading`, then built into a value: by the
+     * materializer when there is one, checked against `$latest`; as a
+     * generic struct at `$latest`'s version when there is none. Wrapped in
+     * {@see Validated} so an outer schema's reference can tell where it
+     * came from.
+     *
+     * @return array{0: mixed, 1: Registry}
+     */
+    private static function materialized(Registry $registry, Compiled $reading, Compiled $latest, DXNStruct $struct): array
     {
+        $pairs = Validator::resolve($reading, $struct, $registry);
         $materializer = $registry->fetchMaterializer($struct->name);
-        return [Validator::materialize($compiled, $struct, $materializer, $registry), $registry];
+        $value = $materializer === null
+            ? DXNStruct::keyed($struct->name, $pairs, $latest->version)
+            : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs);
+        return [new Validated($struct->name, $value), $registry];
+    }
+
+    /**
+     * @param \Closure(string, int, array<string, mixed>): mixed $materializer
+     * @param list<array{0: string, 1: mixed}> $pairs
+     */
+    private static function built(
+        Registry $registry,
+        \Closure $materializer,
+        string $name,
+        Compiled $reading,
+        Compiled $latest,
+        array $pairs,
+    ): mixed {
+        $fields = [];
+        foreach ($pairs as [$field, $value]) {
+            $fields[$field] = $value;
+        }
+        try {
+            $value = $materializer($name, $reading->version, $fields);
+        } catch (\Throwable $err) {
+            throw self::materializerError($name, "refused: {$err->getMessage()}");
+        }
+        try {
+            Validator::validateForEncode($latest, $value, $registry, coerce: false);
+        } catch (\Throwable $err) {
+            throw self::materializerError(
+                $name,
+                "answered a value version {$latest->version} rejects: {$err->getMessage()}",
+            );
+        }
+        return $value;
+    }
+
+    private static function materializerError(string $name, string $what): DXNError
+    {
+        return new DXNError("the materializer for \"{$name}\" {$what}", stage: 'schema', category: 'schema/materializer');
     }
 }

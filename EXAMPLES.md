@@ -74,16 +74,16 @@ $payload = <<<'DXN'
     DXN;
 
 Dextrin::decode($payload, $registry);
-// => [
-//      'id' => DXNUuid{...}, 'email' => 'ada@example.com',
-//      'role' => DXNKeyword{name: 'admin'}, 'created' => DXNTimestamp{...},
-//      'note' => null,
-//    ]
+// => DXNStruct{name: 'User', version: 1, pairs: [
+//      ['id', DXNUuid{...}], ['email', 'ada@example.com'],
+//      ['role', DXNKeyword{name: 'admin'}], ['created', DXNTimestamp{...}],
+//    ]}
 ```
 
-An optional field with no value supplied (`note?:`) materializes as
-`null`, not simply omitted from the result — the key is always
-present, matching how every other decoded field is looked up.
+With no materializer registered the struct comes back as a generic
+`DXNStruct` at its schema's latest version, its fields in the schema's
+order. An optional field with no value supplied (`note?:`) stays
+absent — DXN tells an absent field from one written `nil`.
 
 ## An event log, streamed to `.dxnb` for storage
 
@@ -120,19 +120,20 @@ $schemaSource = <<<'DXN'
 
 $doc = Dextrin::decode($schemaSource);
 $registry = Schema::compile($doc, new Registry());
-$registry = $registry->putStructMaterializer('Money', fn (array $f): array => [
+$registry = $registry->putStructMaterializer('Money', fn (string $name, int $version, array $f): array => [
     'amount' => $f['amount'],
-    'currency' => $f['currency']->name,
+    'currency' => $f['currency'],
 ]);
 
 Dextrin::decode('%Money{amount: 19.99M, currency: :usd}', $registry);
-// => ['amount' => DXNDecimal{sign: 1, unscaledValue: '1999', exponent: -2}, 'currency' => 'usd']
+// => ['amount' => DXNDecimal{sign: 1, unscaledValue: '1999', exponent: -2}, 'currency' => DXNKeyword{name: 'usd'}]
 ```
 
-`currency` decodes as a `DXNKeyword` — `->name` reads the plain string
-back out, this port's equivalent of Elixir's `Atom.to_string/1` (PHP
-has no atom/interned-symbol type for `keyword` to decode as instead,
-see the tutorial's own note on this).
+What a materializer answers is checked against the latest schema, so it
+has to stay a value of the schema's own shape: answering
+`'currency' => $f['currency']->name` (the string `'usd'`) would be
+refused (`schema/materializer`), because the schema declares
+`{:enum :usd :eur :gbp}`, not a string.
 
 ## A schema, version by version
 
@@ -203,9 +204,9 @@ final class LatLngProvider implements DXNSchemaMaterializingProvider
 
     public function dxnClass(): string { return LatLng::class; }
 
-    public function dxnMaterialize(array $resolved): LatLng
+    public function dxnMaterialize(string $name, int $version, array $fields): LatLng
     {
-        return new LatLng($resolved['lat'], $resolved['lng']);
+        return new LatLng($fields['lat'], $fields['lng']);
     }
 }
 ```
@@ -258,7 +259,9 @@ $resolver = FileResolver::forPaths(['schemas']);
 $registry = Schema::compile($doc, (new Registry())->putResolver($resolver));
 
 Dextrin::decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', $registry);
-// => ['name' => 'Ada', 'home' => ['street' => '1 Main St']]
+// => DXNStruct{name: 'Person', version: 1, pairs: [
+//      ['name', 'Ada'], ['home', DXNStruct{name: 'Address', version: 1, ...}],
+//    ]}
 ```
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with

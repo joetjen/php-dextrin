@@ -49,7 +49,7 @@ final class Registry
     /** @var array<string, array<int, Compiled>> struct name -> version -> compiled schema. */
     private array $structs = [];
 
-    /** @var array<string, \Closure(array<string, mixed>): mixed> struct name -> materializer. */
+    /** @var array<string, \Closure(string, int, array<string, mixed>): mixed> struct name -> materializer. */
     private array $materializers = [];
 
     /** @var (\Closure(string): ?Compiled)|null */
@@ -167,7 +167,15 @@ final class Registry
         return isset($this->structs[$name][$version]);
     }
 
-    /** @param \Closure(array<string, mixed>): mixed $materializer */
+    /**
+     * The schema's materializer (DXN.md §4.8): called for every decoded
+     * struct of `$name`, whatever the version, with the schema's name,
+     * the version the fields were read with and the fields keyed by name;
+     * it answers the application's latest-version value, which is checked
+     * against the latest schema, or throws.
+     *
+     * @param \Closure(string, int, array<string, mixed>): mixed $materializer
+     */
     public function putStructMaterializer(string $name, \Closure $materializer): self
     {
         $copy = $this->clone();
@@ -227,7 +235,7 @@ final class Registry
         return $found === null ? $struct : $struct->withVersion($found->compiled->version);
     }
 
-    /** @return (\Closure(array<string, mixed>): mixed)|null */
+    /** @return (\Closure(string, int, array<string, mixed>): mixed)|null */
     public function fetchMaterializer(string $name): ?\Closure
     {
         return $this->materializers[$name] ?? null;

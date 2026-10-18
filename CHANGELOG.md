@@ -51,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version that is loaded is read with its own schema and handed to the
   materializer, and refused as `schema/no-materializer` without one; an
   older version that is not loaded is refused as `schema/unknown-version`.
+- **One materializer per schema, for every version** (DXN.md §4.8).
+  `Registry::putStructMaterializer()` takes a closure of
+  `(string $name, int $version, array $fields)`; it is called for every
+  decoded struct of its schema, upgrades older versions, and its result is
+  checked against the latest schema -- a throw or a rejected result is
+  `schema/materializer`. `DXNSchemaMaterializingProvider::dxnMaterialize()`
+  takes the same arguments.
+- **Without a materializer, a checked struct decodes to a `DXNStruct`** at
+  its schema's latest version, fields in the schema's order, instead of a
+  marked-key array -- so it encodes back to the text it came from. An
+  optional field that was absent stays absent instead of becoming `null`.
+- `Validator::materialize()` is replaced by `resolve()`; building the value
+  is `Schema\Reader`'s job.
 
 ### Changed
 

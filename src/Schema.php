@@ -9,6 +9,7 @@ use JOetjen\Dextrin\Schema\DXNSchemaProvider;
 use JOetjen\Dextrin\Schema\Provider;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Schema\Validated;
+use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Schema\Validator;
 use JOetjen\Dextrin\Value\DXNStruct;
 
@@ -63,12 +64,11 @@ final class Schema
         if (!$value instanceof DXNStruct || $value->name !== $schemaName) {
             throw new SchemaValidationError("expected a DXNStruct named \"{$schemaName}\", got " . get_debug_type($value));
         }
-        $found = $registry->fetchStructSchema($schemaName);
-        if ($found === null) {
+        // Read exactly as a decode would read it, version and
+        // materializer included ({@see Reader}).
+        if (Reader::read($registry, $value) === null) {
             throw new SchemaValidationError("no compiled schema registered for \"{$schemaName}\"");
         }
-        $materializer = $registry->fetchMaterializer($schemaName);
-        Validator::materialize($found->compiled, $value, $materializer, $registry);
         return true;
     }
 

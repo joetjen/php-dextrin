@@ -76,7 +76,7 @@ final class RegistryTest extends TestCase
 
     public function testPutAndFetchMaterializer(): void
     {
-        $materializer = static fn (array $fields): array => $fields;
+        $materializer = static fn (string $name, int $version, array $fields): array => $fields;
         $registry = (new Registry())->putStructMaterializer('Point', $materializer);
         self::assertSame($materializer, $registry->fetchMaterializer('Point'));
         self::assertNull($registry->fetchMaterializer('Missing'));

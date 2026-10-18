@@ -136,7 +136,7 @@ $registry = Schema::compile(mixed $schemaDoc, Registry $baseRegistry);
 $registry
     ->addStructSchema(string $name, Compiled $compiled)      // a new version; throws schema/duplicate-version if loaded
     ->replaceStructSchema(string $name, Compiled $compiled)  // hot-swap a loaded version; throws schema/not-loaded otherwise
-    ->putStructMaterializer(string $name, \Closure $materializer)
+    ->putStructMaterializer(string $name, \Closure $materializer)   // fn (string $name, int $version, array $fields): mixed -- every version; result checked against the latest
     ->putStructModule(string $name, string $class)          // for {form: 'reference', name} checks on hand-built instances
     ->putResolver(\Closure $resolver);   // lazy/on-demand schema loading, (string $name): ?Compiled
 ```
@@ -160,7 +160,7 @@ $registry = Schema::registerProvider($registry, $someLibMoneyProvider);
 
 `$someLibMoneyProvider` implements `DXNSchemaProvider`
 (`dxnSchema()`, `dxnSchemaName()`, `dxnClass()`) or
-`DXNSchemaMaterializingProvider` (adds `dxnMaterialize()`) -- formal
+`DXNSchemaMaterializingProvider` (adds `dxnMaterialize(string $name, int $version, array $fields)`) -- formal
 PHP interfaces, unlike the JS port's duck-typed object shape, since
 PHP has no structural-typing equivalent to lean on instead.
 

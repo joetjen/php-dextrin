@@ -9,12 +9,12 @@ use JOetjen\Dextrin\Dextrin;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema;
 use JOetjen\Dextrin\Value\DXNStruct;
+use JOetjen\Dextrin\Tests\Support\DecodedFields;
 use PHPUnit\Framework\TestCase;
 
 /**
  * A struct is read according to the version it was written with, set
- * against the versions loaded (DXN.md §4.8). Materialized fields carry
- * MapBuilder's string-key marker, as every materialized field does.
+ * against the versions loaded (DXN.md §4.8).
  */
 final class ReadingAcrossVersionsTest extends TestCase
 {
@@ -33,7 +33,10 @@ final class ReadingAcrossVersionsTest extends TestCase
 
     private static function upgrading(Registry $registry): Registry
     {
-        return $registry->putStructMaterializer('User', static fn (array $fields): array => ['upgraded' => $fields]);
+        return $registry->putStructMaterializer(
+            'User',
+            static fn (string $name, int $version, array $fields): array => $fields + ['upgradedFrom' => $version],
+        );
     }
 
     private static function categoryOf(\Closure $refused): ?string
@@ -55,8 +58,8 @@ final class ReadingAcrossVersionsTest extends TestCase
     public function testTheLatestVersionIsReadWithExactlyThatSchema(): void
     {
         self::assertSame(
-            ["\0name" => 'a', "\0email" => null, "\0nick" => null],
-            Dextrin::decode('%User(3){name: "a"}', self::loaded(self::V2, self::V3)),
+            ['name' => 'a'],
+            DecodedFields::of(Dextrin::decode('%User(3){name: "a"}', self::loaded(self::V2, self::V3))),
         );
     }
 
@@ -68,7 +71,7 @@ final class ReadingAcrossVersionsTest extends TestCase
     public function testAnOlderVersionGoesToTheMaterializerWithTheFieldsItsOwnSchemaNames(): void
     {
         self::assertSame(
-            ['upgraded' => ['name' => 'a', 'email' => null]],
+            ['name' => 'a', 'upgradedFrom' => 2],
             Dextrin::decode('%User(2){name: "a"}', self::upgrading(self::loaded(self::V2, self::V3))),
         );
     }
@@ -101,8 +104,8 @@ final class ReadingAcrossVersionsTest extends TestCase
     public function testANewerVersionIsReadAgainstTheLatestMatchingTextByName(): void
     {
         self::assertSame(
-            ["\0name" => 'a', "\0email" => null],
-            Dextrin::decode('%User(3){nick: "n", name: "a"}', self::loaded(self::V1, self::V2)),
+            ['name' => 'a'],
+            DecodedFields::of(Dextrin::decode('%User(3){nick: "n", name: "a"}', self::loaded(self::V1, self::V2))),
         );
     }
 
@@ -114,19 +117,19 @@ final class ReadingAcrossVersionsTest extends TestCase
     public function testAndBinaryAssumesPositionsAreUnchangedDroppingTheItemsBeyondItsOwn(): void
     {
         $bytes = self::binary(DXNStruct::positional('User', ['a', 'e', 'n'], 3));
-        self::assertSame(["\0name" => 'a', "\0email" => 'e'], Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2)));
+        self::assertSame(['name' => 'a', 'email' => 'e'], DecodedFields::of(Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2))));
     }
 
     public function testAndFewerItemsLeaveTheOptionalFieldsAbsent(): void
     {
         $bytes = self::binary(DXNStruct::positional('User', ['a'], 3));
-        self::assertSame(["\0name" => 'a', "\0email" => null], Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2)));
+        self::assertSame(['name' => 'a'], DecodedFields::of(Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2))));
     }
 
     /** The documented risk: a reordering is misread, without an error, whenever the types agree. */
     public function testAndAReorderingIsMisreadWithoutAnErrorWhenTheTypesAgree(): void
     {
         $bytes = self::binary(DXNStruct::positional('User', ['e', 'a'], 3));
-        self::assertSame(["\0name" => 'e', "\0email" => 'a'], Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2)));
+        self::assertSame(['name' => 'e', 'email' => 'a'], DecodedFields::of(Dextrin::decodeBinary($bytes, self::loaded(self::V1, self::V2))));
     }
 }

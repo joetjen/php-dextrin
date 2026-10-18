@@ -116,7 +116,8 @@ $schemaDoc = Dextrin::decode(<<<'DXN'
 $registry = Schema::compile($schemaDoc, new Registry());
 
 Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
-// => ['x' => 1.0, 'y' => 2.0] -- schema-validated, decode-time enforcement
+// => DXNStruct{name: 'Point', version: 1, pairs: [['x', 1.0], ['y', 2.0]]}
+//    -- schema-validated, decode-time enforcement; a materializer can build your own class instead
 
 Dextrin::encode(['x' => 1.0, 'y' => 2.0], registry: $registry, schema: 'Point');
 // => '%Point(1){x:1.0,y:2.0}'

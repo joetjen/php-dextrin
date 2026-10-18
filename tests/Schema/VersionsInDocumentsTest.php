@@ -116,8 +116,7 @@ final class VersionsInDocumentsTest extends TestCase
         // A refusal: version 2 requires `y`. Schema violations get their
         // own categories later, so only the refusal is checked here.
         self::categoryOf(fn () => Dextrin::decode('%Point{x: 1}', $registry));
-        // String keys carry MapBuilder's marker, as every materialized field does.
-        self::assertSame(["\0x" => 1, "\0y" => 2], Dextrin::decode('%Point{x: 1, y: 2}', $registry));
+        self::assertTrue(DXNStruct::keyed('Point', [['x', 1], ['y', 2]], 2)->equals(Dextrin::decode('%Point{x: 1, y: 2}', $registry)));
     }
 
     public function testAVersionInATypeExpressionIsASyntaxError(): void
