@@ -141,7 +141,7 @@ final class Encoder
             // categorically code, not data, so it's excluded the same
             // way Printer excludes it.
             is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::encodePlainObjectAsStruct($value, $registry),
-            default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
+            default => throw \JOetjen\Dextrin\UnsupportedValue::of($value),
         };
     }
 

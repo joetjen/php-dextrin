@@ -19,11 +19,25 @@ final class DXNError extends \RuntimeException
     public readonly string $stage;
     public readonly ?int $offset;
 
-    public function __construct(string $message, string $stage = 'unknown', ?int $offset = null, ?\Throwable $previous = null)
-    {
+    /**
+     * What kind of error this is, as DXN.md §5 names it -- `syntax`,
+     * `binary`, `encode/unsupported`, ... -- so errors compare across
+     * implementations without comparing messages. Null where none has
+     * been assigned yet.
+     */
+    public readonly ?string $category;
+
+    public function __construct(
+        string $message,
+        string $stage = 'unknown',
+        ?int $offset = null,
+        ?\Throwable $previous = null,
+        ?string $category = null,
+    ) {
         parent::__construct($message, 0, $previous);
         $this->stage = $stage;
         $this->offset = $offset;
+        $this->category = $category;
     }
 
     /**
@@ -40,6 +54,7 @@ final class DXNError extends \RuntimeException
             return $err;
         }
         $offset = $err instanceof HasOffset ? $err->offset() : null;
-        return new self($err->getMessage(), $stage, $offset, $err);
+        $category = $err instanceof HasCategory ? $err->category() : null;
+        return new self($err->getMessage(), $stage, $offset, $err, $category);
     }
 }

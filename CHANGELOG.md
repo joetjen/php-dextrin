@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Canonical::print()` -- the canonical form of a value (DXN.md §1.5):
+  one rendering fixed down to the byte, with maps and sets in canonical
+  order, floats by one exact algorithm that no `precision` ini setting
+  can change, and one fixed set of string escapes, so values from
+  different implementations compare as text.
+- `DXNError::$category` and the `HasCategory` interface -- the error's
+  kind as DXN.md §5 names it (`syntax`, `binary`, `encode/unsupported`,
+  ...), so errors compare across implementations without comparing
+  messages. A value with no DXN meaning now throws `UnsupportedValue`.
+- `Conformance::answer()` and `dextrin conformance REQUEST ANSWER` --
+  this implementation's adapter for the Dextrin Conformance Suite.
+
 ## [0.1.0] - 2026-08-14
 
 ### Changed

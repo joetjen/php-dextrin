@@ -111,7 +111,7 @@ final class Printer
             // properties) instead of failing the way it should for
             // "no DXN representation."
             is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::printPlainObjectAsStruct($value, $registry),
-            default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
+            default => throw \JOetjen\Dextrin\UnsupportedValue::of($value),
         };
     }
 

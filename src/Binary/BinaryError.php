@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Binary;
 
+use JOetjen\Dextrin\HasCategory;
 use JOetjen\Dextrin\HasOffset;
 
 /** Error type for malformed `.dxnb` input -- the binary-side analog of `Text\ParseError`. */
-final class BinaryError extends \RuntimeException implements HasOffset
+final class BinaryError extends \RuntimeException implements HasOffset, HasCategory
 {
     private readonly ?int $byteOffset;
 
@@ -20,5 +21,11 @@ final class BinaryError extends \RuntimeException implements HasOffset
     public function offset(): ?int
     {
         return $this->byteOffset;
+    }
+
+    /** DXN.md §5's category for a malformed .dxnb document. */
+    public function category(): string
+    {
+        return 'binary';
     }
 }

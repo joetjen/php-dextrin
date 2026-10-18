@@ -48,6 +48,7 @@ const USAGE = <<<'USAGE'
                                                     Reformat a .dxn file
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
+      conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
     USAGE;
@@ -62,8 +63,28 @@ function main(array $argv): int
         'encode' => run(static fn () => cmdEncode($rest)),
         'format' => run(static fn () => cmdFormat($rest)),
         'validate' => run(static fn () => cmdValidate($rest)),
+        'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
+}
+
+/**
+ * `dextrin conformance REQUEST ANSWER` -- this implementation's adapter
+ * for the Dextrin Conformance Suite: reads the JSON request, answers every
+ * case, writes the JSON answer. It fails only when the adapter itself
+ * cannot work, never because a case did: a failed case is an answer, and
+ * the suite judges it.
+ *
+ * @param list<string> $args
+ */
+function cmdConformance(array $args): void
+{
+    if (count($args) !== 2) {
+        throw new \RuntimeException('usage: dextrin conformance REQUEST ANSWER');
+    }
+    [$request, $answer] = $args;
+    $decoded = json_decode((string) file_get_contents($request), true, flags: JSON_THROW_ON_ERROR);
+    file_put_contents($answer, json_encode(\JOetjen\Dextrin\Conformance::answer($decoded), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
 function printUsageAndExit(?string $command): int
