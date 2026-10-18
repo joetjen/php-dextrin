@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `parseTypeName()` spell it, and `Printer::writtenHead()` is the head
   both text writers share. A `.dxnb` type name whose version is not a
   positive integer is a `binary` error.
+- **A struct is read according to the version it was written with**
+  (DXN.md §4.8, `Schema\Reader`), in text and binary alike. The latest
+  version, or none, is read exactly. A newer version is read against the
+  latest: text by name, binary by position, dropping items beyond the
+  reader's fields and leaving missing optional fields absent. An older
+  version that is loaded is read with its own schema and handed to the
+  materializer, and refused as `schema/no-materializer` without one; an
+  older version that is not loaded is refused as `schema/unknown-version`.
 
 ### Changed
 

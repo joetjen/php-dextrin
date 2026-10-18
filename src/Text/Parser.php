@@ -7,7 +7,8 @@ namespace JOetjen\Dextrin\Text;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
-use JOetjen\Dextrin\Schema\Validator;
+use JOetjen\Dextrin\DXNError;
+use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -31,9 +32,9 @@ use JOetjen\Dextrin\Value\DXNUuid;
  * {@see Printer}, built directly on {@see Lexer}'s token stream.
  *
  * A `struct` decodes against a compiled schema when `$registry` has
- * one for that name ({@see Validator::materialize()}, same as the
- * binary decoder); with no registry, or no schema registered for that
- * name, it decodes to an opaque {@see DXNStruct}. Same story for a
+ * one for that name ({@see Reader::read()}, which picks the schema by
+ * the struct's version, same as the binary decoder); with no registry,
+ * or no schema registered for that name, it decodes to an opaque {@see DXNStruct}. Same story for a
  * non-built-in tag against the registry's own tag table -- falls back
  * to {@see DXNCustomTag} -- never a hard failure, matching
  * `dxn/DXN.md` §1.4's "opaque tagged value, not an error" contract.
@@ -325,19 +326,25 @@ final class Parser
 
     private function materializeStruct(string $name, DXNStruct $struct): mixed
     {
-        $found = $this->registry?->fetchStructSchema($name);
-        if ($found === null) {
+        if ($this->registry === null) {
             return $struct;
         }
-        $this->registry = $found->registry;
-        $materializer = $this->registry->fetchMaterializer($name);
         try {
             // Fail-fast, decode-time enforcement -- a schema violation
             // is an ordinary parse error, same channel as bad syntax.
-            return Validator::materialize($found->compiled, $struct, $materializer, $this->registry);
+            // Which schema a struct is read with depends on its version
+            // ({@see Reader}).
+            $read = Reader::read($this->registry, $struct);
+        } catch (DXNError $err) {
+            throw $err;
         } catch (\Throwable $err) {
             throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
         }
+        if ($read === null) {
+            return $struct;
+        }
+        [$value, $this->registry] = $read;
+        return $value;
     }
 
     /**

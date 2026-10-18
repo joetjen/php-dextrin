@@ -7,7 +7,8 @@ namespace JOetjen\Dextrin\Binary;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
-use JOetjen\Dextrin\Schema\Validator;
+use JOetjen\Dextrin\DXNError;
+use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -483,16 +484,19 @@ final class Decoder
         [$name, $version] = $parsed;
         $struct = DXNStruct::positional($name, $items, $version);
 
-        $found = $this->registry?->fetchStructSchema($name);
-        if ($found === null) {
+        if ($this->registry === null) {
             return $struct;
         }
-        $materializer = $found->registry->fetchMaterializer($name);
         try {
-            return Validator::materialize($found->compiled, $struct, $materializer, $found->registry);
+            // Same fail-fast enforcement as the text parser, through the
+            // same {@see Reader}.
+            $read = Reader::read($this->registry, $struct);
+        } catch (DXNError $err) {
+            throw $err;
         } catch (\Throwable $err) {
             throw new BinaryError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
         }
+        return $read === null ? $struct : $read[0];
     }
 
     private function buildDate(mixed $value): DXNDate
