@@ -173,6 +173,7 @@ vendor/bin/dextrin decode data.dxnb                                  # -> pretty
 vendor/bin/dextrin encode data.dxn --out data.dxnb
 vendor/bin/dextrin format data.dxn --mode pretty|condense [--in-place]
 vendor/bin/dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
+vendor/bin/dextrin compat old-schemas/ schemas/   # changed schemas need new versions
 ```
 
 ## Documentation

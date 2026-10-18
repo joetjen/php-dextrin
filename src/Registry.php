@@ -46,7 +46,7 @@ final class Registry
     /** @var array<class-string, array{0: string, 1: \Closure(object): mixed}> class -> [tag name, encoder]. */
     private array $tagEncoders = [];
 
-    /** @var array<string, array<int, Compiled>> struct name -> version -> compiled schema. */
+    /** @var array<string, non-empty-array<int, Compiled>> struct name -> version -> compiled schema. */
     private array $structs = [];
 
     /** @var array<string, \Closure(string, int, array<int|string, mixed>): mixed> struct name -> materializer. */
@@ -274,6 +274,17 @@ final class Registry
     public function fetchTypeAlias(string $name): ?TypeExpr
     {
         return $this->typeAliases[$name] ?? null;
+    }
+
+    /**
+     * Every loaded struct schema, by name and version -- what the version
+     * discipline check ({@see \JOetjen\Dextrin\Schema\Compat}) compares.
+     *
+     * @return array<string, non-empty-array<int, Compiled>>
+     */
+    public function structSchemas(): array
+    {
+        return $this->structs;
     }
 
     /** @return array<string, TypeExpr> */

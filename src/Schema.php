@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin;
 
+use JOetjen\Dextrin\Schema\Compat;
 use JOetjen\Dextrin\Schema\Compiler;
 use JOetjen\Dextrin\Schema\DXNSchemaProvider;
 use JOetjen\Dextrin\Schema\Provider;
@@ -111,5 +112,18 @@ final class Schema
     public static function registerProvider(Registry $registry, DXNSchemaProvider $provider): Registry
     {
         return \JOetjen\Dextrin\Schema\Provider::registerProvider($registry, $provider, self::compile(...));
+    }
+
+    /**
+     * The version discipline check ({@see Compat}, DXN.md §4.8): `$old`'s
+     * schemas against `$new`'s, as the problems -- a version whose
+     * content changed without a new version, a version that went down --
+     * and what the latest versions' materializers have to upgrade.
+     *
+     * @return array{problems: list<array<string, mixed>>, upgrades: list<array<string, mixed>>}
+     */
+    public static function compat(Registry $old, Registry $new): array
+    {
+        return Compat::check($old, $new);
     }
 }
