@@ -63,7 +63,10 @@ final class Schema
     public static function validate(mixed $value, Registry $registry, string $schemaName): true
     {
         if (!$value instanceof DXNStruct || $value->name !== $schemaName) {
-            throw new SchemaValidationError("expected a DXNStruct named \"{$schemaName}\", got " . get_debug_type($value));
+            throw new SchemaValidationError(
+                "expected a DXNStruct named \"{$schemaName}\", got " . get_debug_type($value),
+                'schema/type-mismatch',
+            );
         }
         // Read exactly as a decode would read it, version and
         // materializer included ({@see Reader}).

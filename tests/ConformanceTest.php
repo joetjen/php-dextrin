@@ -92,6 +92,51 @@ final class ConformanceTest extends TestCase
         );
     }
 
+    private const USER = '%{User: %schema(2){name: :string}}';
+
+    public function testACasesSchemasAreLoadedBeforeItRuns(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'canonical' => '%User(2){name: "x"}']],
+            self::answered([['id' => 'a', 'operation' => 'decode', 'text' => '%User{name: "x"}', 'schemas' => [self::USER]]]),
+        );
+    }
+
+    public function testAndASchemaViolationAnswersItsCategory(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'error' => 'schema/type-mismatch']],
+            self::answered([['id' => 'a', 'operation' => 'decode', 'text' => '%User{name: 1}', 'schemas' => [self::USER]]]),
+        );
+    }
+
+    public function testAStrictCaseDecodesStrictly(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'error' => 'schema/undeclared-field']],
+            self::answered([[
+                'id' => 'a', 'operation' => 'decode', 'text' => '%User{name: "x", nick: "y"}',
+                'schemas' => [self::USER], 'strict' => true,
+            ]]),
+        );
+    }
+
+    public function testAStructDecodedAgainstASchemaIsEncodedUnderItsVersionedTypeName(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'binary' => base64_encode(hex2bin('445801d8d08267557365722832296178'))]],
+            self::answered([['id' => 'a', 'operation' => 'encode', 'text' => '%User{name: "x"}', 'schemas' => [self::USER]]]),
+        );
+    }
+
+    public function testASchemaThatDoesNotCompileAnswersItsCategory(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'error' => 'schema/compile']],
+            self::answered([['id' => 'a', 'operation' => 'decode', 'text' => '1', 'schemas' => ['%{User: 1}']]]),
+        );
+    }
+
     public function testTheCommandReadsTheRequestAndWritesTheAnswer(): void
     {
         $dir = sys_get_temp_dir() . '/dextrin-conformance-' . bin2hex(random_bytes(4));

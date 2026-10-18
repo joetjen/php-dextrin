@@ -10,6 +10,7 @@ use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
+use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -550,7 +551,9 @@ final class Decoder
             // Same fail-fast enforcement as the text parser, through the
             // same {@see Reader}.
             $read = Reader::read($this->registry, $struct);
-        } catch (DXNError $err) {
+        } catch (DXNError | SchemaValidationError $err) {
+            // A schema violation keeps its own category (DXN.md §5); it
+            // is not a binary error for having been found here.
             throw $err;
         } catch (\Throwable $err) {
             throw new BinaryError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);

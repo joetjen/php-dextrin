@@ -77,7 +77,7 @@ final class Validator
         $names = $compiled->fieldNames();
         $values = $struct->values();
         if (count($names) !== count($values)) {
-            throw new SchemaValidationError('expected ' . count($names) . ' positional field(s), got ' . count($values));
+            throw new SchemaValidationError('expected ' . count($names) . ' positional field(s), got ' . count($values), 'schema/field-count');
         }
         $result = [];
         foreach ($names as $i => $name) {
@@ -117,7 +117,7 @@ final class Validator
             return $field->default;
         }
         if ($field->required) {
-            throw new SchemaValidationError("missing required field \"{$field->name}\"");
+            throw new SchemaValidationError("missing required field \"{$field->name}\"", 'schema/missing-field');
         }
         return Absent::instance();
     }
@@ -134,7 +134,7 @@ final class Validator
         }
 
 
-        throw new SchemaValidationError("field \"{$name}\" does not match its declared type");
+        throw new SchemaValidationError("field \"{$name}\" does not match its declared type", 'schema/type-mismatch');
     }
 
     // ---- encode-time validation -----------------------------------------------
@@ -184,7 +184,7 @@ final class Validator
             $declared = array_flip($compiled->fieldNames());
             foreach ($value->extra as [$key, $unusedValue]) {
                 if (is_string($key) && isset($declared[$key])) {
-                    throw new SchemaValidationError("extra field \"{$key}\" shadows a declared field");
+                    throw new SchemaValidationError("extra field \"{$key}\" shadows a declared field", 'schema/shadowed-field');
                 }
             }
         }
@@ -265,7 +265,7 @@ final class Validator
             $names = $compiled->fieldNames();
             $values = $value->values();
             if (count($names) !== count($values)) {
-                throw new SchemaValidationError('expected ' . count($names) . ' positional field(s), got ' . count($values));
+                throw new SchemaValidationError('expected ' . count($names) . ' positional field(s), got ' . count($values), 'schema/field-count');
             }
             $result = [];
             foreach ($names as $i => $name) {
@@ -286,7 +286,10 @@ final class Validator
         if (is_object($value) && !$value instanceof \Closure) {
             return get_object_vars($value);
         }
-        throw new SchemaValidationError('expected a map/struct/object to validate against a schema, got ' . get_debug_type($value));
+        throw new SchemaValidationError(
+            'expected a map/struct/object to validate against a schema, got ' . get_debug_type($value),
+            'schema/type-mismatch',
+        );
     }
 
     /**
@@ -306,7 +309,11 @@ final class Validator
             try {
                 return self::checkCompiled($compiled, $value, $registry);
             } catch (\Throwable $err) {
-                throw new SchemaValidationError("struct \"{$name}\" violates its schema: " . $err->getMessage());
+                throw new SchemaValidationError(
+                    "struct \"{$name}\" violates its schema: " . $err->getMessage(),
+                    $err instanceof SchemaValidationError ? $err->category() : null,
+                    $err,
+                );
             }
         }
         return self::wrapChildren($value, $registry);

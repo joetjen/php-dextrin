@@ -17,7 +17,9 @@ namespace JOetjen\Dextrin;
  * `decode` reads `text` and answers its canonical form (DXN.md §1.5);
  * `decode-binary` reads `binary`, a base64 `.dxnb` document, and answers
  * its canonical form; `encode` reads `text` and answers the exact bytes
- * as base64. Any of them may answer `error` instead: the error's
+ * as base64. A case may carry `schemas`, `.dxns` sources compiled in
+ * order into the registry it runs with, and `strict: true`, which
+ * decodes strictly (DXN.md §4.7). Any of them may answer `error` instead: the error's
  * category (DXN.md §5), never its message. An error with no category yet
  * is `uncategorised`, which no case expects, so it shows as a
  * disagreement rather than passing by accident.
@@ -31,7 +33,7 @@ final class Conformance
     /**
      * The answer to a decoded JSON request: one result per case, in order.
      *
-     * @param array{cases: list<array<string, string>>} $request
+     * @param array{cases: list<array<string, mixed>>} $request
      * @return array{results: list<array<string, string>>}
      */
     public static function answer(array $request): array
@@ -43,16 +45,21 @@ final class Conformance
     }
 
     /**
-     * @param array<string, string> $case
+     * @param array<string, mixed> $case
      * @return array<string, string>
      */
     private static function outcome(array $case): array
     {
         try {
+            $registry = self::loaded($case['schemas'] ?? []);
+            $strict = ($case['strict'] ?? false) === true;
             return match ($case['operation'] ?? null) {
-                'decode' => ['canonical' => Canonical::print(Dextrin::decode($case['text']))],
-                'decode-binary' => self::decodedBinary($case['binary']),
-                'encode' => ['binary' => base64_encode(Dextrin::encodeBinary(Dextrin::decode($case['text'])))],
+                'decode' => ['canonical' => Canonical::print(Dextrin::decode(self::text($case, 'text'), $registry, $strict))],
+                'decode-binary' => self::decodedBinary(self::text($case, 'binary'), $registry, $strict),
+                'encode' => ['binary' => base64_encode(Dextrin::encodeBinary(
+                    Dextrin::decode(self::text($case, 'text'), $registry, $strict),
+                    registry: $registry,
+                ))],
                 default => ['error' => 'unsupported operation ' . json_encode($case['operation'] ?? null)],
             };
         } catch (DXNError $err) {
@@ -60,13 +67,42 @@ final class Conformance
         }
     }
 
+    /**
+     * A case's schemas, compiled in order into one registry.
+     *
+     * @param mixed $sources
+     */
+    private static function loaded(mixed $sources): Registry
+    {
+        $registry = new Registry();
+        foreach (is_array($sources) ? $sources : [] as $source) {
+            try {
+                $registry = Schema::compile(Dextrin::decode((string) $source), $registry);
+            } catch (\Throwable $err) {
+                throw DXNError::wrap($err, 'schema');
+            }
+        }
+        return $registry;
+    }
+
+    /**
+     * One of a case's text fields.
+     *
+     * @param array<string, mixed> $case
+     */
+    private static function text(array $case, string $key): string
+    {
+        $value = $case[$key] ?? '';
+        return is_string($value) ? $value : '';
+    }
+
     /** @return array<string, string> */
-    private static function decodedBinary(string $base64): array
+    private static function decodedBinary(string $base64, Registry $registry, bool $strict): array
     {
         $bytes = base64_decode($base64, true);
         if ($bytes === false) {
             return ['error' => 'binary'];
         }
-        return ['canonical' => Canonical::print(Dextrin::decodeBinary($bytes))];
+        return ['canonical' => Canonical::print(Dextrin::decodeBinary($bytes, $registry, $strict))];
     }
 }

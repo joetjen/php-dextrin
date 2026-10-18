@@ -12,5 +12,6 @@ namespace JOetjen\Dextrin;
  */
 interface HasCategory
 {
-    public function category(): string;
+    /** The category, or null for an exception that has none. */
+    public function category(): ?string;
 }
