@@ -228,7 +228,7 @@ final class Decoder
             Tags::T_STRINGREF => $this->decodeStringref(),
             // Read as raw pairs, bypassing MapBuilder -- see this
             // class's own doc for why.
-            Tags::T_ORDERED => new DXNOrderedMap($this->decodeOrderedPairs()),
+            Tags::T_ORDERED => self::orderedMap($this->decodeOrderedPairs()),
             default => $this->buildTagged($tagNumber, $this->decodeItem()),
         };
     }
@@ -604,5 +604,16 @@ final class Decoder
             $value instanceof DXNCustomTag => new DXNCustomTag($value->name, self::deepClone($value->value)),
             default => $value,
         };
+    }
+
+    /**
+     * An ordered map, every key one DXN.md §1.6 allows.
+     *
+     * @param list<array{0: mixed, 1: mixed}> $pairs
+     */
+    private static function orderedMap(array $pairs): DXNOrderedMap
+    {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
+        return new DXNOrderedMap($pairs);
     }
 }

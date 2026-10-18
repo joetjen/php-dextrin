@@ -347,9 +347,9 @@ final class Parser
 
     /**
      * @param list<array{0: mixed, 1: mixed}> $pairs
-     * @return array<int|string, mixed>
+     * @return array<int|string, mixed>|\JOetjen\Dextrin\Value\DXNMap
      */
-    private function buildMap(array $pairs): array
+    private function buildMap(array $pairs): array|\JOetjen\Dextrin\Value\DXNMap
     {
         return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
     }
@@ -415,7 +415,9 @@ final class Parser
         if (!$this->at('LBRACE')) {
             throw new ParseError('@ordered requires a map literal argument', $offset);
         }
-        return new DXNOrderedMap($this->parseEntries());
+        $pairs = $this->parseEntries();
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
+        return new DXNOrderedMap($pairs);
     }
 
     private function parseSortedSetTag(int $offset): DXNSortedSet

@@ -148,15 +148,18 @@ final class DecoderTest extends TestCase
         self::assertSame('1', $decoded->pairs[1][0]);
     }
 
-    public function testUntaggedMapAppliesKeyCollisionDetection(): void
+    public function testUntaggedMapKeepsKeysANativeArrayWouldCollide(): void
     {
+        // `1` and `"1"` are two DXN keys a native array would coerce to one
+        // slot, so the map decodes to a DXNMap holding both (DXN.md §1.6).
         $pairs = Writer::mapOf([
             [Writer::integerItem(1), Writer::textItem('a')],
             [Writer::textItem('1'), Writer::textItem('b')],
         ]);
-        $bytes = $this->envelope($pairs);
-        $this->expectException(BinaryError::class);
-        Decoder::decode($bytes);
+        $map = Decoder::decode($this->envelope($pairs));
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNMap::class, $map);
+        self::assertSame('a', $map->get(1));
+        self::assertSame('b', $map->get('1'));
     }
 
     public function testDecodesBignumTags(): void

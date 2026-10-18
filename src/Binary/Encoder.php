@@ -104,6 +104,7 @@ final class Encoder
                 $value->items,
             ))),
             $value instanceof DXNOrderedMap => Writer::tag(Tags::T_ORDERED, Writer::mapOf(self::encodePairs($value->pairs, $registry))),
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => Writer::mapOf(self::encodePairs($value->pairs(), $registry)),
 
             is_array($value) && array_is_list($value) => Writer::tag(Tags::T_ARRAY, Writer::arrayOf(array_map(
                 static fn (mixed $v): string => self::encodeItem($v, $registry),
@@ -151,6 +152,7 @@ final class Encoder
      */
     private static function encodePairs(array $pairs, ?Registry $registry): array
     {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         return array_map(
             static fn (array $p): array => [self::encodeItem($p[0], $registry), self::encodeItem($p[1], $registry)],
             $pairs,

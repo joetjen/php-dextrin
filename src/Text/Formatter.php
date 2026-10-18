@@ -62,7 +62,10 @@ final class Formatter
                 : '@array' . self::bracketed('[', $value, ']', $depth, $indentSize, $registry),
             $value instanceof DXNOrderedMap => $value->pairs === []
                 ? '@ordered %{}'
-                : '@ordered ' . self::bracketedEntries('%{', $value->pairs, '}', $depth, $indentSize, $registry),
+                : '@ordered ' . self::bracketedEntries('%{', self::allowedPairs($value->pairs), '}', $depth, $indentSize, $registry),
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => count($value) === 0
+                ? '%{}'
+                : self::bracketedEntries('%{', self::allowedPairs($value->pairs()), '}', $depth, $indentSize, $registry),
             // array_is_list([]) is true, so the array_is_list branch
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
@@ -208,5 +211,17 @@ final class Formatter
             return ':' . Printer::quoteString($key->name) . ' => ' . self::render($value, $depth, $indentSize, $registry);
         }
         return Printer::print($key, $registry) . ' => ' . self::render($value, $depth, $indentSize, $registry);
+    }
+
+    /**
+     * `$pairs`, having checked every key is one DXN.md §1.6 allows.
+     *
+     * @param list<array{0: mixed, 1: mixed}> $pairs
+     * @return list<array{0: mixed, 1: mixed}>
+     */
+    private static function allowedPairs(array $pairs): array
+    {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
+        return $pairs;
     }
 }

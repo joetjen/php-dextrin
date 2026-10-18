@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 final class MapBuilderTest extends TestCase
 {
-    private function build(array $pairs): array
+    private function build(array $pairs): array|\JOetjen\Dextrin\Value\DXNMap
     {
         return MapBuilder::build($pairs, static fn (string $m): ParseError => new ParseError($m));
     }
@@ -28,12 +28,15 @@ final class MapBuilderTest extends TestCase
         self::assertSame(['x' => 1, "\0x" => 2], $result);
     }
 
-    public function testCanonicalIntegerStringKeyIsNotMarked(): void
+    public function testCanonicalIntegerStringKeyMakesADxnMap(): void
     {
-        // Left alone so it keeps colliding with a bare `integer` key
-        // of the same value -- see testIntAndCanonicalNumericStringKeyStillCollide().
-        $result = $this->build([['5', 'value']]);
-        self::assertSame([5 => 'value'], $result);
+        // PHP would turn the array key "5" into the integer 5 and the key
+        // would read back as one, so the map is a DXNMap and "5" stays a
+        // string (DXN.md §1.5: nothing is normalised).
+        $map = $this->build([['5', 'value']]);
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNMap::class, $map);
+        self::assertSame('value', $map->get('5'));
+        self::assertNull($map->get(5));
     }
 
     public function testNonCanonicalNumericLookingStringKeyIsMarked(): void
@@ -45,10 +48,12 @@ final class MapBuilderTest extends TestCase
         self::assertSame(["\0" . '01' => 'value'], $result);
     }
 
-    public function testIntAndCanonicalNumericStringKeyStillCollide(): void
+    public function testIntAndCanonicalNumericStringKeyMakeADxnMap(): void
     {
-        $this->expectException(ParseError::class);
-        $this->build([[5, 'a'], ['5', 'b']]);
+        // A native array would coerce both to slot 5; a DXNMap keeps both.
+        $map = $this->build([[5, 'a'], ['5', 'b']]);
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNMap::class, $map);
+        self::assertCount(2, $map);
     }
 
     public function testKeywordAndStringKeyNoLongerCollide(): void

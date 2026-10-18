@@ -88,6 +88,7 @@ final class Canonical
             $value instanceof DXNSet => '@{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',
             $value instanceof DXNSortedSet => '@sorted-set @{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',
             $value instanceof DXNOrderedMap => '@ordered %{' . self::entries($value->pairs, false) . '}',
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => '%{' . self::entries($value->pairs(), true) . '}',
             $value instanceof DXNStruct => self::struct($value),
             $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
             $value instanceof DXNTime => '~T[' . self::trimmed(Temporal::formatTime($value)) . ']',

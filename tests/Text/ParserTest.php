@@ -102,10 +102,12 @@ final class ParserTest extends TestCase
         self::assertSame(Parser::parse('%{a: 1}'), Parser::parse('%{:a => 1}'));
     }
 
-    public function testMapKeyCollisionThrows(): void
+    public function testMapKeysThatWouldCollideMakeADxnMap(): void
     {
-        $this->expectException(ParseError::class);
-        Parser::parse('%{1 => "a", "1" => "b"}');
+        $map = Parser::parse('%{1 => "a", "1" => "b"}');
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNMap::class, $map);
+        self::assertSame('a', $map->get(1));
+        self::assertSame('b', $map->get('1'));
     }
 
     public function testMapKeywordAndSameTextStringKeyCoexistDistinctly(): void
@@ -117,9 +119,9 @@ final class ParserTest extends TestCase
         self::assertSame(['name' => 1, "\0name" => 2], Parser::parse('%{name: 1, "name" => 2}'));
     }
 
-    public function testMapNonScalarKeyThrows(): void
+    public function testMapCollectionKeyIsNotAllowed(): void
     {
-        $this->expectException(ParseError::class);
+        $this->expectException(\JOetjen\Dextrin\KeyNotAllowed::class);
         Parser::parse('%{[1 2] => "a"}');
     }
 

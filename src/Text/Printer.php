@@ -90,6 +90,7 @@ final class Printer
                 $value->items,
             )) . '}'),
             $value instanceof DXNOrderedMap => self::tagForm('ordered', '%{' . self::printOrderedEntries($value->pairs, $registry) . '}'),
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => '%{' . self::printOrderedEntries($value->pairs(), $registry) . '}',
             $value instanceof DXNStruct => self::printStruct($value, $registry),
             $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
             $value instanceof DXNTime => '~T[' . Temporal::formatTime($value) . ']',
@@ -198,6 +199,7 @@ final class Printer
     /** @param list<array{0: mixed, 1: mixed}> $pairs */
     private static function printOrderedEntries(array $pairs, ?Registry $registry): string
     {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         $parts = [];
         foreach ($pairs as [$key, $value]) {
             $parts[] = self::printEntry($key, $value, $registry);

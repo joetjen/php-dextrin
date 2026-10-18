@@ -20,6 +20,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages. A value with no DXN meaning now throws `UnsupportedValue`.
 - `Conformance::answer()` and `dextrin conformance REQUEST ANSWER` --
   this implementation's adapter for the Dextrin Conformance Suite.
+- `DXNMap` -- a decoded map a native PHP array cannot hold exactly, with
+  its keys compared by canonical form (DXN.md §1.6). `MapKey` holds the
+  map-key rule.
+
+### Changed
+
+- **A map key must be one of the eight types of DXN.md §1.6** (string,
+  keyword, integer, uuid, date, bytes, symbol, char). Any other key is
+  refused as `key/not-allowed` (`KeyNotAllowed`) when decoding text or
+  binary and when encoding, in maps and ordered maps alike.
+- **A map decodes to a `DXNMap` when a native array cannot hold it
+  exactly**: a char, uuid, date, bytes or symbol key; `1` beside `"1"`;
+  a string key such as `"5"` that PHP would turn into an integer; an
+  empty map, or one keyed `0..n-1`. These used to fail to decode, collide
+  as an error, or -- for `"5"` and the empty map -- come back as a
+  different value. A map of ordinary keys is still a native array.
+
+### Fixed
+
+- A float, boolean or `nil` map key is refused instead of being silently
+  turned into another key: `1.5` became `1`, `true` became `1` and `nil`
+  became `:""`.
 
 ## [0.1.0] - 2026-08-14
 
