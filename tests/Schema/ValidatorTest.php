@@ -159,20 +159,9 @@ final class ValidatorTest extends TestCase
         }
     }
 
-    public function testCoercionOnEncodeConvertsAFloatToARationalField(): void
+    public function testEncodeNeverConvertsAFloatToARationalField(): void
     {
-        $doc = <<<'DXN'
-            %{
-              Fraction: %schema{ value: :rational }
-            }
-            DXN;
-        $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
-        $text = Dextrin::encode(['value' => 0.5], registry: $registry, schema: 'Fraction');
-        self::assertSame('%Fraction(1){value:1/2}', $text);
-    }
-
-    public function testCoerceFalseRejectsWhatWouldOtherwiseBeCoerced(): void
-    {
+        // Nothing is converted to make a value match (DXN.md §4.7).
         $doc = <<<'DXN'
             %{
               Fraction: %schema{ value: :rational }
@@ -180,7 +169,7 @@ final class ValidatorTest extends TestCase
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
         $this->expectException(DXNError::class);
-        Dextrin::encode(['value' => 0.5], registry: $registry, schema: 'Fraction', coerce: false);
+        Dextrin::encode(['value' => 0.5], registry: $registry, schema: 'Fraction');
     }
 
     public function testSchemaFacadeValidateChecksAnAlreadyDecodedStruct(): void
@@ -190,7 +179,7 @@ final class ValidatorTest extends TestCase
         self::assertTrue(Schema::validate($struct, $registry, 'Point'));
     }
 
-    public function testSchemaFacadeValidateEncodeReturnsTheCoercedValue(): void
+    public function testSchemaFacadeValidateEncodeReturnsTheCheckedValueUnconverted(): void
     {
         $doc = <<<'DXN'
             %{
@@ -198,7 +187,7 @@ final class ValidatorTest extends TestCase
             }
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
-        $result = Schema::validateEncode(['value' => 0.5], $registry, 'Fraction');
+        $result = Schema::validateEncode(['value' => new DXNRational('1', '2')], $registry, 'Fraction');
         self::assertInstanceOf(DXNStruct::class, $result);
         self::assertEquals(new DXNRational('1', '2'), $result->pairs()[0][1]);
     }

@@ -47,7 +47,7 @@ use JOetjen\Dextrin\Value\Equality;
  * One field-per-form, all nullable except `form` itself, rather than a
  * class hierarchy -- mirrors the JS port's own plain tagged-object
  * representation (`{form: 'list-of', elem: ...}`) closely enough that
- * porting {@see Compiler}/{@see Coercion} stays a mechanical
+ * porting {@see Compiler} stays a mechanical
  * translation.
  */
 final class TypeExpr
@@ -203,13 +203,18 @@ final class TypeExpr
         if ($value instanceof Validated) {
             return $value->name === $name;
         }
+        // A struct is matched only by a struct (DXN.md §4.7): past a
+        // struct or checked value of the right name, only the class
+        // registered for `$name` is one. An array, or any other value, is
+        // not a struct, however much it looks like one -- nothing is
+        // converted to make it match.
         if ($registry !== null && is_object($value)) {
             $registered = $registry->fetchStructModule($name);
             if ($registered !== null) {
                 return $value::class === $registered;
             }
         }
-        return true;
+        return false;
     }
 
     // ---- primitives (dxn/DXN.md §1.3's 28 non-header types) ----------------

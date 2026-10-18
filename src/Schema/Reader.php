@@ -209,7 +209,7 @@ final class Reader
             throw self::materializerError($name, "refused: {$err->getMessage()}");
         }
         try {
-            Validator::validateForEncode($latest, $value, $registry, coerce: false);
+            Validator::validateForEncode($latest, $value, $registry);
         } catch (\Throwable $err) {
             throw self::materializerError(
                 $name,

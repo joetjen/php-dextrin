@@ -76,6 +76,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Registry::putStrict()`).
 - A keyed struct entry whose key is not a name -- `%Point{1 => 2}` -- is an
   extra field instead of an error.
+- **A struct is matched only by a struct** (DXN.md §4.7). A field typed
+  `User` accepts a `DXNStruct` named `User`, or the class registered for
+  `User`; a bare array, any other value, and a class registered for no
+  schema or another are type errors. Until now every non-struct value was
+  accepted.
+- **Nothing is converted to make a value match its type.** The
+  schema-driven coercion and the `$coerce` parameter of
+  `Dextrin::encode()`, `encodeBinary()`, `Schema::validateEncode()` and
+  `validateEncodeTree()` are removed (`Schema\Coercion` and
+  `Schema\NotCoercible` are gone): a `float` for a `:rational` or
+  `:decimal` field, a string for `:char`, an array for `:list` or
+  `:tuple` and a `\DateTimeImmutable` for a date or time field are now
+  refused. A host value always means the same DXN type, schema or not.
 
 ### Changed
 

@@ -8,22 +8,20 @@ lookups.
 ## Decode / encode
 
 ```php
-Dextrin::decode(string $text, ?Registry $registry = null): mixed
+Dextrin::decode(string $text, ?Registry $registry = null, ?bool $strict = null): mixed
 Dextrin::encode(
     mixed $value,
     bool $pretty = false,
     int $indent = 2,
     ?Registry $registry = null,
     bool $validate = true,
-    bool $coerce = true,
     ?string $schema = null,
 ): string
-Dextrin::decodeBinary(string $bytes, ?Registry $registry = null): mixed
+Dextrin::decodeBinary(string $bytes, ?Registry $registry = null, ?bool $strict = null): mixed
 Dextrin::encodeBinary(
     mixed $value,
     ?Registry $registry = null,
     bool $validate = true,
-    bool $coerce = true,
     ?string $schema = null,
 ): string
 ```
@@ -36,10 +34,9 @@ knows; also lets a registered application class encode under its
 schema's name rather than its own PHP class name.
 `$schema` (encode only): validate the top-level value against one
 named schema. `$validate` (encode only, default `true`): set `false`
-to skip the automatic whole-tree schema check. `$coerce` (encode only,
-default `true`): let a mismatched field be coerced toward its
-declared type via that DXN type's `fromX` conversion helper before
-failing validation; no Elixir `dextrin` equivalent. `$pretty`/`$indent`
+to skip the automatic whole-tree schema check; nothing is ever
+converted to match a field's type (DXN.md §4.7). `$strict` (decode
+only): refuse extra fields on schema-backed structs. `$pretty`/`$indent`
 (encode only): multi-line, indented output instead of single-line/
 compact, and spaces per nesting level when `$pretty` is `true`
 (default 2).
@@ -168,8 +165,8 @@ PHP has no structural-typing equivalent to lean on instead.
 
 ```php
 Schema::validate(mixed $value, Registry $registry, string $schemaName): true;                    // throws on failure
-Schema::validateEncode(mixed $value, Registry $registry, string $schemaName, bool $coerce = true): mixed;  // one named schema, encode-side -- may coerce and return a new value
-Schema::validateEncodeTree(mixed $value, Registry $registry, bool $coerce = true): mixed;          // automatic whole-tree walk, encode-side -- may coerce and return a new value
+Schema::validateEncode(mixed $value, Registry $registry, string $schemaName): mixed;  // one named schema, encode-side -- checks, never converts
+Schema::validateEncodeTree(mixed $value, Registry $registry): mixed;          // automatic whole-tree walk, encode-side -- checks, never converts
 ```
 
 ## `.dxns` type_expr forms, at a glance

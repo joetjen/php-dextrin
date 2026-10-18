@@ -66,12 +66,11 @@ final class Dextrin
      * one case the automatic walk can't cover on its own, a nameless
      * top-level bare array or unregistered struct.
      *
-     * `$coerce` (default `true`) lets a field whose value doesn't
-     * already match its declared type be coerced toward it first (a
-     * plain `float` becoming a `DXNRational` for a `:rational` field,
-     * say) -- see {@see \JOetjen\Dextrin\Schema\Coercion}'s own doc;
-     * this has no Elixir `dextrin` equivalent. Pass `coerce: false`
-     * for strict validation with no silent conversion.
+     * Nothing is converted to make a value match its declared type
+     * (DXN.md §4.7): a host value always means the same DXN type,
+     * schema or not, so a `float` for a `:rational` field is refused
+     * rather than turned into a `DXNRational`. Use the `DXN*` classes to
+     * say which type a value is.
      */
     public static function encode(
         mixed $value,
@@ -79,11 +78,10 @@ final class Dextrin
         int $indent = 2,
         ?Registry $registry = null,
         bool $validate = true,
-        bool $coerce = true,
         ?string $schema = null,
     ): string {
         try {
-            $validated = self::maybeValidateEncode($value, $registry, $validate, $coerce, $schema);
+            $validated = self::maybeValidateEncode($value, $registry, $validate, $schema);
             return $pretty ? Formatter::pretty($validated, $indent, $registry) : Printer::print($validated, $registry);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'encode');
@@ -107,7 +105,7 @@ final class Dextrin
 
     /**
      * Encodes a value to `.dxnb` binary, returning a raw binary
-     * string. Same `$registry`/`$validate`/`$coerce`/`$schema`
+     * string. Same `$registry`/`$validate`/`$schema`
      * parameters as {@see self::encode()}. Throws {@see DXNError} for
      * a value with no DXN representation, or that fails schema
      * validation.
@@ -116,11 +114,10 @@ final class Dextrin
         mixed $value,
         ?Registry $registry = null,
         bool $validate = true,
-        bool $coerce = true,
         ?string $schema = null,
     ): string {
         try {
-            $validated = self::maybeValidateEncode($value, $registry, $validate, $coerce, $schema);
+            $validated = self::maybeValidateEncode($value, $registry, $validate, $schema);
             return Encoder::encode($validated, $registry);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'binary');
@@ -131,27 +128,23 @@ final class Dextrin
      * Two independent checks, both applied when requested: the
      * automatic whole-tree walk (every named struct anywhere in
      * `$value`, driven by whether a schema is registered for its
-     * name) and, only if `$schema` was given, a check of the
-     * (possibly already-coerced) result against that one named
-     * schema. Both may return a *transformed* value when `$coerce`
-     * (default `true`) lets a mismatched field be coerced toward its
-     * declared type -- see {@see self::encode()}'s own doc.
+     * name) and, only if `$schema` was given, a check of the result
+     * against that one named schema.
      */
     private static function maybeValidateEncode(
         mixed $value,
         ?Registry $registry,
         bool $validate,
-        bool $coerce,
         ?string $schema,
     ): mixed {
         $registry ??= new Registry();
 
         $result = $value;
         if ($validate) {
-            $result = Schema::validateEncodeTree($result, $registry, $coerce);
+            $result = Schema::validateEncodeTree($result, $registry);
         }
         if ($schema !== null) {
-            $result = Schema::validateEncode($result, $registry, $schema, $coerce);
+            $result = Schema::validateEncode($result, $registry, $schema);
         }
         return $result;
     }

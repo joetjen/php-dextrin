@@ -25,15 +25,10 @@ use JOetjen\Dextrin\Value\DXNValueInterface;
  * already uses, via `wrapAndCheck()`, so there's one type-checking
  * implementation, not two that could drift.
  *
- * **One genuine difference from a decode-only validator**: encode here
- * can *transform* a value, not just answer ok/error -- `resolveFields`'s
- * `$coerce` option (see {@see Coercion}) may replace a field's value
- * with its coerced form (a plain `float` becoming a `DXNRational` for a
- * `:rational` field, say), and that coerced value has to actually
- * reach the printer/binary encoder, not just pass a check and be
- * discarded. `wrapAndCheck()` therefore rebuilds every container it
- * walks from its (possibly-coerced) children rather than returning the
- * value unchanged.
+ * **Nothing is converted to make a value match** (DXN.md §4.7): a
+ * schema accepts or rejects a value, and never changes what it means.
+ * `wrapAndCheck()` rebuilds every container it walks from its children,
+ * so a checked struct reaches the printer/binary encoder wrapped.
  *
  * Enforcement is decode-time and fail-fast, with no lenient escape
  * hatch to get the materialized value anyway -- a violation is always
@@ -52,7 +47,7 @@ final class Validator
      * declared type, is an error; an optional field that is missing takes
      * its default, or stays absent when it has none -- DXN tells an absent
      * field from one written `nil`. What is built from the result is
-     * {@see Reader}'s job. Never coerces.
+     * {@see Reader}'s job.
      *
      * @return list<array{0: string, 1: mixed}>
      */
@@ -61,7 +56,7 @@ final class Validator
         $given = self::toNameMap($compiled, $struct);
         $pairs = [];
         foreach ($compiled->fields as $field) {
-            $value = self::resolveField($field, $given, $registry, false);
+            $value = self::resolveField($field, $given, $registry);
             if (!$value instanceof Absent) {
                 $pairs[] = [$field->name, $value];
             }
@@ -95,13 +90,13 @@ final class Validator
      * @param array<string, mixed> $given
      * @return array<string, mixed>
      */
-    private static function resolveFields(Compiled $compiled, array $given, Registry $registry, bool $coerce): array
+    private static function resolveFields(Compiled $compiled, array $given, Registry $registry): array
     {
         $resolved = [];
         foreach ($compiled->fields as $field) {
             // An absent optional field still holds its position when a
             // value goes out, as null.
-            $value = self::resolveField($field, $given, $registry, $coerce);
+            $value = self::resolveField($field, $given, $registry);
             $resolved[$field->name] = $value instanceof Absent ? null : $value;
         }
         return $resolved;
@@ -113,10 +108,10 @@ final class Validator
      *
      * @param array<string, mixed> $given
      */
-    private static function resolveField(Field $field, array $given, Registry $registry, bool $coerce): mixed
+    private static function resolveField(Field $field, array $given, Registry $registry): mixed
     {
         if (array_key_exists($field->name, $given)) {
-            return self::checkType($field->name, $given[$field->name], $field->type, $registry, $coerce);
+            return self::checkType($field->name, $given[$field->name], $field->type, $registry);
         }
         if ($field->default !== Field::NO_DEFAULT) {
             return $field->default;
@@ -127,7 +122,7 @@ final class Validator
         return Absent::instance();
     }
 
-    private static function checkType(string $name, mixed $value, TypeExpr $type, Registry $registry, bool $coerce): mixed
+    private static function checkType(string $name, mixed $value, TypeExpr $type, Registry $registry): mixed
     {
         if ($type->matches($value, $registry)) {
             // Stripped here, not deferred to the top: `$value` is
@@ -138,12 +133,6 @@ final class Validator
             return Validated::strip($value);
         }
 
-        if ($coerce) {
-            $coerced = Coercion::tryCoerce($type, $value);
-            if (!$coerced instanceof NotCoercible && $type->matches($coerced, $registry)) {
-                return Validated::strip($coerced);
-            }
-        }
 
         throw new SchemaValidationError("field \"{$name}\" does not match its declared type");
     }
@@ -154,26 +143,24 @@ final class Validator
     // `$value` here is ordinary PHP data about to be encoded -- a
     // DXNStruct (the one shape that round-trips to `%Name{...}` wire
     // syntax), a bare PHP array (this port's own `map`), or a real
-    // application class instance -- and may come back transformed if
-    // `$coerce` lets a field's value be coerced toward its declared
-    // type; see this class's own doc for why.
+    // application class instance; it is checked, never converted.
     //
     // The one structural difference from decode: decode's nested
     // structs arrive *already* `Validated`-wrapped, bottom-up, as a
     // natural consequence of how decoding recurses. Encode has no such
     // built-in recursion to piggyback on, so wrapAndCheck() does it
-    // explicitly -- walking `$value`, checking (and rebuilding, with
-    // any coercions applied) every recognized struct, before
+    // explicitly -- walking `$value`, checking (and rebuilding) every
+    // recognized struct, before
     // resolveFields() ever sees it.
 
     /**
      * Checks `$value` -- ordinary PHP data about to be encoded --
-     * against `$compiled`. Returns the checked (and, if `$coerce`,
-     * possibly coerced) value, {@see Validated}-wrapped.
+     * against `$compiled`. Returns the checked value,
+     * {@see Validated}-wrapped.
      */
-    public static function validateForEncode(Compiled $compiled, mixed $value, Registry $registry, bool $coerce = true): Validated
+    public static function validateForEncode(Compiled $compiled, mixed $value, Registry $registry): Validated
     {
-        return self::checkCompiled($compiled, $value, $registry, $coerce);
+        return self::checkCompiled($compiled, $value, $registry);
     }
 
     /**
@@ -181,15 +168,15 @@ final class Validator
      * application class instance anywhere in the tree and checks each
      * one against its own schema, if the registry has one --
      * regardless of what any enclosing field's declared type is,
-     * recursing fully into whatever it finds. Returns the
-     * (possibly-coerced) tree.
+     * recursing fully into whatever it finds. Returns the checked
+     * tree.
      */
-    public static function validateTreeForEncode(mixed $value, Registry $registry, bool $coerce = true): mixed
+    public static function validateTreeForEncode(mixed $value, Registry $registry): mixed
     {
-        return self::wrapAndCheck($value, $registry, $coerce);
+        return self::wrapAndCheck($value, $registry);
     }
 
-    private static function checkCompiled(Compiled $compiled, mixed $value, Registry $registry, bool $coerce): Validated
+    private static function checkCompiled(Compiled $compiled, mixed $value, Registry $registry): Validated
     {
         // An extra field never shadows a declared one (DXN.md §4.7), on
         // the way out as on the way in.
@@ -202,16 +189,15 @@ final class Validator
             }
         }
         $given = self::toNameMapForEncode($compiled, $value);
-        $wrappedGiven = self::wrapGiven($given, $registry, $coerce);
-        $resolved = self::resolveFields($compiled, $wrappedGiven, $registry, $coerce);
+        $wrappedGiven = self::wrapGiven($given, $registry);
+        $resolved = self::resolveFields($compiled, $wrappedGiven, $registry);
         return new Validated($compiled->name ?? '', self::rebuildChecked($value, $compiled, $resolved));
     }
 
     /**
      * Rebuilds `$value` in its *original* shape (a `DXNStruct`, or a
-     * real application class instance) with `$resolved`'s checked --
-     * and, if coercion applied, coerced -- field values written back
-     * in. Without this, `checkCompiled()` would hand the
+     * real application class instance) with `$resolved`'s checked
+     * field values written back in. Without this, `checkCompiled()` would hand the
      * printer/binary encoder a bare field map instead of something it
      * actually knows how to encode (a plain array has no name of its
      * own to recover `%Name{...}` wire syntax from) -- the encode-time
@@ -227,7 +213,7 @@ final class Validator
      * happened.
      *
      * **PHP-specific limitation**: rebuilding a real application class
-     * instance writes coerced field values back onto a clone via
+     * instance writes checked field values back onto a clone via
      * direct property assignment, which throws if that property is
      * `readonly` (PHP has no generic "reconstruct with these fields
      * changed" for readonly properties the way JS's always-mutable
@@ -308,22 +294,22 @@ final class Validator
      * named struct with a registered schema, check it
      * (`checkCompiled()`) and wrap the result in `Validated`; otherwise
      * recurse into whatever container it is, reconstructing it from
-     * the (possibly-coerced, possibly-wrapped) results so a
-     * wrapped/coerced grandchild survives all the way up to whichever
+     * the (possibly-wrapped) results so a wrapped grandchild survives
+     * all the way up to whichever
      * ancestor's field type actually needs to see it.
      */
-    private static function wrapAndCheck(mixed $value, Registry $registry, bool $coerce): mixed
+    private static function wrapAndCheck(mixed $value, Registry $registry): mixed
     {
         $found = self::schemaNameFor($value, $registry);
         if ($found !== null) {
             [$name, $compiled] = $found;
             try {
-                return self::checkCompiled($compiled, $value, $registry, $coerce);
+                return self::checkCompiled($compiled, $value, $registry);
             } catch (\Throwable $err) {
                 throw new SchemaValidationError("struct \"{$name}\" violates its schema: " . $err->getMessage());
             }
         }
-        return self::wrapChildren($value, $registry, $coerce);
+        return self::wrapChildren($value, $registry);
     }
 
     /** @return array{0: string, 1: Compiled}|null */
@@ -348,16 +334,16 @@ final class Validator
      * @param array<string, mixed> $given
      * @return array<string, mixed>
      */
-    private static function wrapGiven(array $given, Registry $registry, bool $coerce): array
+    private static function wrapGiven(array $given, Registry $registry): array
     {
         $result = [];
         foreach ($given as $k => $v) {
-            $result[$k] = self::wrapAndCheck($v, $registry, $coerce);
+            $result[$k] = self::wrapAndCheck($v, $registry);
         }
         return $result;
     }
 
-    private static function wrapChildren(mixed $value, Registry $registry, bool $coerce): mixed
+    private static function wrapChildren(mixed $value, Registry $registry): mixed
     {
         // Both DXN `map` and `array` are a bare PHP array (see the
         // project's own collections decision) -- one branch,
@@ -366,41 +352,41 @@ final class Validator
         if (is_array($value)) {
             $result = [];
             foreach ($value as $k => $v) {
-                $result[$k] = self::wrapAndCheck($v, $registry, $coerce);
+                $result[$k] = self::wrapAndCheck($v, $registry);
             }
             return $result;
         }
         if ($value instanceof DXNList) {
-            return new DXNList(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce), $value->items));
+            return new DXNList(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry), $value->items));
         }
         if ($value instanceof DXNTuple) {
-            return new DXNTuple(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce), $value->items));
+            return new DXNTuple(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry), $value->items));
         }
         if ($value instanceof DXNSet) {
-            return new DXNSet(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce), $value->items));
+            return new DXNSet(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry), $value->items));
         }
         if ($value instanceof DXNSortedSet) {
-            return DXNSortedSet::fromArray(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce), $value->items));
+            return DXNSortedSet::fromArray(array_map(static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry), $value->items));
         }
         if ($value instanceof DXNOrderedMap) {
             return new DXNOrderedMap(array_map(
-                static fn (array $p): array => [$p[0], self::wrapAndCheck($p[1], $registry, $coerce)],
+                static fn (array $p): array => [$p[0], self::wrapAndCheck($p[1], $registry)],
                 $value->pairs,
             ));
         }
         if ($value instanceof DXNStruct) {
             return $value->isKeyed()
                 ? $value->withPairs(array_map(
-                    static fn (array $p): array => [$p[0], self::wrapAndCheck($p[1], $registry, $coerce)],
+                    static fn (array $p): array => [$p[0], self::wrapAndCheck($p[1], $registry)],
                     $value->pairs(),
                 ))
                 : $value->withValues(array_map(
-                    static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry, $coerce),
+                    static fn (mixed $v): mixed => self::wrapAndCheck($v, $registry),
                     $value->values(),
                 ));
         }
         if ($value instanceof DXNCustomTag) {
-            return new DXNCustomTag($value->name, self::wrapAndCheck($value->value, $registry, $coerce));
+            return new DXNCustomTag($value->name, self::wrapAndCheck($value->value, $registry));
         }
         // Every other DXN* leaf value (DXNChar, DXNSymbol, DXNKeyword,
         // DXNDecimal, DXNRational, DXNDate, DXNTime, DXNTimestamp,
@@ -417,7 +403,7 @@ final class Validator
             $rebuilt = clone $value;
             foreach (get_object_vars($value) as $k => $v) {
                 if (property_exists($rebuilt, $k)) {
-                    $rebuilt->$k = self::wrapAndCheck($v, $registry, $coerce);
+                    $rebuilt->$k = self::wrapAndCheck($v, $registry);
                 }
             }
             return $rebuilt;

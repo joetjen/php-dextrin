@@ -132,18 +132,13 @@ struct anywhere in a value by default (`validate: false` to skip), and
 a `schema:` name additionally validates — and, for a nameless bare
 array, *names* — the top-level value itself against one named schema.
 
-**Schema-driven coercion on encode** (`coerce:`, default `true`, no
-Elixir `dextrin` equivalent) lets a field whose value doesn't already
-match its declared type be coerced toward it first, reusing the same
-`DXN*::fromX()` conversion helpers documented above — a plain `float`
-becomes a `DXNRational` for a `:rational` field, a `\DateTimeImmutable`
-becomes a `DXNDate` for a `:date` field, and so on, recursively through
-`list-of`/`set-of`/`tuple-of`/`nilable`/`one-of` too. Pass
-`coerce: false` for strict validation with no silent conversion (see
-`src/Schema/Coercion.php`). One coercion the JS port has that this
-port omits: `symbol` from a native `symbol` value — PHP's `keyword`
-always decodes as `DXNKeyword`, with nothing analogous to JS's
-`Symbol.for` for such a coercion to apply to.
+**Nothing is converted to make a value match** (DXN.md §4.7): a host
+value always means the same DXN type, with or without a schema. A plain
+`float` is a `float`, so a `:rational` field refuses it rather than
+turning it into a `DXNRational`; say which type a value is with the
+`DXN*` classes and their `fromX()` helpers. A field typed `Point`
+accepts only a `Point` struct — a `DXNStruct` named `Point`, or the
+class registered for it — never a bare array.
 
 Also included, each mirroring its `Dextrin.Schema.*` counterpart:
 `Schema::registerProvider()` (let a class's own library ship its

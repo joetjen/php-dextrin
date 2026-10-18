@@ -77,17 +77,16 @@ final class Schema
      * data you're about to encode -- against a named, compiled schema
      * *before* encoding produces any output. The mirror image of
      * {@see self::validate()}, for data on its way out rather than in.
-     * Returns the checked value (possibly coerced -- see {@see
-     * \JOetjen\Dextrin\Schema\Validator}'s own doc), stripped of
-     * internal bookkeeping.
+     * Returns the checked value, stripped of internal bookkeeping;
+     * nothing is converted (DXN.md §4.7).
      */
-    public static function validateEncode(mixed $value, Registry $registry, string $schemaName, bool $coerce = true): mixed
+    public static function validateEncode(mixed $value, Registry $registry, string $schemaName): mixed
     {
         $found = $registry->fetchStructSchema($schemaName);
         if ($found === null) {
             throw new SchemaValidationError("no compiled schema registered for \"{$schemaName}\"");
         }
-        return Validated::strip(Validator::validateForEncode($found->compiled, $value, $registry, $coerce));
+        return Validated::strip(Validator::validateForEncode($found->compiled, $value, $registry));
     }
 
     /**
@@ -96,12 +95,11 @@ final class Schema
      * instance anywhere in it against its own schema, wherever it
      * turns out to be. Symmetric to how decode checks every named
      * struct unconditionally. `Dextrin::encode()`/`encodeBinary()` call
-     * this automatically by default. Returns the (possibly-coerced)
-     * tree.
+     * this automatically by default. Returns the checked tree.
      */
-    public static function validateEncodeTree(mixed $value, Registry $registry, bool $coerce = true): mixed
+    public static function validateEncodeTree(mixed $value, Registry $registry): mixed
     {
-        return Validated::strip(Validator::validateTreeForEncode($value, $registry, $coerce));
+        return Validated::strip(Validator::validateTreeForEncode($value, $registry));
     }
 
     /**
