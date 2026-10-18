@@ -221,7 +221,7 @@ Dextrin::decode('%LatLng{lat: 51.05, lng: 13.74}', $registry);
 // => LatLng{lat: 51.05, lng: 13.74}
 
 Dextrin::encode(new LatLng(51.05, 13.74), registry: $registry);
-// => '%LatLng{lat:51.05,lng:13.74}'
+// => '%LatLng(1){lat:51.05,lng:13.74}'
 
 // Degrees' own refine constraint is enforced automatically, same as
 // any other schema -- no special handling needed on either side:

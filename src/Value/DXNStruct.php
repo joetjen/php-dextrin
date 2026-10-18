@@ -64,7 +64,40 @@ final class DXNStruct implements DXNValueInterface
      */
     public static function head(string $name, ?int $version = null): string
     {
-        return $version === null ? "%{$name}" : "%{$name}({$version})";
+        return '%' . self::typeName($name, $version);
+    }
+
+    /**
+     * The struct's name as `.dxnb` writes it: `Name`, or `Name(3)` when
+     * it carries a version (DXN.md §2.4, §4.8).
+     */
+    public static function typeName(string $name, ?int $version = null): string
+    {
+        return $version === null ? $name : "{$name}({$version})";
+    }
+
+    /**
+     * The other direction: a `.dxnb` type name read back into its name
+     * and version, or `null` when its version is not a positive integer.
+     *
+     * @return array{0: string, 1: ?int}|null
+     */
+    public static function parseTypeName(string $text): ?array
+    {
+        if (!str_contains($text, '(') && !str_contains($text, ')')) {
+            return [$text, null];
+        }
+        if (preg_match('/\A([^()]+)\(([0-9]+)\)\z/s', $text, $match) !== 1) {
+            return null;
+        }
+        $version = filter_var($match[2], FILTER_VALIDATE_INT);
+        return $version === false || $version <= 0 ? null : [$match[1], $version];
+    }
+
+    /** This struct carrying `$version` instead, and otherwise unchanged. */
+    public function withVersion(?int $version): self
+    {
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $version);
     }
 
     /**

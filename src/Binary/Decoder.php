@@ -467,11 +467,21 @@ final class Decoder
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
         }
         $items = $value->items;
-        $name = array_shift($items);
-        if (!is_string($name)) {
+        $typeName = array_shift($items);
+        if (!is_string($typeName)) {
             throw new BinaryError('malformed struct (tag ' . Tags::T_STRUCT . ') payload', $this->pos);
         }
-        $struct = DXNStruct::positional($name, $items);
+        // The type name carries the version the struct was written with,
+        // "User(3)" (DXN.md §2.4, §4.8).
+        $parsed = DXNStruct::parseTypeName($typeName);
+        if ($parsed === null) {
+            throw new BinaryError(
+                "struct type name \"{$typeName}\" has a version that is not a positive integer",
+                $this->pos,
+            );
+        }
+        [$name, $version] = $parsed;
+        $struct = DXNStruct::positional($name, $items, $version);
 
         $found = $this->registry?->fetchStructSchema($name);
         if ($found === null) {

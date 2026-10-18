@@ -70,8 +70,8 @@ final class Formatter
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
             is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => DXNStruct::head($value->name, $value->version) . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
-            $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => DXNStruct::head($value->name, $value->version) . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isKeyed() && $value->pairs() !== [] => Printer::writtenHead($value, $registry) . self::bracketedEntries('{', self::keywordPairs($value->pairs()), '}', $depth, $indentSize, $registry),
+            $value instanceof DXNStruct && $value->isPositional() && $value->values() !== [] => Printer::writtenHead($value, $registry) . self::bracketed('[', $value->values(), ']', $depth, $indentSize, $registry),
             // Every scalar, every empty collection, and any
             // struct-shaped extended type Printer already handles
             // directly (Regex, Date, Decimal, DXNUuid, ...) needs no
@@ -141,8 +141,9 @@ final class Formatter
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
+                $head = Printer::writtenHead(DXNStruct::keyed($name, []), $registry);
                 $pairs = self::keywordPairs($found->compiled->fieldValues($value));
-                return $pairs === [] ? "%{$name}{}" : "%{$name}" . self::bracketedEntries('{', $pairs, '}', $depth, $indentSize, $registry);
+                return $pairs === [] ? "{$head}{}" : $head . self::bracketedEntries('{', $pairs, '}', $depth, $indentSize, $registry);
             }
         }
 

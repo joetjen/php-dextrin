@@ -179,7 +179,7 @@ final class EncoderTest extends TestCase
             ->putStructSchema('Point', $compiled);
 
         $viaRegistry = Encoder::encode($point, $registry);
-        $viaExplicitStruct = Encoder::encode(DXNStruct::positional('Point', [1, 2]));
+        $viaExplicitStruct = Encoder::encode(DXNStruct::positional('Point', [1, 2], 1));
         self::assertSame($viaExplicitStruct, $viaRegistry);
 
         $viaClassNameOnly = Encoder::encode($point);

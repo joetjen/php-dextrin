@@ -249,15 +249,27 @@ final class Printer
 
     private static function printStruct(DXNStruct $struct, ?Registry $registry): string
     {
+        $head = self::writtenHead($struct, $registry);
         if ($struct->isKeyed()) {
             $parts = [];
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
-            return DXNStruct::head($struct->name, $struct->version) . '{' . implode(',', $parts) . '}';
+            return $head . '{' . implode(',', $parts) . '}';
         }
         $items = implode(',', array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values()));
-        return DXNStruct::head($struct->name, $struct->version) . "[{$items}]";
+        return $head . "[{$items}]";
+    }
+
+    /**
+     * How `$struct` opens when it is written: `%Name(3)` with the latest
+     * loaded version of its schema, or with its own when there is no
+     * schema (DXN.md §4.8). The formatter writes the same head.
+     */
+    public static function writtenHead(DXNStruct $struct, ?Registry $registry): string
+    {
+        $written = $registry?->asWritten($struct) ?? $struct;
+        return DXNStruct::head($written->name, $written->version);
     }
 
     /**

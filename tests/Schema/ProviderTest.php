@@ -126,7 +126,7 @@ final class ProviderTest extends TestCase
         $registry = Schema::registerProvider(new Registry(), new ProviderTestPointProvider());
         $point = new ProviderTestPoint(1.0, 2.0);
         $text = Dextrin::encode($point, registry: $registry);
-        self::assertSame('%Point{x:1.0,y:2.0}', $text);
+        self::assertSame('%Point(1){x:1.0,y:2.0}', $text);
     }
 
     public function testAMismatchedSchemaNameThrows(): void

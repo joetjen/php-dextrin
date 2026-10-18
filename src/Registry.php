@@ -7,6 +7,7 @@ namespace JOetjen\Dextrin;
 use JOetjen\Dextrin\Schema\Compiled;
 use JOetjen\Dextrin\Schema\FetchedSchema;
 use JOetjen\Dextrin\Schema\TypeExpr;
+use JOetjen\Dextrin\Value\DXNStruct;
 
 /**
  * Extension point for both `struct` and `custom-tag` decoding/encoding.
@@ -210,6 +211,20 @@ final class Registry
             return null;
         }
         return new FetchedSchema($resolved, $this->putStructSchema($name, $resolved));
+    }
+
+    /**
+     * `$struct` as it is written here: carrying the latest loaded version
+     * of its schema (DXN.md §4.8), whatever version it says itself. A
+     * struct whose name has no schema keeps its own version, or none.
+     * Every writer goes through this -- text, the formatter and binary --
+     * so encoding never writes a version other than the latest, and never
+     * writes one no schema stands behind.
+     */
+    public function asWritten(DXNStruct $struct): DXNStruct
+    {
+        $found = $this->fetchStructSchema($struct->name);
+        return $found === null ? $struct : $struct->withVersion($found->compiled->version);
     }
 
     /** @return (\Closure(array<string, mixed>): mixed)|null */

@@ -105,7 +105,7 @@ final class ValidatorTest extends TestCase
     public function testEncodeWithSchemaPromotesABareArrayToTheNamedStruct(): void
     {
         $text = Dextrin::encode(['x' => 1.0, 'y' => 2.0], registry: $this->pointRegistry(), schema: 'Point');
-        self::assertSame('%Point{x:1.0,y:2.0,label:"unlabeled"}', $text);
+        self::assertSame('%Point(1){x:1.0,y:2.0,label:"unlabeled"}', $text);
     }
 
     public function testEncodeTreeAutomaticallyValidatesARegisteredDXNStruct(): void
@@ -116,7 +116,7 @@ final class ValidatorTest extends TestCase
         // defaulted-in fields the caller never mentioned.
         $registry = $this->pointRegistry();
         $text = Dextrin::encode(DXNStruct::keyed('Point', [['x', 1.0], ['y', 2.0]]), registry: $registry);
-        self::assertSame('%Point{x:1.0,y:2.0}', $text);
+        self::assertSame('%Point(1){x:1.0,y:2.0}', $text);
     }
 
     public function testEncodeTreeValidatesNestedStructsRegardlessOfEnclosingType(): void
@@ -124,7 +124,7 @@ final class ValidatorTest extends TestCase
         $registry = $this->pointRegistry();
         $value = ['origin' => DXNStruct::keyed('Point', [['x', 0.0], ['y', 0.0]])];
         $text = Dextrin::encode($value, registry: $registry);
-        self::assertSame('%{origin:%Point{x:0.0,y:0.0}}', $text);
+        self::assertSame('%{origin:%Point(1){x:0.0,y:0.0}}', $text);
     }
 
     public function testEncodeCanBeToldNotToValidate(): void
@@ -136,7 +136,7 @@ final class ValidatorTest extends TestCase
             registry: $this->pointRegistry(),
             validate: false,
         );
-        self::assertSame('%Point{x:1.0}', $text);
+        self::assertSame('%Point(1){x:1.0}', $text);
     }
 
     public function testEncodeSchemaViolationThrowsDXNErrorWithEncodeStage(): void
@@ -158,7 +158,7 @@ final class ValidatorTest extends TestCase
             DXN;
         $registry = Compiler::compile(Dextrin::decode($doc), new Registry());
         $text = Dextrin::encode(['value' => 0.5], registry: $registry, schema: 'Fraction');
-        self::assertSame('%Fraction{value:1/2}', $text);
+        self::assertSame('%Fraction(1){value:1/2}', $text);
     }
 
     public function testCoerceFalseRejectsWhatWouldOtherwiseBeCoerced(): void

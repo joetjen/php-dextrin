@@ -281,8 +281,15 @@ ever differ:
 
 ```php
 Dextrin::encode(new Point(1, 2), registry: $registry3);
-// => '%Point{x:1,y:2}'
+// => '%Point(1){x:1,y:2}'
 ```
+
+The `(1)` is the schema's version. A schema with no header is version
+1; `%schema(2){...}` is version 2, and a registry can hold several
+versions of `Point` side by side. Encoding always writes the latest
+one loaded, so the reader knows exactly which shape it is looking at;
+a struct written without one, `%Point{...}`, is read as the latest.
+See DXN.md §4.8 for how to deploy a schema change.
 
 `Registry` is updated immutable-style — every `put*` method returns a
 *new* `Registry`, never mutates the one it's called on — so build up
@@ -361,7 +368,7 @@ $registry5 = Schema::registerProvider(new Registry(), new LibPointProvider());
 Dextrin::decode('%Point{x: 1, y: 2}', $registry5);
 // => LibPoint{x: 1, y: 2}
 Dextrin::encode(new LibPoint(1.0, 2.0), registry: $registry5);
-// => '%Point{x:1.0,y:2.0}'
+// => '%Point(1){x:1.0,y:2.0}'
 ```
 
 Implementing only `DXNSchemaProvider` (without `dxnMaterialize()`) is

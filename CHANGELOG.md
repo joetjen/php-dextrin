@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%User(3)[...]` decode to a `DXNStruct` whose `version` is 3, and are
   written back with it. A version of zero or less is refused.
 - `DXNStruct::head()`, `DXNStruct::withPairs()` and `withValues()`.
+- **Every struct written against a schema carries the latest loaded
+  version of it**, in text (`%User(3){...}`, and `%User(1){...}` when
+  version 1 is the only one) and in `.dxnb`, where the type name becomes
+  `"User(3)"`. A struct with no schema keeps its own version, or none.
+  `Registry::asWritten()` decides; `DXNStruct::typeName()` and
+  `parseTypeName()` spell it, and `Printer::writtenHead()` is the head
+  both text writers share. A `.dxnb` type name whose version is not a
+  positive integer is a `binary` error.
 
 ### Changed
 
@@ -59,6 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A keyed struct written to `.dxnb` went on the wire in the order of its
+  keys rather than its schema's field order, so it came back with its
+  fields swapped.
 - A float, boolean or `nil` map key is refused instead of being silently
   turned into another key: `1.5` became `1`, `true` became `1` and `nil`
   became `:""`.
