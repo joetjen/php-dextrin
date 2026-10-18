@@ -209,6 +209,20 @@ The body is the fields, in order -- that order is the positional order.
 `(2)` is the version; a schema without one is version 1. A struct can
 say which version it was written with: `%Name(2){...}`.
 
+## Versions and extra fields
+
+```text
+%Point(2){x: 1, y: 2}            written with version 2; encoding always writes the latest
+%Point{x: 1, y: 2}               no version: read as the latest
+%Point[1 2 label: "a"]           extra fields after a positional struct's items
+%Point{x: 1, y: 2, label: "a"}   an undeclared name is an extra field
+```
+
+Newer than loaded: read against the latest (text by name, `.dxnb` by
+position). Older and loaded: the materializer upgrades it, else
+`schema/no-materializer`. Older and not loaded: `schema/unknown-version`.
+Reordering fields misreads silently in older `.dxnb` readers: append only.
+
 ## Standard named types (`Std`)
 
 ```php
@@ -229,6 +243,7 @@ dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
 dextrin format data.dxn [--mode pretty|condense] [--in-place]
+dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 ```
 
 No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.unicode`: the

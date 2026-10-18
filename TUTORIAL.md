@@ -255,7 +255,7 @@ second-guess data it isn't the origin of).
 
 ## 7. Materializing real PHP classes
 
-By default a struct materializes to a plain, string-keyed array.
+By default a checked struct comes back as a generic `DXNStruct`.
 Register a materializer to produce your own class instance instead:
 
 ```php
@@ -294,26 +294,7 @@ Dextrin::encode(new Point(1, 2), registry: $registry3);
 // => '%Point(1){x:1,y:2}'
 ```
 
-The `(1)` is the schema's version. A schema with no header is version
-1; `%schema(2){...}` is version 2, and a registry can hold several
-versions of `Point` side by side. Encoding always writes the latest
-one loaded, so the reader knows exactly which shape it is looking at;
-a struct written without one, `%Point{...}`, is read as the latest.
-
-A reader that meets a struct written with another version than its
-latest does one of three things. A **newer** version is read against
-the latest the reader has, matching fields by name in text and by
-position in `.dxnb`; anything it does not know is dropped. An **older**
-version it has loaded is handed to the schema's materializer to be
-upgraded, and refused (`schema/no-materializer`) when there is none.
-An older version it has *not* loaded is refused
-(`schema/unknown-version`).
-
-**Reading forward in `.dxnb` trusts the positions.** If a newer version
-reordered, inserted or removed fields, an older reader puts values in
-the wrong fields — with no error at all when the types happen to agree.
-A schema whose older readers must keep working only ever *appends*
-fields. See DXN.md §4.8 for this and for how to deploy a schema change.
+The `(1)` is the schema's version; §8 is about what it is for.
 
 `Registry` is updated immutable-style — every `put*` method returns a
 *new* `Registry`, never mutates the one it's called on — so build up
@@ -342,7 +323,117 @@ and a materializer receives the extras with the declared fields. Pass
 instead (`schema/undeclared-field`): right for a config file written by
 hand, where an unknown field is a typo.
 
-## 8. Named types and the standard library
+## 8. Evolving a schema
+
+A schema changes; data written with the old one does not. Each `.dxns`
+document describes one **version** of each schema in it — no header
+is version 1, `%schema(2){...}` is version 2 — and a registry holds as
+many versions of `Point` side by side as you load:
+
+```php
+$load = fn (array $sources): Registry => array_reduce(
+    $sources,
+    fn (Registry $registry, string $source) => Schema::compile(Dextrin::decode($source), $registry),
+    new Registry(),
+);
+
+$v1 = '%{Point: %schema{x: :integer, y: :integer}}';
+$v2 = '%{Point: %schema(2){x: :integer, y: :integer, label?: :string}}';
+```
+
+**Every struct is written with the latest version loaded**, so a
+reader always knows which shape it is looking at:
+
+```php
+$point = Dextrin::decode('%Point{x: 1, y: 2, label: "origin"}', $load([$v2]));
+Dextrin::encode($point, registry: $load([$v2]));
+// => '%Point(2){x:1,y:2,label:"origin"}'
+```
+
+A struct written without a version, `%Point{...}` — mostly text written
+by hand — is read as the latest.
+
+### A newer writer, an older reader
+
+A reader that has only version 1 reads version 2 against what it has.
+Text matches fields by name, and a field it does not know is kept as an
+extra field (§7), so it travels on:
+
+```php
+Dextrin::decode('%Point(2){x: 1, y: 2, label: "origin"}', $load([$v1]));
+// => DXNStruct{name: 'Point', version: 1, pairs: [['x', 1], ['y', 2]], extra: [['label', 'origin']]}
+```
+
+`.dxnb` has no names, only positions: the reader takes as many items
+as it has fields and drops the rest, so the same point read from binary
+comes back without its `label`. Every field the reader requires must be
+there, with the right type, either way.
+
+### An older writer, a newer reader
+
+A reader whose latest is version 2 cannot read version 1 as though it
+were version 2 — that would be a guess — so it refuses, unless the
+schema has a materializer to upgrade it:
+
+```php
+Dextrin::decode('%Point(1){x: 1, y: 2}', $load([$v1, $v2]));
+// throws DXNError, category 'schema/no-materializer'
+
+$registry = $load([$v1, $v2])->putStructMaterializer(
+    'Point',
+    fn (string $name, int $version, array $f): DXNStruct => DXNStruct::keyed(
+        'Point',
+        [['x', $f['x']], ['y', $f['y']], ['label', $version === 1 ? 'unnamed' : $f['label']]],
+        2,
+    ),
+);
+
+Dextrin::decode('%Point(1){x: 1, y: 2}', $registry);
+// => DXNStruct{name: 'Point', version: 2, pairs: [['x', 1], ['y', 2], ['label', 'unnamed']]}
+```
+
+The materializer is called for every `Point`, whatever its version, and
+what it answers is checked against the latest. That is why the version
+needs loading: an older version that is not loaded is refused
+(`schema/unknown-version`), because without its schema there are no
+field names to hand the materializer.
+
+### The one thing that goes wrong silently
+
+**Reading forward in `.dxnb` trusts the positions.** Suppose version 3
+only swaps two fields:
+
+```php
+$v3 = '%{Point: %schema(3){y: :integer, x: :integer, label?: :string}}';
+
+$p3 = Dextrin::decode('%Point{x: 1, y: 2, label: "a"}', $load([$v3]));
+Dextrin::decodeBinary(Dextrin::encodeBinary($p3, registry: $load([$v3])), $load([$v2]));
+// => DXNStruct{name: 'Point', version: 2, pairs: [['x', 2], ['y', 1], ['label', 'a']]}
+```
+
+The version 2 reader has `x` and `y` the wrong way round, and nothing
+said so: both are integers. Text, read by name, gets it right. So a
+schema whose older readers must keep working **only ever appends**
+fields; reordering, inserting or removing one is for when every reader
+has the new version — deploy readers first (DXN.md §4.8).
+
+### Checking a change before it ships
+
+`dextrin compat` compares the previous release's schema files with the
+current ones, for CI. It fails when a version's content changed without
+a new version, or when a version went down, and lists what the latest
+version's materializer has to upgrade from each older one:
+
+```sh
+$ vendor/bin/dextrin compat schemas-v1.4.0/ schemas/
+Point 1 -> 3: added label
+Point 2 -> 3: no field changes
+OK: no version discipline problems
+```
+
+`Schema::compat($old, $new)` answers the same as data.
+
+## 9. Named types and the standard library
 
 Any `.dxns` entry that *isn't* a `%schema{}` defines a reusable named
 type instead — purely data, composing the fixed type_expr vocabulary:
@@ -366,7 +457,7 @@ use JOetjen\Dextrin\Schema\Std;
 $registry4 = Schema::compile($doc, Std::registry());
 ```
 
-## 9. Letting a third-party class provide its own schema
+## 10. Letting a third-party class provide its own schema
 
 Everything so far assumed you write the `.dxns` schema yourself. If
 `Point` instead came from a library that doesn't want to (and
@@ -420,7 +511,7 @@ Implementing only `DXNSchemaProvider` (without `dxnMaterialize()`) is
 fine too — decoding then falls back to the same generic `DXNStruct` any
 other schema with no materializer produces.
 
-## 10. Putting it together: a small config loader
+## 11. Putting it together: a small config loader
 
 ```php
 $schemaSource = <<<'DXN'

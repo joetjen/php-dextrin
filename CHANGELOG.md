@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The tutorial's §8, "Evolving a schema": a worked example of versions,
+  reading across them, the materializer, the positional risk and
+  `dextrin compat`. The cheatsheet gains versions and extra fields.
 - `Schema::compat()` and `dextrin compat OLD NEW` -- the version
   discipline check (DXN.md §4.8), for CI against the previous release's
   schema files: a version whose content changed without a new version,
