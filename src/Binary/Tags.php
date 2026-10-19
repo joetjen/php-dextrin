@@ -46,6 +46,9 @@ final class Tags
     /** A struct's extra fields: only ever its last item (DXN.md §2.3). */
     public const T_EXTRA = 215;
 
+    /** A run of bits that is not whole bytes: `[bytes, count]` (DXN.md §2.3). */
+    public const T_BITS = 216;
+
     /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
     public const DURATION_FIELDS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'microseconds'];
 

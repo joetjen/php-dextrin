@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bits`**, as DXN.md 1.1 defines it (dextrin afbb00d): `DXNBits`
+  holds a run of bits that is not whole bytes -- the bytes, the unused
+  bits zero, and the count -- written `@bits {"oA==" 3}` and `T_BITS`
+  (216). `DXNBits::from()` answers `DXNBytes` for a whole number of
+  bytes, as bits and bytes are one value space. `:bits` in a schema takes
+  bits and bytes, `:bytes` only whole bytes; bits are no map key.
+- The format guides in `dxn/` are DXN.md 1.1's text: format version 1.1,
+  `bits`, the private range 200-216, and §5's `document/*` errors.
+
 ### Fixed
 
 - **A map key that is not allowed, and a schema violation, say where

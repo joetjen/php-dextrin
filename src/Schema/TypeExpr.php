@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Schema;
 
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNDate;
@@ -55,7 +56,7 @@ final class TypeExpr
     private const PRIMITIVES = [
         'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
         'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
-        'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'regex',
+        'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex',
     ];
 
     /**
@@ -252,6 +253,8 @@ final class TypeExpr
             'uuid' => $value instanceof DXNUuid,
             'uri' => $value instanceof DXNUri,
             'bytes' => $value instanceof DXNBytes,
+            // Bits and bytes are one value space (DXN.md §4.1): `:bits` takes both.
+            'bits' => $value instanceof DXNBits || $value instanceof DXNBytes,
             'regex' => $value instanceof DXNRegex,
             default => false,
         };

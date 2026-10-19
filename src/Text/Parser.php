@@ -13,6 +13,7 @@ use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -47,7 +48,7 @@ final class Parser
 {
     private const BUILT_IN_TAGS = [
         'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true,
-        'uri' => true, 'bytes' => true, 'datetime' => true, 'duration' => true,
+        'uri' => true, 'bytes' => true, 'bits' => true, 'datetime' => true, 'duration' => true,
     ];
 
     /** @var list<Token> */
@@ -660,6 +661,7 @@ final class Parser
             'uuid' => DXNUuid::fromString($this->parseStringValue($name, $offset)),
             'uri' => DXNUri::fromString($this->parseStringValue($name, $offset)),
             'bytes' => $this->parseBytesTag($name, $offset),
+            'bits' => $this->parseBitsTag($offset),
             'datetime' => Temporal::parseOffsetDateTime($this->parseStringValue($name, $offset)),
             // No `default` arm: self::BUILT_IN_TAGS' keys are exactly
             // this match's arms, so PHPStan already proves this is
@@ -710,6 +712,29 @@ final class Parser
             throw new ParseError('@array requires a list literal argument', $offset);
         }
         return $inner->toArray();
+    }
+
+    /**
+     * `@bits {"..." n}` (DXN.md §1.4): base64 and a bit count; a whole
+     * number of bytes reads as bytes, which is what it is.
+     */
+    private function parseBitsTag(int $offset): DXNBits|DXNBytes
+    {
+        $wanted = '@bits takes {"base64" bit-count}, the count matching the bytes';
+        $inner = $this->parseValue();
+        if (!$inner instanceof DXNTuple || count($inner->items) !== 2) {
+            throw new ParseError($wanted, $offset);
+        }
+        [$text, $count] = $inner->items;
+        $data = is_string($text) ? base64_decode($text, true) : false;
+        if ($data === false || !is_int($count)) {
+            throw new ParseError($wanted, $offset);
+        }
+        try {
+            return DXNBits::from($data, $count);
+        } catch (\InvalidArgumentException) {
+            throw new ParseError($wanted, $offset);
+        }
     }
 
     private function parseBytesTag(string $name, int $offset): DXNBytes
