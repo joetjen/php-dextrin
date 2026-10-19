@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A value written well that is not one is a `syntax` error** at the
+  token it began with (`DXN.md` §5), as the reference answers: an
+  impossible date or time, a uuid or datetime that is not one, an unknown
+  string escape, a zero denominator. They came back with no category and
+  no offset.
 - `Document::format()` wrote the header without its space
   (`@dxn"1.0"`); it writes the tag, one space and the version, however
   they were spaced.

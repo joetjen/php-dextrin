@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\HasCategory;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\MapKey;
 use JOetjen\Dextrin\Registry;
@@ -237,9 +238,32 @@ final class Parser
         }
     }
 
+    /**
+     * One value, read off the tokens.
+     *
+     * **A value written well that is not one** -- an impossible date, a
+     * uuid that is not one, an unknown escape -- is text that does not
+     * parse: the `\InvalidArgumentException` the value's own constructor
+     * throws becomes a `syntax` error at the token the value began with,
+     * as the reference answers. One that names its own category (a map
+     * key not allowed) and any other error pass through as they are.
+     */
     private function parseValueBody(): mixed
     {
         $tok = $this->peek();
+        try {
+            return $this->parseValueToken($tok);
+        } catch (\InvalidArgumentException $err) {
+            if ($err instanceof HasCategory) {
+                throw $err;
+            }
+            throw new ParseError($err->getMessage(), $tok->start);
+        }
+    }
+
+    /** The value `$tok` begins. */
+    private function parseValueToken(Token $tok): mixed
+    {
         return match ($tok->type) {
             'NIL' => $this->advanceAnd(null),
             'TRUE' => $this->advanceAnd(true),
