@@ -290,10 +290,13 @@ function cmdFormat(array $argv): void
     // value.
     $doc = \JOetjen\Dextrin\Document::parse(readFileContents($path));
     $text = $mode === 'pretty' ? $doc->format() : Dextrin::encode($doc->toValue());
+    // A file written in place ends with one newline, and so does printed
+    // output, whether or not the formatted text kept the source's.
+    $line = rtrim($text, "\n") . "\n";
     if ($flags['in-place'] ?? false) {
-        file_put_contents($path, $text . "\n");
+        file_put_contents($path, $line);
     } else {
-        fwrite(STDOUT, $text . "\n");
+        fwrite(STDOUT, $line);
     }
 }
 

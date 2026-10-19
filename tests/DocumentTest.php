@@ -174,9 +174,25 @@ final class DocumentTest extends TestCase
     {
         $text = "# top\n\n%{name: \"acme\", # the name\n deps: [\"a\" # temporary\n# still about a\n \"b\"\n\n# pinned\n \"c\"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n";
         self::assertSame(
-            "# top\n\n%{\n  name: \"acme\"  # the name\n  deps: [\n    \"a\"  # temporary\n         # still about a\n    \"b\"\n\n    # pinned\n    \"c\"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end",
+            "# top\n\n%{\n  name: \"acme\"  # the name\n  deps: [\n    \"a\"  # temporary\n         # still about a\n    \"b\"\n\n    # pinned\n    \"c\"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end\n",
             Document::parse($text)->format(),
         );
+    }
+
+    // The header is `@dxn` and its version, one space between them,
+    // however they were spaced.
+    public function testTheHeaderKeepsOneSpaceBetweenItsTagAndItsVersion(): void
+    {
+        self::assertSame("@dxn \"1.0\"\n[\n  1\n]", Document::parse("@dxn   \"1.0\"\n[1]")->format());
+        self::assertSame("@dxn \"1.0\"\n[\n  1\n]", Document::parse("@dxn\"1.0\"\n[1]")->format());
+    }
+
+    // A formatter run on save must not take a file's last newline away;
+    // one the source did not end with, it does not add.
+    public function testADocumentEndsWithANewlineExactlyWhenTheSourceDid(): void
+    {
+        self::assertSame("%{\n  a: 1\n}\n", Document::parse("%{a: 1}\n")->format());
+        self::assertSame("%{\n  a: 1\n}", Document::parse("%{a: 1}")->format());
     }
 
     public function testADocumentWithNoCommentsComesOutAsThePrettyPrinterWritesItsValue(): void
