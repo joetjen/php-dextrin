@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
+Versioned schemas, extra fields, the conformance suite's adapter and a
+document that keeps its comments. Breaking: a 0.1.x `.dxns` file has
+to be rewritten, and decoding a checked struct answers a `DXNStruct`.
+
+### Migrating from 0.1.x
+
+- **`.dxns` files.** The body lists the fields directly, in the order
+  `fields: @ordered %{...}` gave them, and a schema without a version
+  is version 1:
+
+  ```text
+  # 0.1.x
+  User: %schema{closed: true, fields: @ordered %{name: :string, email?: :string}}
+  # 0.2.0
+  User: %schema{name: :string, email?: :string}
+  ```
+
+  An unconverted file is refused by `Schema::compile` (a
+  `SchemaCompileError`, `schema/compile`: `field "fields": unrecognized
+  type expression`), never read as something else.
+- **`closed:`, `forbidden:` and `refine-fn:` are gone.** A struct may
+  carry fields its schema does not declare. Where `closed: true` refused
+  them, decode with `strict: true` (or `$registry->putStrict(true)`),
+  which refuses every undeclared field as `schema/undeclared-field`. A
+  `forbidden:` list or a refine predicate becomes a check in the
+  schema's materializer (`$registry->putStructMaterializer()`), which may
+  throw.
+- **A checked struct decodes to a `DXNStruct`**, not an array. A
+  materializer that answers its fields keeps the old shape:
+  `$registry = $registry->putStructMaterializer('User', fn (string
+  $name, int $version, array $fields): array => $fields)` -- the
+  registry's methods answer a new registry.
+- **`.dxnb` written by 0.1.x still reads**, and so does text: its structs
+  carry no version, and a struct without a version is read as the latest
+  version loaded. Proven against bytes 0.1.0 wrote, in
+  `tests/Binary/V010Test.php`.
+- **Rewrite stored 0.1.x data before you load a version 2.** Once a
+  version 2 is loaded, an unversioned struct is read as version 2, and a
+  `.dxnb` struct with version 1's fields no longer matches it
+  (`schema/field-count`). Decoded and encoded again with 0.2.0, the same
+  value is written as `User(1)`, and from then on it is read as version 1
+  and handed to the materializer to upgrade.
+
 ### Added
 
 - `Document` -- a `.dxn` document with everything it holds, its comments,
@@ -114,6 +159,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Licensed under the Apache License 2.0 (`Apache-2.0`); it was MIT.
+- The format guides in `dxn/` are `DXN.md`'s current text, copied from
+  the Elixir reference; the tutorial no longer calls PHP "JS".
 - **A native `\DateTimeInterface` encodes as a `datetime`**, keeping its
   offset, with or without a schema (DXN.md §4.7). It was written as an
   empty struct named after its class. `DXNDateTime::fromNative()` is
