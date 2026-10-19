@@ -129,6 +129,35 @@ final class ConformanceTest extends TestCase
         );
     }
 
+    public function testAFormatAnswersTheDocumentLaidOutItsCommentsKept(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'text' => "[\n  1  # one\n  2\n]"]],
+            self::answered([['id' => 'a', 'operation' => 'format', 'text' => "[1 # one\n 2]"]]),
+        );
+    }
+
+    public function testAnEditAnswersTheDocumentRenderedAfterItsEditsInOrder(): void
+    {
+        $edits = [
+            ['op' => 'replace', 'path' => '[:name]', 'value' => '"other"'],
+            ['op' => 'delete', 'path' => '[:deps 0]'],
+            ['op' => 'insert', 'path' => '[:deps]', 'where' => '-1', 'value' => '"c"'],
+        ];
+        self::assertSame(
+            [['id' => 'a', 'text' => "%{\n  name: \"other\" # the name\n  deps: [\"b\" \"c\"]\n}\n"]],
+            self::answered([['id' => 'a', 'operation' => 'edit', 'text' => "%{\n  name: \"acme\" # the name\n  deps: [\"a\" \"b\"]\n}\n", 'edits' => $edits]]),
+        );
+    }
+
+    public function testARefusedEditAnswersDocumentReason(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'error' => 'document/not-found']],
+            self::answered([['id' => 'a', 'operation' => 'edit', 'text' => '%{a: 1}', 'edits' => [['op' => 'delete', 'path' => '[:nope]']]]]),
+        );
+    }
+
     public function testASchemaThatDoesNotCompileAnswersItsCategory(): void
     {
         self::assertSame(

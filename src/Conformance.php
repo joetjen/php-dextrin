@@ -19,7 +19,12 @@ namespace JOetjen\Dextrin;
  * its canonical form; `encode` reads `text` and answers the exact bytes
  * as base64. A case may carry `schemas`, `.dxns` sources compiled in
  * order into the registry it runs with, and `strict: true`, which
- * decodes strictly (DXN.md §4.7). Any of them may answer `error` instead: the error's
+ * decodes strictly (DXN.md §4.7). `format` reads `text` as a document and
+ * answers it laid out, comments kept, as `text`; `edit` reads `text` as a
+ * document, makes its `edits` in order -- `replace`, `delete`, `insert`,
+ * `update`, their `path`, `value` and `where` written as DXN text -- and
+ * answers the document rendered, as `text`; a refused edit answers
+ * `document/<reason>`. Any of them may answer `error` instead: the error's
  * category (DXN.md §5), never its message. An error with no category yet
  * is `uncategorised`, which no case expects, so it shows as a
  * disagreement rather than passing by accident.
@@ -56,6 +61,12 @@ final class Conformance
             return match ($case['operation'] ?? null) {
                 'decode' => ['canonical' => Canonical::print(Dextrin::decode(self::text($case, 'text'), $registry, $strict))],
                 'decode-binary' => self::decodedBinary(self::text($case, 'binary'), $registry, $strict),
+                'format' => ['text' => Document::parse(self::text($case, 'text'), $registry, $strict)->format()],
+                'edit' => ['text' => self::edited(
+                    Document::parse(self::text($case, 'text'), $registry, $strict),
+                    $case['edits'] ?? [],
+                    $registry,
+                )->render()],
                 'encode' => ['binary' => base64_encode(Dextrin::encodeBinary(
                     Dextrin::decode(self::text($case, 'text'), $registry, $strict),
                     registry: $registry,
@@ -64,7 +75,32 @@ final class Conformance
             };
         } catch (DXNError $err) {
             return ['error' => $err->category ?? 'uncategorised'];
+        } catch (Document\DocumentError $err) {
+            return ['error' => $err->category()];
         }
+    }
+
+    /**
+     * `$doc` after `$edits`, made in order; each one's path, value and
+     * where are DXN text, read by this implementation's own decoder.
+     */
+    private static function edited(Document $doc, mixed $edits, Registry $registry): Document
+    {
+        foreach (is_array($edits) ? $edits : [] as $edit) {
+            $read = static fn (string $key): mixed => Dextrin::decode(is_array($edit) && is_string($edit[$key] ?? null) ? $edit[$key] : 'nil', $registry);
+            $path = static function () use ($read): array {
+                $list = $read('path');
+                return $list instanceof Value\DXNList ? $list->items : [];
+            };
+            $doc = match (is_array($edit) ? ($edit['op'] ?? null) : null) {
+                'replace' => $doc->replace($path(), $read('value')),
+                'delete' => $doc->delete($path()),
+                'insert' => $doc->insert($path(), $read('where'), $read('value')),
+                'update' => $doc->update($read('value'), is_string($edit['on_ambiguity'] ?? null) ? $edit['on_ambiguity'] : 'safe')[0],
+                default => throw new \InvalidArgumentException('unknown edit ' . json_encode($edit)),
+            };
+        }
+        return $doc;
     }
 
     /**

@@ -72,6 +72,19 @@ only changes rendering, never what the value decodes back to.
 dextrin format data.dxn --mode pretty|condense [--in-place]
 ```
 
+## Documents: keeping comments
+
+```php
+$doc = Document::parse($source, $registry, $strict);   // decode()'s options and errors
+$doc->toValue();                                       // what decode() gives
+$doc->render();                                        // the source, byte for byte
+$doc->format();                                        // laid out, comments kept
+$doc = $doc->replace(['version'], '2.0.0');
+$doc = $doc->delete(['deps', 0]);                      // with its own comments
+$doc = $doc->insert(['deps'], -1, 'new');              // index, or a map's new key
+[$doc, $changes] = $doc->update($newValue, 'safe');    // 'safe' | 'guess' | 'error'
+```
+
 ## Value-type cheatsheet
 
 ```text
@@ -245,7 +258,7 @@ NonEmptyList, NonEmptySet
 dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
-dextrin format data.dxn [--mode pretty|condense] [--in-place]
+dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps comments
 dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 ```
 

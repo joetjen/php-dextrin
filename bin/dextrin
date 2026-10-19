@@ -285,8 +285,11 @@ function cmdFormat(array $argv): void
     if ($mode !== 'pretty' && $mode !== 'condense') {
         throw new \RuntimeException("unrecognized --mode \"{$mode}\" -- expected \"pretty\" or \"condense\"");
     }
-    $value = Dextrin::decode(readFileContents($path));
-    $text = Dextrin::encode($value, pretty: $mode === 'pretty');
+    // Pretty lays the document out and keeps its comments; condensed
+    // output is one line, which no comment fits on, so it reprints the
+    // value.
+    $doc = \JOetjen\Dextrin\Document::parse(readFileContents($path));
+    $text = $mode === 'pretty' ? $doc->format() : Dextrin::encode($doc->toValue());
     if ($flags['in-place'] ?? false) {
         file_put_contents($path, $text . "\n");
     } else {

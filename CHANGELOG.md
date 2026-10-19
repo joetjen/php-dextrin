@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Document` -- a `.dxn` document with everything it holds, its comments,
+  blank lines and commas as well as its value, mirroring
+  `Dextrin.Document`; immutable, every edit answering a new one:
+  `parse()` (`decode()`'s options and errors), `toValue()`, `render()`
+  (the source, byte for byte, when nothing was edited), `format()` (laid
+  out, every comment kept), `replace()`, `delete()` and `insert()` by
+  path, and `update()`, which makes a new value by the fewest edits and
+  refuses where guessing would lose a comment. The parser records the
+  tree as it parses (`Text\Parser::parseTree()`), so it is the same
+  parser as `decode()`'s.
+- **`dextrin format` keeps comments** (`--mode pretty`, the default);
+  `--mode condense` still drops them, a comment ending its line.
+- `dextrin conformance` answers `format` and `edit` cases.
 - The tutorial's §8, "Evolving a schema": a worked example of versions,
   reading across them, the materializer, the positional risk and
   `dextrin compat`. The cheatsheet gains versions and extra fields.

@@ -157,14 +157,44 @@ Dextrin::encode($value, pretty: true, indent: 4);
 `pretty`/`indent` only change *rendering* — the value `decode()` gets
 back is identical either way. Schema validation (§6 below) runs the
 same regardless too; it's an independent concern from formatting.
-`pretty: true` calls `Text\Formatter::pretty()` under the hood, which
-is also directly callable on its own (the CLI's
-`dextrin format --mode pretty` uses it that way, without going through
-`encode()`'s own validation).
+`pretty: true` calls `Text\Formatter::pretty()` under the hood.
 
-Comments are never preserved by either path — `.dxn`'s lexer discards
-`#`-comments as trivia before the parser ever sees them, so there's no
-comment text left by the time a value exists to reprint.
+### Keeping comments
+
+A value has no comments: `decode()` keeps the data and nothing else, so
+decoding a file, changing it and encoding it again deletes every comment
+in it. For a file people annotate, parse it as a `Document` instead,
+which keeps everything — comments, blank lines, commas — beside the
+value:
+
+```php
+use JOetjen\Dextrin\Document;
+
+$doc = Document::parse("# the config\n%{name: \"acme\", version: \"1.0.0\" # bumped for the fix\n}\n");
+
+$doc->toValue();   // what decode() gives
+
+$doc->format();
+// => "# the config\n%{\n  name: \"acme\"\n  version: \"1.0.0\"  # bumped for the fix\n}"
+```
+
+`format()` changes layout only and keeps every comment with its entry —
+it is what `dextrin format` does. A document is immutable, and every
+edit answers a new one, changed exactly where it says; every byte it
+does not touch stays as it was:
+
+```php
+$doc->replace(['version'], '2.0.0')->render();
+// => "# the config\n%{name: \"acme\", version: \"2.0.0\" # bumped for the fix\n}\n"
+```
+
+A path names a map's key as it decodes — `new DXNKeyword('version')`, or
+`'version'` as a native array spells it — a struct's field name, or an
+index. `delete()` takes an entry's own comments with it, the ones above
+it and the one beside it; `insert()` puts a new entry above the comments
+of the one it lands before; `update()` turns a whole new value into
+these edits, and refuses where guessing which edit you meant would lose
+a comment.
 
 ## 5. Extending: custom tags
 
