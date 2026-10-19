@@ -43,6 +43,7 @@ final class Equality
             is_string($value) => 'string',
             is_array($value) => array_is_list($value) ? 'array' : 'map',
             $value instanceof DXNValueInterface => $value->dxnType(),
+            $value instanceof \DateTimeInterface => 'datetime',
             is_object($value) => 'struct',
             default => throw new \InvalidArgumentException('not a DXN value: ' . get_debug_type($value)),
         };

@@ -193,7 +193,7 @@ final class PrinterTest extends TestCase
             ->putStructModule('Point', PrinterTestPoint::class)
             ->putStructSchema('Point', $compiled);
 
-        self::assertSame('%Point{x:1,y:2}', Printer::print($point, $registry));
+        self::assertSame('%Point(1){x:1,y:2}', Printer::print($point, $registry));
         // With no registry, or a registry that doesn't know this
         // class, the class-name convenience still applies unchanged.
         self::assertSame('%PrinterTestPoint{x:1,y:2}', Printer::print($point));
@@ -215,7 +215,7 @@ final class PrinterTest extends TestCase
         $registryWithBoth = $registry
             ->putStructModule('Money', PrinterTestMoney::class)
             ->putStructSchema('Money', $compiled);
-        self::assertSame('%Money{cents:500}', Printer::print($money, $registryWithBoth));
+        self::assertSame('%Money(1){cents:500}', Printer::print($money, $registryWithBoth));
     }
 }
 

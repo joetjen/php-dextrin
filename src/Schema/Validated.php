@@ -71,11 +71,11 @@ final class Validated
         }
         if ($value instanceof DXNStruct) {
             return $value->isKeyed()
-                ? DXNStruct::keyed($value->name, array_map(
+                ? $value->withPairs(array_map(
                     static fn (array $p): array => [$p[0], self::strip($p[1])],
                     $value->pairs(),
                 ))
-                : DXNStruct::positional($value->name, array_map(self::strip(...), $value->values()));
+                : $value->withValues(array_map(self::strip(...), $value->values()));
         }
         if ($value instanceof DXNCustomTag) {
             return new DXNCustomTag($value->name, self::strip($value->value));

@@ -52,14 +52,11 @@ use JOetjen\Dextrin\Schema\Std;
 $schemaSource = <<<'DXN'
     %{
       User: %schema{
-        closed: true
-        fields: @ordered %{
-          id:       :uuid
-          email:    NonEmptyString
-          role:     {:enum :admin :member :guest}
-          created:  :timestamp
-          note?:    :string
-        }
+        id:       :uuid
+        email:    NonEmptyString
+        role:     {:enum :admin :member :guest}
+        created:  :timestamp
+        note?:    :string
       }
     }
     DXN;
@@ -77,27 +74,16 @@ $payload = <<<'DXN'
     DXN;
 
 Dextrin::decode($payload, $registry);
-// => [
-//      'id' => DXNUuid{...}, 'email' => 'ada@example.com',
-//      'role' => DXNKeyword{name: 'admin'}, 'created' => DXNTimestamp{...},
-//      'note' => null,
-//    ]
+// => DXNStruct{name: 'User', version: 1, pairs: [
+//      ['id', DXNUuid{...}], ['email', 'ada@example.com'],
+//      ['role', DXNKeyword{name: 'admin'}], ['created', DXNTimestamp{...}],
+//    ]}
 ```
 
-A response body accidentally including a legacy field is rejected
-loudly, not silently dropped:
-
-```php
-Dextrin::decode(
-    '%User{id: @uuid "550e8400-e29b-41d4-a716-446655440000", email: "a@b.co", role: :admin, created: ~U[2024-01-01 00:00:00Z], legacy_id: 1}',
-    $registry,
-);
-// => throws DXNError: struct "User" violates its schema: unknown field "legacy_id" (schema is closed)
-```
-
-An optional field with no value supplied (`note?:`) materializes as
-`null`, not simply omitted from the result — the key is always
-present, matching how every other decoded field is looked up.
+With no materializer registered the struct comes back as a generic
+`DXNStruct` at its schema's latest version, its fields in the schema's
+order. An optional field with no value supplied (`note?:`) stays
+absent — DXN tells an absent field from one written `nil`.
 
 ## An event log, streamed to `.dxnb` for storage
 
@@ -126,58 +112,57 @@ use JOetjen\Dextrin\Registry;
 $schemaSource = <<<'DXN'
     %{
       Money: %schema{
-        fields: @ordered %{
-          amount:   :decimal
-          currency: {:enum :usd :eur :gbp}
-        }
+        amount:   :decimal
+        currency: {:enum :usd :eur :gbp}
       }
     }
     DXN;
 
 $doc = Dextrin::decode($schemaSource);
 $registry = Schema::compile($doc, new Registry());
-$registry = $registry->putStructMaterializer('Money', fn (array $f): array => [
+$registry = $registry->putStructMaterializer('Money', fn (string $name, int $version, array $f): array => [
     'amount' => $f['amount'],
-    'currency' => $f['currency']->name,
+    'currency' => $f['currency'],
 ]);
 
 Dextrin::decode('%Money{amount: 19.99M, currency: :usd}', $registry);
-// => ['amount' => DXNDecimal{sign: 1, unscaledValue: '1999', exponent: -2}, 'currency' => 'usd']
+// => ['amount' => DXNDecimal{sign: 1, unscaledValue: '1999', exponent: -2}, 'currency' => DXNKeyword{name: 'usd'}]
 ```
 
-`currency` decodes as a `DXNKeyword` — `->name` reads the plain string
-back out, this port's equivalent of Elixir's `Atom.to_string/1` (PHP
-has no atom/interned-symbol type for `keyword` to decode as instead,
-see the tutorial's own note on this).
+What a materializer answers is checked against the latest schema, so it
+has to stay a value of the schema's own shape: answering
+`'currency' => $f['currency']->name` (the string `'usd'`) would be
+refused (`schema/materializer`), because the schema declares
+`{:enum :usd :eur :gbp}`, not a string.
 
-## Cross-field validation with `refine-fn`
+## A schema, version by version
 
-A `type_expr` can only describe shape, not "field A implies field B" —
-`refine-fn:` names a predicate resolved from a `$predicates` array
-passed to `compile()`. A predicate returns `true` on success or a
-`string` error message on failure:
+Each `.dxns` document describes one version of a schema, in its
+header; the body is the fields, in order. Without a header it is
+version 1:
 
 ```php
-$schemaSource = <<<'DXN'
-    %{
-      DateRange: %schema{
-        refine-fn: date-range/valid
-        fields: @ordered %{ starts: :date, ends: :date }
-      }
-    }
-    DXN;
+$registry = Schema::compile(Dextrin::decode('%{ User: %schema{ name: :string } }'), new Registry());
+$registry = Schema::compile(Dextrin::decode('%{ User: %schema(2){ name: :string, email?: :string } }'), $registry);
 
-$predicates = [
-    'date-range/valid' => fn (array $r): bool|string =>
-        $r['starts']->compareTo($r['ends']) <= 0 ? true : 'starts must not be after ends',
-];
+$registry->fetchStructSchema('User')->compiled->version;          // => 2, the latest
+$registry->fetchStructSchema('User', 1)->compiled->fieldNames();  // => ['name']
 
-$doc = Dextrin::decode($schemaSource);
-$registry = Schema::compile($doc, new Registry(), $predicates);
-
-Dextrin::decode('%DateRange{starts: ~D[2024-06-01], ends: ~D[2024-01-01]}', $registry);
-// => throws DXNError: struct "DateRange" violates its schema: starts must not be after ends
+Schema::compile(Dextrin::decode('%{ User: %schema(2){ name: :string } }'), $registry);
+// => throws DXNError, category 'schema/duplicate-version'
 ```
+
+Loading the same version twice is a mistake rather than an update;
+`$registry->replaceStructSchema($name, $compiled)` swaps a loaded
+version on purpose. A struct can say which version it was written
+with, and is written back with it:
+
+```php
+Dextrin::decode('%User(2){name: "Ada"}')->version;                // => 2
+Dextrin::encode(Dextrin::decode('%User(2){name: "Ada"}'));        // => '%User(2){name:"Ada"}'
+```
+
+A version must be a positive integer: `%User(0){...}` is a syntax error.
 
 ## A third-party class provider, end to end
 
@@ -210,9 +195,7 @@ final class LatLngProvider implements DXNSchemaMaterializingProvider
         return <<<'DXN'
             %{
               Degrees: {:refine :float %{min: -180.0, max: 180.0}}
-              LatLng: %schema{
-                fields: @ordered %{ lat: Degrees, lng: Degrees }
-              }
+              LatLng: %schema{ lat: Degrees, lng: Degrees }
             }
             DXN;
     }
@@ -221,9 +204,9 @@ final class LatLngProvider implements DXNSchemaMaterializingProvider
 
     public function dxnClass(): string { return LatLng::class; }
 
-    public function dxnMaterialize(array $resolved): LatLng
+    public function dxnMaterialize(string $name, int $version, array $fields): LatLng
     {
-        return new LatLng($resolved['lat'], $resolved['lng']);
+        return new LatLng($fields['lat'], $fields['lng']);
     }
 }
 ```
@@ -239,7 +222,7 @@ Dextrin::decode('%LatLng{lat: 51.05, lng: 13.74}', $registry);
 // => LatLng{lat: 51.05, lng: 13.74}
 
 Dextrin::encode(new LatLng(51.05, 13.74), registry: $registry);
-// => '%LatLng{lat:51.05,lng:13.74}'
+// => '%LatLng(1){lat:51.05,lng:13.74}'
 
 // Degrees' own refine constraint is enforced automatically, same as
 // any other schema -- no special handling needed on either side:
@@ -259,16 +242,12 @@ Given `schemas/Address.dxns` and `schemas/Person.dxns` on disk:
 ```
 # schemas/Address.dxns
 %{
-  Address: %schema{
-    fields: @ordered %{ street: :string }
-  }
+  Address: %schema{ street: :string }
 }
 
 # schemas/Person.dxns
 %{
-  Person: %schema{
-    fields: @ordered %{ name: :string, home: Address }
-  }
+  Person: %schema{ name: :string, home: Address }
 }
 ```
 
@@ -280,7 +259,9 @@ $resolver = FileResolver::forPaths(['schemas']);
 $registry = Schema::compile($doc, (new Registry())->putResolver($resolver));
 
 Dextrin::decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', $registry);
-// => ['name' => 'Ada', 'home' => ['street' => '1 Main St']]
+// => DXNStruct{name: 'Person', version: 1, pairs: [
+//      ['name', 'Ada'], ['home', DXNStruct{name: 'Address', version: 1, ...}],
+//    ]}
 ```
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with

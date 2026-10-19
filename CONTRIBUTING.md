@@ -98,4 +98,4 @@ act on than a specific input/expected/actual triple.
 ## License
 
 By contributing, you agree that your contributions will be licensed
-under the project's [MIT license](LICENSE).
+under the project's [Apache License 2.0](LICENSE).

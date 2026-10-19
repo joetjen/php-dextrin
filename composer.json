@@ -5,11 +5,11 @@
   "type": "library",
   "homepage": "http://github.com/joetjen/php-dextrin",
   "minimum-stability": "stable",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "authors": [
     {
       "name": "Jan Oetjen",
-      "email": "oetjenj@gmail.com"
+      "email": "joetjen.riveting388@passmail.net"
     }
   ],
   "support": {

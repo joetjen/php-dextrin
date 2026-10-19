@@ -6,7 +6,7 @@ namespace JOetjen\Dextrin\Schema;
 
 /**
  * Lets a class's *own* library ship a DXN schema for it -- field
- * names, types, required/optional, closed/forbidden, refinements --
+ * names, types, required/optional, refinements --
  * without that library ever taking a runtime dependency on this one.
  * The `struct` (schema-backed) counterpart to what
  * {@see \JOetjen\Dextrin\Registry::putTagEncoder()} already does for

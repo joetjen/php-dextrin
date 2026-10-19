@@ -3,7 +3,7 @@
 A step-by-step introduction to DXN (Data eXchange Notation) itself —
 the format, independent of any particular implementation. Every
 snippet below is plain `.dxn` text; try each one with
-`decode()` (or any other conformant reader) as you go. See the
+`Dextrin::decode()` (or any other conformant reader) as you go. See the
 [reference](DXN.md) for the complete, terse specification this
 tutorial is building intuition for.
 
@@ -190,6 +190,6 @@ using nearly every type at once:
 Every field here round-trips losslessly through `.dxnb`, the binary
 form — see the [reference](DXN.md) §2 for the full binary type
 mapping, and [examples](DXN_EXAMPLES.md)/[cheatsheet](DXN_CHEATSHEET.md)
-for more. If you're working in JS, `dextrin`'s own
+for more. If you're working in PHP, `dextrin`'s own
 [tutorial](../TUTORIAL.md) picks up exactly here and shows what each
 of these types looks like once decoded.

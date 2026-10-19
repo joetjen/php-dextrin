@@ -113,7 +113,7 @@ final class FormatterTest extends TestCase
             ->putStructModule('Point', FormatterTestPoint::class)
             ->putStructSchema('Point', $compiled);
 
-        self::assertSame("%Point{\n  x: 1\n  y: 2\n}", Formatter::pretty($point, registry: $registry));
+        self::assertSame("%Point(1){\n  x: 1\n  y: 2\n}", Formatter::pretty($point, registry: $registry));
         self::assertSame("%FormatterTestPoint{\n  x: 1\n  y: 2\n}", Formatter::pretty($point));
     }
 

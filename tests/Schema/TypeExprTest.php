@@ -203,12 +203,12 @@ final class TypeExprTest extends TestCase
         self::assertFalse($type->matches(DXNStruct::keyed('NotPoint', [['x', 1]])));
     }
 
-    public function testReferenceIsPermissiveForOrdinaryValuesWithNoBetterInformation(): void
+    public function testAReferenceRefusesAValueThatIsNotAStruct(): void
     {
-        // No registry, not a DXNStruct/Validated -- reference checks
-        // can't refute this, so they default to accepting it (matching
-        // the JS port's own behavior).
-        self::assertTrue(TypeExpr::reference('Point')->matches(42));
+        // A struct is matched only by a struct (DXN.md §4.7): an array or
+        // any other value is not one, however much it looks like it.
+        self::assertFalse(TypeExpr::reference('Point')->matches(42));
+        self::assertFalse(TypeExpr::reference('Point')->matches(['x' => 1]));
     }
 
     public function testIsPrimitiveName(): void

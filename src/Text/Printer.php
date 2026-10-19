@@ -70,7 +70,9 @@ final class Printer
             $value instanceof DXNDecimal => $value->toString() . 'M',
             $value instanceof DXNRational => "{$value->numerator}/{$value->denominator}",
             $value instanceof DXNChar => '?' . self::printCharBody($value->codepoint),
-            $value instanceof DXNSymbol => $value->name,
+            $value instanceof DXNSymbol => self::isBareIdentifier($value->name)
+                ? $value->name
+                : throw \JOetjen\Dextrin\UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => ':' . self::keywordName($value->name),
             $value instanceof DXNBytes => self::tagForm('bytes', self::quoteString(base64_encode($value->data))),
             $value instanceof DXNList => '[' . implode(' ', array_map(
@@ -90,11 +92,13 @@ final class Printer
                 $value->items,
             )) . '}'),
             $value instanceof DXNOrderedMap => self::tagForm('ordered', '%{' . self::printOrderedEntries($value->pairs, $registry) . '}'),
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => '%{' . self::printOrderedEntries($value->pairs(), $registry) . '}',
             $value instanceof DXNStruct => self::printStruct($value, $registry),
             $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
             $value instanceof DXNTime => '~T[' . Temporal::formatTime($value) . ']',
             $value instanceof DXNTimestamp => '~U[' . Temporal::formatInstant($value) . ']',
             $value instanceof DXNDateTime => self::tagForm('datetime', self::quoteString(Temporal::formatOffsetDateTime($value))),
+            $value instanceof \DateTimeInterface => self::print(DXNDateTime::fromNative($value), $registry),
             $value instanceof DXNDuration => self::tagForm('duration', self::quoteString(Temporal::formatDuration($value))),
             $value instanceof DXNUuid => self::tagForm('uuid', self::quoteString($value->toString())),
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
@@ -111,7 +115,7 @@ final class Printer
             // properties) instead of failing the way it should for
             // "no DXN representation."
             is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::printPlainObjectAsStruct($value, $registry),
-            default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
+            default => throw \JOetjen\Dextrin\UnsupportedValue::of($value),
         };
     }
 
@@ -198,6 +202,7 @@ final class Printer
     /** @param list<array{0: mixed, 1: mixed}> $pairs */
     private static function printOrderedEntries(array $pairs, ?Registry $registry): string
     {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         $parts = [];
         foreach ($pairs as [$key, $value]) {
             $parts[] = self::printEntry($key, $value, $registry);
@@ -247,15 +252,35 @@ final class Printer
 
     private static function printStruct(DXNStruct $struct, ?Registry $registry): string
     {
+        $head = self::writtenHead($struct, $registry);
+        $extra = array_map(
+            static fn (array $pair): string => is_string($pair[0])
+                ? self::printKeywordEntry($pair[0], $pair[1], $registry)
+                : self::printEntry($pair[0], $pair[1], $registry),
+            $struct->extra,
+        );
         if ($struct->isKeyed()) {
             $parts = [];
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
-            return "%{$struct->name}{" . implode(',', $parts) . '}';
+            return $head . '{' . implode(',', [...$parts, ...$extra]) . '}';
         }
-        $items = implode(',', array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values()));
-        return "%{$struct->name}[{$items}]";
+        // A positional struct's items, then its extra fields as entries
+        // (DXN.md §1.2).
+        $items = array_map(static fn (mixed $v): string => self::print($v, $registry), $struct->values());
+        return $head . '[' . implode(',', [...$items, ...$extra]) . ']';
+    }
+
+    /**
+     * How `$struct` opens when it is written: `%Name(3)` with the latest
+     * loaded version of its schema, or with its own when there is no
+     * schema (DXN.md §4.8). The formatter writes the same head.
+     */
+    public static function writtenHead(DXNStruct $struct, ?Registry $registry): string
+    {
+        $written = $registry?->asWritten($struct) ?? $struct;
+        return DXNStruct::head($written->name, $written->version);
     }
 
     /**
@@ -292,7 +317,7 @@ final class Printer
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                return self::printStruct(DXNStruct::keyed($name, $found->compiled->fieldValues($value)), $registry);
+                return self::printStruct($found->compiled->structOf($name, $value), $registry);
             }
         }
 

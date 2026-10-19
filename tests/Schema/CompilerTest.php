@@ -16,18 +16,16 @@ final class CompilerTest extends TestCase
     private const DOC = <<<'DXN'
         %{
           Point: %schema{
-            fields: @ordered %{
-              x: :float
-              y: :float
-              label?: %field{type: :string, default: "unlabeled", description: "a caption"}
-            }
+            x: :float
+            y: :float
+            label?: %field{type: :string, default: "unlabeled", description: "a caption"}
           }
           PositiveInt: {:refine :integer %{min: 1}}
           Coord: Point
         }
         DXN;
 
-    public function testCompilesASchemaEntryWithOrderedFieldsAndAField(): void
+    public function testCompilesASchemaEntryWithItsFieldsInOrderAndAField(): void
     {
         $registry = Compiler::compile(Dextrin::decode(self::DOC), new Registry());
         $found = $registry->fetchStructSchema('Point');
@@ -36,8 +34,6 @@ final class CompilerTest extends TestCase
 
         self::assertSame('Point', $compiled->name);
         self::assertSame(['x', 'y', 'label'], $compiled->fieldNames());
-        self::assertFalse($compiled->closed);
-        self::assertSame([], $compiled->forbidden);
 
         [$x, $y, $label] = $compiled->fields;
         self::assertTrue($x->required);
@@ -67,82 +63,17 @@ final class CompilerTest extends TestCase
         self::assertSame('Point', $coord->name);
     }
 
-    public function testClosedAndForbiddenAreHonored(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Strict: %schema{
-                closed: true
-                forbidden: [password]
-                fields: @ordered %{ name: :string }
-              }
-            }
-            DXN;
-        $compiled = Compiler::compile(Dextrin::decode($doc), new Registry())->fetchStructSchema('Strict')?->compiled;
-        self::assertNotNull($compiled);
-        self::assertTrue($compiled->closed);
-        self::assertSame(['password'], $compiled->forbidden);
-    }
-
-    public function testRefineFnIsResolvedFromThePredicatesMap(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Range: %schema{
-                refine-fn: valid-range
-                fields: @ordered %{ low: :integer, high: :integer }
-              }
-            }
-            DXN;
-        $predicate = static fn (array $resolved): bool|string => $resolved['low'] <= $resolved['high'] ? true : 'low must not exceed high';
-        $compiled = Compiler::compile(Dextrin::decode($doc), new Registry(), ['valid-range' => $predicate])
-            ->fetchStructSchema('Range')?->compiled;
-        self::assertNotNull($compiled);
-        self::assertNotNull($compiled->refineFn);
-        self::assertTrue(($compiled->refineFn)(['low' => 1, 'high' => 2]));
-        self::assertSame('low must not exceed high', ($compiled->refineFn)(['low' => 2, 'high' => 1]));
-    }
-
-    public function testUnresolvedRefineFnThrows(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Range: %schema{
-                refine-fn: missing-predicate
-                fields: @ordered %{ low: :integer }
-              }
-            }
-            DXN;
-        $this->expectException(SchemaCompileError::class);
-        Compiler::compile(Dextrin::decode($doc), new Registry());
-    }
-
     public function testNonMapDocumentThrows(): void
     {
         $this->expectException(SchemaCompileError::class);
         Compiler::compile('not-a-map', new Registry());
     }
 
-    public function testFieldsMustBeAnOrderedMap(): void
-    {
-        $doc = <<<'DXN'
-            %{
-              Bad: %schema{
-                fields: %{ x: :integer }
-              }
-            }
-            DXN;
-        $this->expectException(SchemaCompileError::class);
-        Compiler::compile(Dextrin::decode($doc), new Registry());
-    }
-
     public function testUnrecognizedPrimitiveNameThrows(): void
     {
         $doc = <<<'DXN'
             %{
-              Bad: %schema{
-                fields: @ordered %{ x: :not-a-real-primitive }
-              }
+              Bad: %schema{ x: :not-a-real-primitive }
             }
             DXN;
         $this->expectException(SchemaCompileError::class);
@@ -153,9 +84,7 @@ final class CompilerTest extends TestCase
     {
         $doc = <<<'DXN'
             %{
-              Bad: %schema{
-                fields: @ordered %{ x: {1, 2, 3} }
-              }
+              Bad: %schema{ x: {1, 2, 3} }
             }
             DXN;
         $this->expectException(SchemaCompileError::class);
@@ -168,16 +97,14 @@ final class CompilerTest extends TestCase
         $doc = <<<'DXN'
             %{
               Shape: %schema{
-                fields: @ordered %{
-                  tags: {:list-of :string}
-                  ids: {:set-of :integer}
-                  point: {:tuple-of :float :float}
-                  meta: {:map-of :string :integer}
-                  color: {:enum :red :green :blue}
-                  code: {:one-of :nil :integer}
-                  positive: {:all-of :integer {:refine :integer %{min: 1}}}
-                  nickname: {:nilable :string}
-                }
+                tags: {:list-of :string}
+                ids: {:set-of :integer}
+                point: {:tuple-of :float :float}
+                meta: {:map-of :string :integer}
+                color: {:enum :red :green :blue}
+                code: {:one-of :nil :integer}
+                positive: {:all-of :integer {:refine :integer %{min: 1}}}
+                nickname: {:nilable :string}
               }
             }
             DXN;
