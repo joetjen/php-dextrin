@@ -52,7 +52,7 @@ final class Registry
     /** @var array<string, \Closure(string, int, array<int|string, mixed>): mixed> struct name -> materializer. */
     private array $materializers = [];
 
-    /** @var (\Closure(string): ?Compiled)|null */
+    /** @var (\Closure(string): (Compiled|list<Compiled>|null))|null */
     private ?\Closure $resolver = null;
 
     /** @var array<string, TypeExpr> named type -> compiled type expression. */
@@ -206,7 +206,15 @@ final class Registry
         return $copy;
     }
 
-    /** @param \Closure(string): ?Compiled $resolver */
+    /**
+     * A lazy source of schemas, asked on a miss for a name: every version
+     * it finds -- one compiled schema or a list of them, all loaded -- or
+     * null. It throws a {@see \JOetjen\Dextrin\Schema\SchemaCompileError}
+     * when the schemas it found cannot be used: two files with one
+     * version, a file that is not the version its name says, ...
+     *
+     * @param \Closure(string): (Compiled|list<Compiled>|null) $resolver
+     */
     public function putResolver(\Closure $resolver): self
     {
         $copy = $this->clone();
@@ -216,8 +224,8 @@ final class Registry
 
     /**
      * Looks up a compiled schema by struct name: the latest version, or
-     * with `$version` exactly that one. Only the latest consults the
-     * lazy resolver (if any) on a miss, caching the result. Whether
+     * with `$version` exactly that one. A name not loaded at all consults
+     * the lazy resolver (if any), which loads every version it finds. Whether
      * schemas are all compiled up front or resolved on demand (a
      * resolver reading a file, calling a schema service, ...) is
      * entirely the caller's choice -- this is what makes both paths look
@@ -228,20 +236,43 @@ final class Registry
     public function fetchStructSchema(string $name, ?int $version = null): ?FetchedSchema
     {
         $versions = $this->structs[$name] ?? [];
-        if ($version !== null) {
-            return isset($versions[$version]) ? new FetchedSchema($versions[$version], $this) : null;
-        }
         if ($versions !== []) {
+            if ($version !== null) {
+                return isset($versions[$version]) ? new FetchedSchema($versions[$version], $this) : null;
+            }
             return new FetchedSchema($versions[max(array_keys($versions))], $this);
         }
+        $resolved = $this->resolve($name);
+        if ($resolved === null || $version === null) {
+            return $resolved;
+        }
+        return $resolved->registry->fetchStructSchema($name, $version);
+    }
+
+    /**
+     * What the resolver answers for `$name`, every version of it loaded --
+     * so an older struct reaches the materializer (DXN.md §4.6, §4.8) --
+     * and the latest answered. A resolver's refusal is thrown on.
+     */
+    private function resolve(string $name): ?FetchedSchema
+    {
         if ($this->resolver === null) {
             return null;
         }
         $resolved = ($this->resolver)($name);
-        if ($resolved === null) {
+        $all = $resolved === null ? [] : (is_array($resolved) ? $resolved : [$resolved]);
+        if ($all === []) {
             return null;
         }
-        return new FetchedSchema($resolved, $this->putStructSchema($name, $resolved));
+        $registry = $this;
+        $latest = $all[0];
+        foreach ($all as $compiled) {
+            $registry = $registry->putStructSchema($name, $compiled);
+            if ($compiled->version > $latest->version) {
+                $latest = $compiled;
+            }
+        }
+        return new FetchedSchema($latest, $registry);
     }
 
     /**
@@ -254,7 +285,13 @@ final class Registry
      */
     public function asWritten(DXNStruct $struct): DXNStruct
     {
-        $found = $this->fetchStructSchema($struct->name);
+        // No schema to stand behind a version: the struct keeps its own. A
+        // resolver's refusal surfaces where the struct is read or checked.
+        try {
+            $found = $this->fetchStructSchema($struct->name);
+        } catch (Schema\SchemaCompileError) {
+            $found = null;
+        }
         return $found === null ? $struct : $struct->withVersion($found->compiled->version);
     }
 

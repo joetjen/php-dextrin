@@ -264,8 +264,8 @@ Also included, each mirroring its `Dextrin.Schema.*` counterpart:
 schema without depending on this one, see `src/Schema/Provider.php`),
 `Std::registry()`'s standard library of common named types
 (`PositiveInteger`, `NonEmptyString`, ...), and
-`FileResolver::forPaths([...])`'s `Namespace/Name` → `.dxns`-file
-resolver for `Registry::putResolver()`:
+`FileResolver::forPaths([...])`'s resolver from names to `.dxns` files,
+by DXN.md §4.6's convention, for `Registry::putResolver()`:
 
 ```php
 use JOetjen\Dextrin\Schema\FileResolver;

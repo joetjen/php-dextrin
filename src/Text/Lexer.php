@@ -170,16 +170,32 @@ final class Lexer
     {
         $start = $this->i;
         $this->i++;
+        $this->readSegmentsRest();
+        // A name is segments joined by "." with at most one "/" between a
+        // namespace and a name (DXN.md §1.1): Foo.Bar/Baz.
+        if (($this->cp[$this->i] ?? null) === '/' && $this->isIdStart($this->cp[$this->i + 1] ?? '')) {
+            $this->i += 2;
+            $this->readSegmentsRest();
+        }
+        return $this->slice($start, $this->i);
+    }
+
+    /**
+     * The rest of a run of segments joined by ".", the first character of
+     * the first one already read. A "." not followed by a segment's start
+     * is left where it is, and refused by whatever reads it next.
+     */
+    private function readSegmentsRest(): void
+    {
         while ($this->isIdContinue($this->cp[$this->i] ?? null)) {
             $this->i++;
         }
-        if (($this->cp[$this->i] ?? null) === '/' && $this->isIdStart($this->cp[$this->i + 1] ?? '')) {
+        while (($this->cp[$this->i] ?? null) === '.' && $this->isIdStart($this->cp[$this->i + 1] ?? '')) {
             $this->i += 2;
             while ($this->isIdContinue($this->cp[$this->i] ?? null)) {
                 $this->i++;
             }
         }
-        return $this->slice($start, $this->i);
     }
 
     private function readIdentifierOrKeywordLike(int $start): Token

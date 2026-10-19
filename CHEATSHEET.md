@@ -157,8 +157,10 @@ $registry
 `$registry->fetchStructSchema($name)` answers the latest version, and
 `fetchStructSchema($name, $version)` exactly that one.
 
-`FileResolver::forPaths(array $paths)` builds
-a ready-made resolver for `Namespace/Name -> paths/Namespace.dxns`.
+`FileResolver::forPaths(array $paths)` builds a ready-made resolver
+following DXN.md §4.6: `Foo.Bar/Baz` version N in `Foo/Bar/Baz-vN.dxns`,
+`Foo/Bar/Baz/vN.dxns` or `Foo.Bar.Baz-vN.dxns` (`-v1` optional), or the
+entry `Baz` in `Foo.Bar.dxns`; every version found is loaded.
 
 ## Registry: third-party classes (`DXNSchemaProvider`)
 
