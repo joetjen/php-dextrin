@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Schema::compileAll($docs, $baseRegistry)`: several `.dxns` documents
+  compiled into one registry, in order; the first that does not compile
+  throws, naming which -- as the reference's `compile_all/2`.
 - **Dotted names** (DXN.md §1.1, as dextrin 0d1c7f5): segments joined by
   `.`, with at most one `/` -- `%Foo.Bar/Baz{...}`, `acme.billing/invoice`,
   `:a.b`, `a.b: 1`. Two slashes or an empty segment are refused.
