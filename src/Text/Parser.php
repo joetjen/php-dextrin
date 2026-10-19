@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\KeyNotAllowed;
 use JOetjen\Dextrin\HasCategory;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\MapKey;
@@ -423,14 +424,18 @@ final class Parser
         }
         $this->begin('struct', $at);
         try {
-            return $this->parseStructBody();
+            return $this->parseStructBody($this->tokens[$at]->start);
         } finally {
             $this->end();
         }
     }
 
-    /** The rest of a struct after its `%`: its name, its version, and its keyed or positional body. */
-    private function parseStructBody(): mixed
+    /**
+     * The rest of a struct after its `%`: its name, its version, and its
+     * keyed or positional body. `$start` is where its `%` is, for its
+     * errors.
+     */
+    private function parseStructBody(int $start): mixed
     {
         $name = $this->next('IDENTIFIER')->value;
         $version = $this->parseStructVersion();
@@ -449,10 +454,10 @@ final class Parser
                     $extra[] = [$key, $value];
                 }
             }
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra));
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra), $start);
         }
         [$values, $extra] = $this->parsePositionalBody();
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra));
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra), $start);
     }
 
     /**
@@ -485,6 +490,7 @@ final class Parser
                 $this->rewrapAsEntry($keyAt);
                 $this->next('ARROW');
                 $this->mark('arrow');
+                $this->keyAllowed($value, $start);
                 $entries[] = [$value, $this->parseValue()];
                 $this->end();
             } elseif ($entries !== []) {
@@ -519,7 +525,7 @@ final class Parser
         return $version;
     }
 
-    private function materializeStruct(string $name, DXNStruct $struct): mixed
+    private function materializeStruct(string $name, DXNStruct $struct, int $start): mixed
     {
         if ($this->registry === null) {
             return $struct;
@@ -530,18 +536,38 @@ final class Parser
             // Which schema a struct is read with depends on its version
             // ({@see Reader}).
             $read = Reader::read($this->registry, $struct);
-        } catch (DXNError | SchemaValidationError $err) {
+        } catch (SchemaValidationError $err) {
             // A schema violation keeps its own category (DXN.md §5); it
-            // is not a syntax error for having been found here.
-            throw $err;
+            // is not a syntax error for having been found here. It is
+            // placed at this struct's `%` unless a struct inside it was
+            // already where it was found -- the innermost place wins, as
+            // the reference's.
+            throw $err->placedAt($start);
+        } catch (DXNError $err) {
+            throw $err->offset === null ? new DXNError($err->getMessage(), $err->stage, $start, $err, $err->category) : $err;
         } catch (\Throwable $err) {
-            throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
+            throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $start);
         }
         if ($read === null) {
             return $struct;
         }
         [$value, $this->registry] = $read;
         return $value;
+    }
+
+    /**
+     * Refuses `$key` as a map key (DXN.md §1.6) unless it may be one,
+     * placed at `$offset`, where the key was written -- as the reference
+     * places it. Checked here rather than once the map is built, where
+     * nothing says which entry it was.
+     */
+    private function keyAllowed(mixed $key, int $offset): void
+    {
+        try {
+            MapKey::check($key);
+        } catch (KeyNotAllowed $err) {
+            throw $err->placedAt($offset);
+        }
     }
 
     /**
@@ -570,9 +596,11 @@ final class Parser
                 $this->mark('key');
                 $pairs[] = [$key, $this->parseValue()];
             } else {
+                $keyStart = $this->peek()->start;
                 $key = $this->parseValue();
                 $this->next('ARROW');
                 $this->mark('arrow');
+                $this->keyAllowed($key, $keyStart);
                 $pairs[] = [$key, $this->parseValue()];
             }
             $this->end();
