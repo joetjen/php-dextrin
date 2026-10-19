@@ -113,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Licensed under the Apache License 2.0 (`Apache-2.0`); it was MIT.
 - **A native `\DateTimeInterface` encodes as a `datetime`**, keeping its
   offset, with or without a schema (DXN.md §4.7). It was written as an
   empty struct named after its class. `DXNDateTime::fromNative()` is
