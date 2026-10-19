@@ -6,6 +6,8 @@ namespace JOetjen\Dextrin\Schema;
 
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTuple;
@@ -119,6 +121,30 @@ final class Compiler
     }
 
     /**
+     * Refuses a schema written in DXN 1.0's syntax -- `fields: @ordered
+     * %{...}`, `closed: true`, `forbidden: [...]` -- saying so, and what
+     * 1.1 writes instead (DXN.md §4.4), rather than that a field has no
+     * known type. Only those shapes: in 1.1 `fields`, `closed` and
+     * `forbidden` are ordinary field names, whose values are type
+     * expressions.
+     *
+     * @param iterable<array{0: string, 1: mixed}> $pairs
+     */
+    private static function notFormat10(iterable $pairs): void
+    {
+        foreach ($pairs as [$key, $value]) {
+            if (($key === 'fields' && $value instanceof DXNOrderedMap)
+                || ($key === 'closed' && is_bool($value))
+                || ($key === 'forbidden' && $value instanceof DXNList)) {
+                throw new SchemaCompileError(
+                    "this is DXN 1.0's schema syntax (fields:, closed:, forbidden:); DXN 1.1 lists the fields directly, "
+                    . '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXN.md §4.4)'
+                );
+            }
+        }
+    }
+
+    /**
      * One `%schema(N){field: type, ...}` entry: the body is the fields,
      * in the order they are written; the header is the version, 1 when
      * there is none.
@@ -130,6 +156,7 @@ final class Compiler
         if (!$entry->isKeyed()) {
             throw new SchemaCompileError('a schema lists its fields by name: %schema(N){field: type, ...}');
         }
+        self::notFormat10($entry->pairs());
         $fields = [];
         $seen = [];
         foreach ($entry->pairs() as [$key, $value]) {

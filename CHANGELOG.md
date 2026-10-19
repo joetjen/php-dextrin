@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The format guides in `dxn/` are DXN.md 1.1's text: format version 1.1,
   `bits`, the private range 200-216, and §5's `document/*` errors.
 
+### Changed
+
+- **A 1.0 schema says it is one**, as the reference's (dextrin afbb00d):
+  `fields: @ordered %{...}`, `closed: true` and `forbidden: [...]` are
+  refused (`schema/compile`) naming DXN 1.0's syntax and what 1.1 writes
+  instead, rather than as a field of no known type.
+
 ### Fixed
 
 - **A map key that is not allowed, and a schema violation, say where
