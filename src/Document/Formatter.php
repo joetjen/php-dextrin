@@ -44,7 +44,7 @@ final class Formatter
         $value = null;
         foreach ($doc->tree->children as $child) {
             if ($child->kind === 'header') {
-                $head .= $self->tokensText($child->first, $child->last) . "\n";
+                $head .= $self->headerText($child->first, $child->last) . "\n";
                 $from = $doc->tokens[$child->last]->end;
             } elseif ($child->kind === 'value') {
                 $value = $child;
@@ -58,7 +58,12 @@ final class Formatter
             ['node' => $value],
             ['gap' => substr($doc->source, $self->end($value))],
         ];
-        return $head . $self->lines($self->slots($sequence, false), '', fn (SyntaxNode $node): string => $self->valueText($node, ''));
+        // It ends with a newline exactly when the source did: a formatter
+        // run on save keeps a file's last newline, and a comment-free
+        // document without one comes out exactly as the pretty printer
+        // writes its value.
+        $ending = str_ends_with($doc->source, "\n") ? "\n" : '';
+        return $head . $self->lines($self->slots($sequence, false), '', fn (SyntaxNode $node): string => $self->valueText($node, '')) . $ending;
     }
 
     // ---- slots: which comment belongs where -------------------------------
@@ -289,6 +294,16 @@ final class Formatter
     }
 
     /** The tokens `$first..$last`, written together without the trivia between them. */
+    /**
+     * The header, `@dxn "1.0"`: the tag, one space, and the version, each
+     * as written, however they were spaced. The tag is two tokens here
+     * (`@`, `dxn`), so the space goes before the version alone.
+     */
+    private function headerText(int $first, int $last): string
+    {
+        return $this->tokensText($first, $last - 1) . ' ' . $this->tokensText($last, $last);
+    }
+
     private function tokensText(int $first, int $last): string
     {
         $text = '';
