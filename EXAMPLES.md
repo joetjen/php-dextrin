@@ -266,11 +266,10 @@ Dextrin::decode('%Person{name: "Ada", home: %Address{street: "1 Main St"}}', $re
 
 `Address.dxns` is loaded and compiled lazily, on first encounter with
 its name, and memoized in the registry for the rest of that decode.
-`FileResolver` also understands a namespaced `Namespace/Name` field
-reference (resolving to `<searchPath>/Namespace.dxns`'s `Name` entry,
-for a file that defines a differently-named schema than its own file
-stem) — but keep the *struct literal itself* written under its own
-bare schema name (`%Address{...}`, never `%Namespace/Name{...}`),
-since a reference's declared name is checked against the referenced
-value's own compiled schema name exactly, and that name is always the
-bare entry name a `.dxns` file defines it under.
+`FileResolver` also understands a namespaced field reference: a field
+typed `geo/Address` is found as the entry `Address` in
+`<searchPath>/geo.dxns`, or in a versioned file of its own
+(`geo/Address-v2.dxns`, `geo/Address/v2.dxns`, `geo.Address-v2.dxns` --
+DXN.md §4.6). A struct in that field is written under the same name,
+`%geo/Address{...}`: a field takes a struct of exactly the name it
+references.

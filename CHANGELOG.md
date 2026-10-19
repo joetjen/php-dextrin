@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dotted names** (DXN.md §1.1, as dextrin 0d1c7f5): segments joined by
+  `.`, with at most one `/` -- `%Foo.Bar/Baz{...}`, `acme.billing/invoice`,
+  `:a.b`, `a.b: 1`. Two slashes or an empty segment are refused.
+- **`FileResolver::forPaths()` follows DXN.md §4.6** (as dextrin
+  fd34537): the four layouts, the first search path deciding, a file's
+  version its schema's, one version found once, every version loaded. A
+  resolver answers a list of every version found and throws
+  `SchemaCompileError` for files it cannot use.
 - **`bits`**, as DXN.md 1.1 defines it (dextrin afbb00d): `DXNBits`
   holds a run of bits that is not whole bytes -- the bytes, the unused
   bits zero, and the count -- written `@bits {"oA==" 3}` and `T_BITS`
@@ -20,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A field typed with a namespaced reference takes a struct of that
+  name** (DXN.md §4.7): a field typed `geo/Address` accepts
+  `%geo/Address{...}` and refuses `%Address{...}` -- the other way round
+  from before, when a resolved schema kept its file's name. Breaking for
+  documents that wrote the bare name. `forPaths()`' resolver answers a
+  list now, each schema under the name asked for.
 - **A 1.0 schema says it is one**, as the reference's (dextrin afbb00d):
   `fields: @ordered %{...}`, `closed: true` and `forbidden: [...]` are
   refused (`schema/compile`) naming DXN 1.0's syntax and what 1.1 writes

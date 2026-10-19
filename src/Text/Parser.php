@@ -12,6 +12,7 @@ use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
+use JOetjen\Dextrin\Schema\SchemaCompileError;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
@@ -544,6 +545,10 @@ final class Parser
             // already where it was found -- the innermost place wins, as
             // the reference's.
             throw $err->placedAt($start);
+        } catch (SchemaCompileError $err) {
+            // A resolver's refusal of the schema files it found keeps its
+            // category, placed at the struct that asked for them.
+            throw new DXNError($err->getMessage(), 'schema', $start, $err, $err->category());
         } catch (DXNError $err) {
             throw $err->offset === null ? new DXNError($err->getMessage(), $err->stage, $start, $err, $err->category) : $err;
         } catch (\Throwable $err) {
