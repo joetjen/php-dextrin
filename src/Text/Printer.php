@@ -70,7 +70,9 @@ final class Printer
             $value instanceof DXNDecimal => $value->toString() . 'M',
             $value instanceof DXNRational => "{$value->numerator}/{$value->denominator}",
             $value instanceof DXNChar => '?' . self::printCharBody($value->codepoint),
-            $value instanceof DXNSymbol => $value->name,
+            $value instanceof DXNSymbol => self::isBareIdentifier($value->name)
+                ? $value->name
+                : throw \JOetjen\Dextrin\UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => ':' . self::keywordName($value->name),
             $value instanceof DXNBytes => self::tagForm('bytes', self::quoteString(base64_encode($value->data))),
             $value instanceof DXNList => '[' . implode(' ', array_map(

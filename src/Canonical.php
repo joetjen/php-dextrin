@@ -80,7 +80,9 @@ final class Canonical
             $value instanceof DXNDecimal => self::decimal($value),
             $value instanceof DXNRational => "{$value->numerator}/{$value->denominator}",
             $value instanceof DXNChar => '?' . self::charBody($value->codepoint),
-            $value instanceof DXNSymbol => $value->name,
+            $value instanceof DXNSymbol => Printer::isBareIdentifier($value->name)
+                ? $value->name
+                : throw UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => self::keyword($value->name),
             $value instanceof DXNBytes => '@bytes ' . self::quoted(base64_encode($value->data)),
             $value instanceof DXNList => '[' . self::items($value->items) . ']',

@@ -142,6 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A symbol whose name is not an identifier is refused by the text
+  writers (`encode/unsupported`): `Dextrin::encode()`, the pretty printer
+  and `Canonical::print()` wrote its name verbatim, which read back as
+  something else, or as nothing (`''`). `.dxnb` keeps any name.
+
 - A keyed struct written to `.dxnb` went on the wire in the order of its
   keys rather than its schema's field order, so it came back with its
   fields swapped.
