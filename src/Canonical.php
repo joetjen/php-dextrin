@@ -6,6 +6,7 @@ namespace JOetjen\Dextrin;
 
 use JOetjen\Dextrin\Text\Printer;
 use JOetjen\Dextrin\Text\Temporal;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -85,6 +86,7 @@ final class Canonical
                 : throw UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => self::keyword($value->name),
             $value instanceof DXNBytes => '@bytes ' . self::quoted(base64_encode($value->data)),
+            $value instanceof DXNBits => '@bits {' . self::quoted(base64_encode($value->data)) . ' ' . $value->bitLength . '}',
             $value instanceof DXNList => '[' . self::items($value->items) . ']',
             $value instanceof DXNTuple => '{' . self::items($value->items) . '}',
             $value instanceof DXNSet => '@{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',

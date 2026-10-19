@@ -26,7 +26,7 @@ final class Equality
         'list' => 10, 'tuple' => 11, 'map' => 12, 'ordered-map' => 13, 'set' => 14,
         'sorted-set' => 15, 'struct' => 16, 'array' => 17, 'date' => 18, 'time' => 19,
         'timestamp' => 20, 'datetime' => 21, 'duration' => 22, 'uuid' => 23,
-        'uri' => 24, 'bytes' => 25, 'regex' => 26, 'custom-tag' => 27,
+        'uri' => 24, 'bytes' => 25, 'bits' => 26, 'regex' => 27, 'custom-tag' => 28,
     ];
 
     private function __construct()
@@ -163,7 +163,7 @@ final class Equality
             $a instanceof DXNChar, $a instanceof DXNSymbol, $a instanceof DXNKeyword,
             $a instanceof DXNDate, $a instanceof DXNTime, $a instanceof DXNTimestamp,
             $a instanceof DXNDateTime, $a instanceof DXNUuid, $a instanceof DXNUri,
-            $a instanceof DXNBytes => $a->compareTo($b),
+            $a instanceof DXNBytes, $a instanceof DXNBits => $a->compareTo($b),
             default => self::canonicalKey($a) <=> self::canonicalKey($b),
         };
     }
@@ -251,6 +251,7 @@ final class Equality
             'uuid' => 'uuid:' . bin2hex($value->bytes),
             'uri' => 'uri:' . $value->value,
             'bytes' => 'bytes:' . bin2hex($value->data),
+            'bits' => 'bits:' . bin2hex($value->data) . '/' . $value->bitLength,
             'regex' => 'regex:' . $value->pattern . '|' . self::flagsKey($value->flags),
             'custom-tag' => 'custom-tag:' . $value->name . '=' . self::canonicalKey($value->value),
             default => throw new \LogicException("unreachable kind: {$kind}"),

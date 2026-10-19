@@ -11,6 +11,7 @@ use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -364,6 +365,7 @@ final class Decoder
             Tags::T_DURATION => $this->buildDuration($value),
             Tags::T_REGEX => $this->buildRegex($value),
             Tags::T_CUSTOM => $this->buildCustom($value),
+            Tags::T_BITS => $this->buildBits($value),
             default => throw new BinaryError("unrecognized CBOR tag {$tag}", $this->pos),
         };
     }
@@ -691,5 +693,26 @@ final class Decoder
     {
         \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         return new DXNOrderedMap($pairs);
+    }
+
+    /**
+     * T_BITS, `[bytes, count]` (DXN.md §2.3): the count must match the
+     * bytes; a whole number of them is bytes.
+     */
+    private function buildBits(mixed $value): DXNBits|DXNBytes
+    {
+        $malformed = 'malformed bits (tag ' . Tags::T_BITS . ') payload: [bytes, count] with the count matching the bytes';
+        if (!$value instanceof DXNList || count($value->items) !== 2) {
+            throw new BinaryError($malformed, $this->pos);
+        }
+        [$data, $count] = $value->items;
+        if (!$data instanceof DXNBytes || !is_int($count)) {
+            throw new BinaryError($malformed, $this->pos);
+        }
+        try {
+            return DXNBits::from($data->data, $count);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError($malformed, $this->pos);
+        }
     }
 }

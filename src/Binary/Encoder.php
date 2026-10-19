@@ -8,6 +8,7 @@ use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Field;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -88,6 +89,8 @@ final class Encoder
             $value instanceof DXNSymbol => Writer::tag(Tags::T_SYMBOL, Writer::textItem($value->name)),
             $value instanceof DXNKeyword => Writer::tag(Tags::T_KEYWORD, Writer::textItem($value->name)),
             $value instanceof DXNBytes => Writer::bytesItem($value->data),
+            // Bits that are not whole bytes (DXN.md §2.3): T_BITS around [bytes, count].
+            $value instanceof DXNBits => Writer::tag(Tags::T_BITS, Writer::arrayOf([Writer::bytesItem($value->data), Writer::integerItem($value->bitLength)])),
 
             $value instanceof DXNList => Writer::arrayOf(array_map(
                 static fn (mixed $v): string => self::encodeItem($v, $registry),

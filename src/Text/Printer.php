@@ -6,6 +6,7 @@ namespace JOetjen\Dextrin\Text;
 
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -75,6 +76,7 @@ final class Printer
                 : throw \JOetjen\Dextrin\UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => ':' . self::keywordName($value->name),
             $value instanceof DXNBytes => self::tagForm('bytes', self::quoteString(base64_encode($value->data))),
+            $value instanceof DXNBits => self::tagForm('bits', '{' . self::quoteString(base64_encode($value->data)) . ' ' . $value->bitLength . '}'),
             $value instanceof DXNList => '[' . implode(' ', array_map(
                 static fn (mixed $v): string => self::print($v, $registry),
                 $value->items,
