@@ -26,7 +26,7 @@ use JOetjen\Dextrin\Text\Parser;
  *   4. If the provider implements {@see DXNSchemaMaterializingProvider},
  *      registers its `dxnMaterialize()` ({@see
  *      Registry::putStructMaterializer()}). If not, decoding this
- *      schema falls back to the default plain field map.
+ *      schema falls back to the generic DXNStruct.
  */
 final class Provider
 {

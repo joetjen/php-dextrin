@@ -4,8 +4,8 @@
 declare(strict_types=1);
 
 /**
- * `dextrin` CLI -- one executable, four subcommands (`decode`,
- * `encode`, `format`, `validate`), the PHP analog of both the JS
+ * `dextrin` CLI -- one executable, six subcommands (`decode`,
+ * `encode`, `format`, `validate`, `compat`, `conformance`), the PHP analog of both the JS
  * port's `bin/dextrin.js` and `dextrin`'s own `mix dextrin.*` tasks.
  * One bin with subcommands rather than a separate script per task,
  * matching how CLIs are conventionally shaped (`git <subcommand>`),
@@ -48,6 +48,8 @@ const USAGE = <<<'USAGE'
                                                     Reformat a .dxn file
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
+      compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+      conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
     USAGE;
@@ -62,8 +64,94 @@ function main(array $argv): int
         'encode' => run(static fn () => cmdEncode($rest)),
         'format' => run(static fn () => cmdFormat($rest)),
         'validate' => run(static fn () => cmdValidate($rest)),
+        'compat' => run(static fn () => cmdCompat($rest)),
+        'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
+}
+
+/**
+ * `dextrin compat OLD NEW` -- the version discipline check
+ * (`Schema::compat`, DXN.md §4.8), for CI against the previous release's
+ * schema files. Lists what the latest versions' materializers have to
+ * upgrade; a version whose content changed without a new version, or a
+ * version that went down, is reported and exits non-zero.
+ *
+ * @param list<string> $args
+ */
+function cmdCompat(array $args): void
+{
+    if (count($args) !== 2) {
+        throw new \RuntimeException('usage: dextrin compat OLD NEW (each a .dxns file or a directory)');
+    }
+    ['problems' => $problems, 'upgrades' => $upgrades] = Schema::compat(loadedSchemas($args[0]), loadedSchemas($args[1]));
+    foreach ($upgrades as $upgrade) {
+        $changes = [];
+        foreach (['added', 'removed', 'changed'] as $what) {
+            if ($upgrade[$what] !== []) {
+                $changes[] = $what . ' ' . implode(', ', $upgrade[$what]);
+            }
+        }
+        $listed = $changes === [] ? 'no field changes' : implode('; ', $changes);
+        fwrite(STDOUT, "{$upgrade['schema']} {$upgrade['from']} -> {$upgrade['to']}: {$listed}\n");
+    }
+    if ($problems !== []) {
+        throw new \RuntimeException(implode("\n", array_map(
+            static fn (array $p) => $p['problem'] === 'version-went-down'
+                ? "{$p['schema']} went down from version {$p['from']} to {$p['to']}"
+                : "{$p['schema']} version {$p['version']} changed without a new version",
+            $problems,
+        )));
+    }
+    fwrite(STDOUT, "OK: no version discipline problems\n");
+}
+
+/**
+ * Every `.dxns` document under `$path` (or `$path` itself, a file),
+ * compiled into one registry -- so several versions of a schema, each in
+ * its own document, sit side by side.
+ */
+function loadedSchemas(string $path): Registry
+{
+    $files = [$path];
+    if (is_dir($path)) {
+        $files = [];
+        $found = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS));
+        foreach ($found as $file) {
+            if ($file instanceof \SplFileInfo && str_ends_with($file->getPathname(), '.dxns')) {
+                $files[] = $file->getPathname();
+            }
+        }
+        sort($files);
+    }
+    $registry = new Registry();
+    foreach ($files as $file) {
+        try {
+            $registry = Schema::compile(Dextrin::decode(readFileContents($file)), $registry);
+        } catch (\Throwable $err) {
+            throw new \RuntimeException("{$file}: " . describeError($err));
+        }
+    }
+    return $registry;
+}
+
+/**
+ * `dextrin conformance REQUEST ANSWER` -- this implementation's adapter
+ * for the Dextrin Conformance Suite: reads the JSON request, answers every
+ * case, writes the JSON answer. It fails only when the adapter itself
+ * cannot work, never because a case did: a failed case is an answer, and
+ * the suite judges it.
+ *
+ * @param list<string> $args
+ */
+function cmdConformance(array $args): void
+{
+    if (count($args) !== 2) {
+        throw new \RuntimeException('usage: dextrin conformance REQUEST ANSWER');
+    }
+    [$request, $answer] = $args;
+    $decoded = json_decode((string) file_get_contents($request), true, flags: JSON_THROW_ON_ERROR);
+    file_put_contents($answer, json_encode(\JOetjen\Dextrin\Conformance::answer($decoded), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
 function printUsageAndExit(?string $command): int
@@ -197,8 +285,11 @@ function cmdFormat(array $argv): void
     if ($mode !== 'pretty' && $mode !== 'condense') {
         throw new \RuntimeException("unrecognized --mode \"{$mode}\" -- expected \"pretty\" or \"condense\"");
     }
-    $value = Dextrin::decode(readFileContents($path));
-    $text = Dextrin::encode($value, pretty: $mode === 'pretty');
+    // Pretty lays the document out and keeps its comments; condensed
+    // output is one line, which no comment fits on, so it reprints the
+    // value.
+    $doc = \JOetjen\Dextrin\Document::parse(readFileContents($path));
+    $text = $mode === 'pretty' ? $doc->format() : Dextrin::encode($doc->toValue());
     if ($flags['in-place'] ?? false) {
         file_put_contents($path, $text . "\n");
     } else {

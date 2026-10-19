@@ -5,42 +5,32 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Schema;
 
 /**
- * The result of compiling one `%schema{}` entry from a `.dxns`
+ * The result of compiling one `%schema(N){}` entry from a `.dxns`
  * document ({@see Compiler}) -- enough to both validate a decoded
  * value and convert it both directions between `.dxnb`'s
  * always-positional wire shape and a named field map.
  *
  * `fields` is ordered -- that order is the canonical position <-> name
- * mapping `.dxnb`'s positional struct encoding needs, which is exactly
- * why a schema's own `fields:` has to be an `@ordered %{...}` in the
- * source document, not a plain `map` (`.dxn`'s `map` type makes no
- * ordering guarantee, but field order here is semantically
- * load-bearing, not incidental).
+ * mapping `.dxnb`'s positional struct encoding needs, and it is the
+ * order the fields are written in the `%schema(N){...}` body.
  *
- * @phpstan-type RefineFn \Closure(array<string, mixed>): (bool|string)
+ * `version` is which version of `name` this is (DXN.md §4.8), 1 for a
+ * schema written without a header.
  */
 final class Compiled
 {
-    /**
-     * @param list<Field> $fields
-     * @param list<string> $forbidden
-     * @param RefineFn|null $refineFn `resolved` is this schema's own
-     * already-type-checked field values; return `true` to accept the
-     * value, or a `string` describing why not.
-     */
+    /** @param list<Field> $fields */
     public function __construct(
         public readonly ?string $name = null,
         public readonly array $fields = [],
-        public readonly bool $closed = false,
-        public readonly array $forbidden = [],
-        public readonly ?\Closure $refineFn = null,
+        public readonly int $version = 1,
     ) {
     }
 
     /** A schema's `name` is only known once {@see Compiler} finishes compiling its enclosing document -- returns a copy with it set. */
     public function withName(string $name): self
     {
-        return new self($name, $this->fields, $this->closed, $this->forbidden, $this->refineFn);
+        return new self($name, $this->fields, $this->version);
     }
 
     /** @return list<string> */
@@ -50,19 +40,31 @@ final class Compiled
     }
 
     /**
-     * Reads `$instance`'s fields (an arbitrary registered PHP class
-     * instance, not a {@see \JOetjen\Dextrin\Value\DXNStruct}) out in
-     * this schema's own canonical field order -- the same order
-     * `.dxnb`'s positional wire encoding needs. A field this schema
-     * declares but `$instance` doesn't have is `null`, same as any
-     * other absent field; extra instance properties the schema doesn't
-     * know about are simply not included.
-     *
-     * @return list<array{0: string, 1: mixed}>
+     * `$instance` -- a registered application class instance -- as the
+     * keyed struct named `$name` it is written as (DXN.md §4.3, §4.7), its fields in
+     * this schema's order. A field it does not have -- a property the
+     * class does not declare, or a typed one left uninitialised -- is
+     * absent, never null: a reader refuses null unless the type admits
+     * it, and a property holding null is a field holding nil. Any other
+     * public property is an extra field, written back with the struct,
+     * as an Elixir struct's undeclared keys are.
      */
-    public function fieldValues(object $instance): array
+    public function structOf(string $name, object $instance): \JOetjen\Dextrin\Value\DXNStruct
     {
         $vars = get_object_vars($instance);
-        return array_map(static fn (string $name): array => [$name, $vars[$name] ?? null], $this->fieldNames());
+        $declared = array_flip($this->fieldNames());
+        $pairs = [];
+        foreach ($this->fieldNames() as $field) {
+            if (array_key_exists($field, $vars)) {
+                $pairs[] = [$field, $vars[$field]];
+            }
+        }
+        $extra = [];
+        foreach ($vars as $key => $value) {
+            if (!isset($declared[$key])) {
+                $extra[] = [$key, $value];
+            }
+        }
+        return \JOetjen\Dextrin\Value\DXNStruct::keyed($name, $pairs, null, $extra);
     }
 }

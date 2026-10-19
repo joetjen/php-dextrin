@@ -43,6 +43,8 @@ final class Tags
     public const T_DURATION = 212;
     public const T_REGEX = 213;
     public const T_CUSTOM = 214;
+    /** A struct's extra fields: only ever its last item (DXN.md §2.3). */
+    public const T_EXTRA = 215;
 
     /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
     public const DURATION_FIELDS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'microseconds'];

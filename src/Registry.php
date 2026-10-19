@@ -7,6 +7,7 @@ namespace JOetjen\Dextrin;
 use JOetjen\Dextrin\Schema\Compiled;
 use JOetjen\Dextrin\Schema\FetchedSchema;
 use JOetjen\Dextrin\Schema\TypeExpr;
+use JOetjen\Dextrin\Value\DXNStruct;
 
 /**
  * Extension point for both `struct` and `custom-tag` decoding/encoding.
@@ -45,10 +46,10 @@ final class Registry
     /** @var array<class-string, array{0: string, 1: \Closure(object): mixed}> class -> [tag name, encoder]. */
     private array $tagEncoders = [];
 
-    /** @var array<string, Compiled> struct name -> compiled schema. */
+    /** @var array<string, non-empty-array<int, Compiled>> struct name -> version -> compiled schema. */
     private array $structs = [];
 
-    /** @var array<string, \Closure(array<string, mixed>): mixed> struct name -> materializer. */
+    /** @var array<string, \Closure(string, int, array<int|string, mixed>): mixed> struct name -> materializer. */
     private array $materializers = [];
 
     /** @var (\Closure(string): ?Compiled)|null */
@@ -63,6 +64,29 @@ final class Registry
     private function clone(): self
     {
         return clone $this;
+    }
+
+    /** Whether this registry decodes strictly ({@see putStrict()}). */
+    private bool $strict = false;
+
+    /**
+     * Marks this registry as decoding *strictly*: a schema-backed struct
+     * that carries a field its schema does not declare is refused
+     * (`schema/undeclared-field`, DXN.md §4.7) instead of keeping it as an
+     * extra field. A config loader decodes strictly; a message consumer
+     * does not. {@see \JOetjen\Dextrin\Dextrin::decode()} and
+     * `decodeBinary()` take it as `strict: true`.
+     */
+    public function putStrict(bool $strict): self
+    {
+        $copy = $this->clone();
+        $copy->strict = $strict;
+        return $copy;
+    }
+
+    public function isStrict(): bool
+    {
+        return $this->strict;
     }
 
     /**
@@ -107,14 +131,74 @@ final class Registry
         return $this->tagEncoders[$class] ?? null;
     }
 
+    /**
+     * `$compiled` as version `$compiled->version` of the schema `$name`,
+     * whether or not that version was loaded already -- the unchecked
+     * setter a resolver's answer goes through. Loading a document's
+     * schemas goes through {@see addStructSchema()}, a hot swap through
+     * {@see replaceStructSchema()}.
+     */
     public function putStructSchema(string $name, Compiled $compiled): self
     {
         $copy = $this->clone();
-        $copy->structs[$name] = $compiled;
+        $copy->structs[$name][$compiled->version] = $compiled;
         return $copy;
     }
 
-    /** @param \Closure(array<string, mixed>): mixed $materializer */
+    /**
+     * Loads `$compiled` as a new version of the schema `$name`. A version
+     * that is already loaded is refused as `schema/duplicate-version`
+     * (DXN.md §4.8): two documents both claiming to be `User` v3 is a
+     * mistake, not an update.
+     *
+     * @throws DXNError
+     */
+    public function addStructSchema(string $name, Compiled $compiled): self
+    {
+        if ($this->isLoaded($name, $compiled->version)) {
+            throw new DXNError(
+                "schema \"{$name}\" version {$compiled->version} is already loaded",
+                stage: 'schema',
+                category: 'schema/duplicate-version',
+            );
+        }
+        return $this->putStructSchema($name, $compiled);
+    }
+
+    /**
+     * Replaces version `$compiled->version` of the schema `$name` -- the
+     * hot swap of a running system. **Replace only replaces**: a version
+     * that is not loaded is refused as `schema/not-loaded`, so a typo in
+     * a hot swap never quietly adds a version instead.
+     *
+     * @throws DXNError
+     */
+    public function replaceStructSchema(string $name, Compiled $compiled): self
+    {
+        if (!$this->isLoaded($name, $compiled->version)) {
+            throw new DXNError(
+                "schema \"{$name}\" version {$compiled->version} is not loaded, so there is nothing to replace",
+                stage: 'schema',
+                category: 'schema/not-loaded',
+            );
+        }
+        return $this->putStructSchema($name, $compiled->withName($name));
+    }
+
+    private function isLoaded(string $name, int $version): bool
+    {
+        return isset($this->structs[$name][$version]);
+    }
+
+    /**
+     * The schema's materializer (DXN.md §4.8): called for every decoded
+     * struct of `$name`, whatever the version, with the schema's name,
+     * the version the fields were read with and the fields keyed by name;
+     * it answers the application's latest-version value, which is checked
+     * against the latest schema, or throws.
+     *
+     * @param \Closure(string, int, array<int|string, mixed>): mixed $materializer
+     */
     public function putStructMaterializer(string $name, \Closure $materializer): self
     {
         $copy = $this->clone();
@@ -131,19 +215,24 @@ final class Registry
     }
 
     /**
-     * Looks up a compiled schema by struct name, consulting the lazy
-     * resolver (if any) on a miss and caching the result. Whether
+     * Looks up a compiled schema by struct name: the latest version, or
+     * with `$version` exactly that one. Only the latest consults the
+     * lazy resolver (if any) on a miss, caching the result. Whether
      * schemas are all compiled up front or resolved on demand (a
      * resolver reading a file, calling a schema service, ...) is
-     * entirely the caller's choice -- this is what makes both paths
-     * look identical to everything else, which never needs to know
-     * which one is in play.
+     * entirely the caller's choice -- this is what makes both paths look
+     * identical to everything else. **A named version never falls back
+     * to another**: a struct is only ever read with the schema it was
+     * written against.
      */
-    public function fetchStructSchema(string $name): ?FetchedSchema
+    public function fetchStructSchema(string $name, ?int $version = null): ?FetchedSchema
     {
-        $cached = $this->structs[$name] ?? null;
-        if ($cached !== null) {
-            return new FetchedSchema($cached, $this);
+        $versions = $this->structs[$name] ?? [];
+        if ($version !== null) {
+            return isset($versions[$version]) ? new FetchedSchema($versions[$version], $this) : null;
+        }
+        if ($versions !== []) {
+            return new FetchedSchema($versions[max(array_keys($versions))], $this);
         }
         if ($this->resolver === null) {
             return null;
@@ -155,7 +244,21 @@ final class Registry
         return new FetchedSchema($resolved, $this->putStructSchema($name, $resolved));
     }
 
-    /** @return (\Closure(array<string, mixed>): mixed)|null */
+    /**
+     * `$struct` as it is written here: carrying the latest loaded version
+     * of its schema (DXN.md §4.8), whatever version it says itself. A
+     * struct whose name has no schema keeps its own version, or none.
+     * Every writer goes through this -- text, the formatter and binary --
+     * so encoding never writes a version other than the latest, and never
+     * writes one no schema stands behind.
+     */
+    public function asWritten(DXNStruct $struct): DXNStruct
+    {
+        $found = $this->fetchStructSchema($struct->name);
+        return $found === null ? $struct : $struct->withVersion($found->compiled->version);
+    }
+
+    /** @return (\Closure(string, int, array<int|string, mixed>): mixed)|null */
     public function fetchMaterializer(string $name): ?\Closure
     {
         return $this->materializers[$name] ?? null;
@@ -171,6 +274,17 @@ final class Registry
     public function fetchTypeAlias(string $name): ?TypeExpr
     {
         return $this->typeAliases[$name] ?? null;
+    }
+
+    /**
+     * Every loaded struct schema, by name and version -- what the version
+     * discipline check ({@see \JOetjen\Dextrin\Schema\Compat}) compares.
+     *
+     * @return array<string, non-empty-array<int, Compiled>>
+     */
+    public function structSchemas(): array
+    {
+        return $this->structs;
     }
 
     /** @return array<string, TypeExpr> */

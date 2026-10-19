@@ -102,10 +102,12 @@ final class ParserTest extends TestCase
         self::assertSame(Parser::parse('%{a: 1}'), Parser::parse('%{:a => 1}'));
     }
 
-    public function testMapKeyCollisionThrows(): void
+    public function testMapKeysThatWouldCollideMakeADxnMap(): void
     {
-        $this->expectException(ParseError::class);
-        Parser::parse('%{1 => "a", "1" => "b"}');
+        $map = Parser::parse('%{1 => "a", "1" => "b"}');
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNMap::class, $map);
+        self::assertSame('a', $map->get(1));
+        self::assertSame('b', $map->get('1'));
     }
 
     public function testMapKeywordAndSameTextStringKeyCoexistDistinctly(): void
@@ -117,9 +119,9 @@ final class ParserTest extends TestCase
         self::assertSame(['name' => 1, "\0name" => 2], Parser::parse('%{name: 1, "name" => 2}'));
     }
 
-    public function testMapNonScalarKeyThrows(): void
+    public function testMapCollectionKeyIsNotAllowed(): void
     {
-        $this->expectException(ParseError::class);
+        $this->expectException(\JOetjen\Dextrin\KeyNotAllowed::class);
         Parser::parse('%{[1 2] => "a"}');
     }
 
@@ -212,11 +214,14 @@ final class ParserTest extends TestCase
         Parser::parse('42 43');
     }
 
-    public function testStructFieldNameMustResolveToString(): void
+    public function testAStructEntryWhoseKeyIsNotANameIsAnExtraField(): void
     {
-        // Arrow-form struct field key using a non-string, non-keyword value.
-        $this->expectException(ParseError::class);
-        Parser::parse('%Point{1 => 2}');
+        // An arrow-form struct entry keyed by a non-name is an extra field
+        // (DXN.md §4.7), not a field and not an error.
+        $value = Parser::parse('%Point{1 => 2}');
+        self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNStruct::class, $value);
+        self::assertSame([], $value->pairs());
+        self::assertSame([[1, 2]], $value->extra);
     }
 
     public function testOrderedRequiresAMapLiteralArgument(): void

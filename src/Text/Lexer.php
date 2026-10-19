@@ -101,6 +101,8 @@ final class Lexer
             $c === ']' => $this->single('RBRACKET'),
             $c === '{' => $this->single('LBRACE'),
             $c === '}' => $this->single('RBRACE'),
+            $c === '(' => $this->single('LPAREN'),
+            $c === ')' => $this->single('RPAREN'),
             $c === '"' => $this->readString(),
             $c === '?' => $this->readChar(),
             $c === '~' => $this->readSigil(),

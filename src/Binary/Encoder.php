@@ -6,6 +6,8 @@ namespace JOetjen\Dextrin\Binary;
 
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Field;
+use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -104,6 +106,7 @@ final class Encoder
                 $value->items,
             ))),
             $value instanceof DXNOrderedMap => Writer::tag(Tags::T_ORDERED, Writer::mapOf(self::encodePairs($value->pairs, $registry))),
+            $value instanceof \JOetjen\Dextrin\Value\DXNMap => Writer::mapOf(self::encodePairs($value->pairs(), $registry)),
 
             is_array($value) && array_is_list($value) => Writer::tag(Tags::T_ARRAY, Writer::arrayOf(array_map(
                 static fn (mixed $v): string => self::encodeItem($v, $registry),
@@ -111,15 +114,12 @@ final class Encoder
             ))),
             is_array($value) => Writer::mapOf(self::encodeMapEntries($value, $registry)),
 
-            $value instanceof DXNStruct => self::encodeStruct(
-                $value->name,
-                $value->isPositional() ? $value->values() : array_map(static fn (array $p) => $p[1], $value->pairs()),
-                $registry,
-            ),
+            $value instanceof DXNStruct => self::encodeStruct($value, $registry),
 
             $value instanceof DXNDate => Writer::tag(Tags::T_DATE, Writer::integerItem(self::epochDays($value))),
             $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem(self::totalMicroseconds($value))),
             $value instanceof DXNTimestamp => Writer::tag(Tags::T_TIMESTAMP, Writer::integerItem($value->epochMicroseconds)),
+            $value instanceof \DateTimeInterface => self::encodeItem(DXNDateTime::fromNative($value), $registry),
             $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME_OFFSET, Writer::arrayOf([
                 Writer::integerItem($value->epochMicroseconds),
                 Writer::integerItem($value->offsetMinutes),
@@ -141,7 +141,7 @@ final class Encoder
             // categorically code, not data, so it's excluded the same
             // way Printer excludes it.
             is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure => self::encodePlainObjectAsStruct($value, $registry),
-            default => throw new \InvalidArgumentException('cannot encode value with no DXN representation: ' . get_debug_type($value)),
+            default => throw \JOetjen\Dextrin\UnsupportedValue::of($value),
         };
     }
 
@@ -151,6 +151,7 @@ final class Encoder
      */
     private static function encodePairs(array $pairs, ?Registry $registry): array
     {
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         return array_map(
             static fn (array $p): array => [self::encodeItem($p[0], $registry), self::encodeItem($p[1], $registry)],
             $pairs,
@@ -188,12 +189,64 @@ final class Encoder
      * schema.
      * @param list<mixed> $values
      */
-    private static function encodeStruct(string $name, array $values, ?Registry $registry): string
+    /**
+     * `.dxnb` structs are always positional (DXN.md §2.1), written with
+     * the type name `Name(3)` that {@see Registry::asWritten()} says --
+     * the latest loaded version of its schema, or its own (§2.4, §4.8).
+     */
+    private static function encodeStruct(DXNStruct $struct, ?Registry $registry): string
     {
-        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf([
-            Writer::textItem($name),
-            ...array_map(static fn (mixed $v): string => self::encodeItem($v, $registry), $values),
-        ]));
+        $written = $registry?->asWritten($struct) ?? $struct;
+        $items = [
+            Writer::textItem(DXNStruct::typeName($written->name, $written->version)),
+            ...array_map(static fn (mixed $v): string => self::encodeItem($v, $registry), self::positionalValues($struct, $registry)),
+        ];
+        // Extra fields, when there are any, as one trailing tag-215 map in
+        // the order they were written (DXN.md §2.3).
+        if ($struct->extra !== []) {
+            $items[] = Writer::tag(Tags::T_EXTRA, Writer::mapOf(self::encodePairs($struct->extra, $registry)));
+        }
+        return Writer::tag(Tags::T_STRUCT, Writer::arrayOf($items));
+    }
+
+    /**
+     * A struct's field values in the order the wire wants them. A keyed
+     * struct is put in its schema's field order, because a position is
+     * what the wire has; with no schema there is no order to consult, and
+     * the pairs' own order is all there is.
+     *
+     * @return list<mixed>
+     */
+    private static function positionalValues(DXNStruct $struct, ?Registry $registry): array
+    {
+        if ($struct->isPositional()) {
+            return $struct->values();
+        }
+        $found = $registry?->fetchStructSchema($struct->name);
+        if ($found === null) {
+            return array_map(static fn (array $p): mixed => $p[1], $struct->pairs());
+        }
+        $named = [];
+        foreach ($struct->pairs() as [$key, $value]) {
+            $named[$key] = $value;
+        }
+        // Every position must be filled, and null is not a stand-in for an
+        // absent field (DXN.md §4.3): a reader refuses null unless the type
+        // is nilable. So an absent field is written as its default where
+        // it has one, and is otherwise refused (`schema/missing-field`).
+        return array_map(static function (Field $field) use ($named, $struct): mixed {
+            if (array_key_exists($field->name, $named)) {
+                return $named[$field->name];
+            }
+            if ($field->default !== Field::NO_DEFAULT) {
+                return $field->default;
+            }
+            throw new SchemaValidationError(
+                "struct \"{$struct->name}\" has no \"{$field->name}\", and .dxnb fills every position: "
+                    . 'give it a value or a default, or declare it nilable',
+                'schema/missing-field',
+            );
+        }, $found->compiled->fields);
     }
 
     private static function shortClassName(string $className): string
@@ -216,8 +269,7 @@ final class Encoder
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                $values = array_map(static fn (array $p): mixed => $p[1], $found->compiled->fieldValues($value));
-                return self::encodeStruct($name, $values, $registry);
+                return self::encodeStruct($found->compiled->structOf($name, $value), $registry);
             }
         }
 
@@ -227,7 +279,10 @@ final class Encoder
             return Writer::tag(Tags::T_CUSTOM, Writer::arrayOf([Writer::textItem($tagName), self::encodeItem($encoder($value), $registry)]));
         }
 
-        return self::encodeStruct(self::shortClassName($value::class), array_values(get_object_vars($value)), $registry);
+        return self::encodeStruct(
+            DXNStruct::positional(self::shortClassName($value::class), array_values(get_object_vars($value))),
+            $registry,
+        );
     }
 
     private static function encodeDecimal(DXNDecimal $value): string

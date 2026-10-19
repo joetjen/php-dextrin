@@ -37,20 +37,17 @@ final class FileResolver
 
     /**
      * Builds a resolver searching `$searchPaths` in order, returning
-     * the first match. `$predicates` is forwarded to
-     * {@see Compiler::compile()} for any `refine-fn:` the loaded files
-     * use.
+     * the first match.
      *
      * @param list<string> $searchPaths
-     * @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates
      * @return \Closure(string): ?Compiled
      */
-    public static function forPaths(array $searchPaths, array $predicates = []): \Closure
+    public static function forPaths(array $searchPaths): \Closure
     {
-        return static function (string $name) use ($searchPaths, $predicates): ?Compiled {
+        return static function (string $name) use ($searchPaths): ?Compiled {
             [$fileStem, $entryName] = self::splitName($name);
             foreach ($searchPaths as $dir) {
-                $found = self::resolveIn($dir, $fileStem, $entryName, $predicates);
+                $found = self::resolveIn($dir, $fileStem, $entryName);
                 if ($found !== null) {
                     return $found;
                 }
@@ -59,8 +56,7 @@ final class FileResolver
         };
     }
 
-    /** @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates */
-    private static function resolveIn(string $dir, string $fileStem, string $entryName, array $predicates): ?Compiled
+    private static function resolveIn(string $dir, string $fileStem, string $entryName): ?Compiled
     {
         $filePath = $dir . '/' . $fileStem . '.dxns';
         if (!is_file($filePath)) {
@@ -72,7 +68,7 @@ final class FileResolver
                 return null;
             }
             $doc = Parser::parse($source);
-            $registry = Compiler::compile($doc, new Registry(), $predicates);
+            $registry = Compiler::compile($doc, new Registry());
             return $registry->fetchStructSchema($entryName)?->compiled;
         } catch (\Throwable) {
             return null;

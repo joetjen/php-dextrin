@@ -5,53 +5,33 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin;
 
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Value\Equality;
 
 /**
- * Builds a DXN `map` as a bare PHP array -- shared by the text
+ * Builds a decoded DXN `map` -- shared by the text
  * {@see \JOetjen\Dextrin\Text\Parser} and the binary
- * {@see \JOetjen\Dextrin\Binary\Decoder}, since both need identical
- * logic for the exact same reason: `map` is the one collection type
- * this port decodes to bare native `array` rather than a wrapper
- * class (see the project's own collections decision), and every
- * PHP-array-key coercion hazard that follows from that applies
- * equally regardless of which pipeline produced the raw key/value
- * pairs.
+ * {@see \JOetjen\Dextrin\Binary\Decoder}, which need identical logic.
  *
- * Every key reduces to whatever PHP scalar it naturally coerces to --
- * everything follows PHP's own int/string/bool/float/null array-key
- * coercion (including PHP's own further auto-coercion of a canonical
- * decimal-integer *string* key to an `int` key, e.g. `"1"` and `1`
- * already share one slot before this class does anything at all),
- * **except** `DXNKeyword`, which needs one more bit of care: a
- * `DXNKeyword` reduces to its bare name string (matching
- * `map_entry`'s shorthand form exactly, and keeping the overwhelmingly
- * common case -- a keyword-keyed map, e.g. `%{x: 1}` -- looking up as
- * the ergonomic, unprefixed `$map['x']`), while a genuinely
- * *string*-typed key with the same text is marked with a single
- * leading {@see self::STRING_KEY_MARKER} byte first -- *unless* it's
- * already a canonical-integer-string PHP would coerce to an `int` key
- * on its own, which is left alone so it keeps colliding with a bare
- * `integer` key exactly as before (see the class-level doc's own
- * example of that, a deliberately-kept error case, not something this
- * class's own keyword/string marking is about).
+ * **Every key is one DXN.md §1.6 allows** -- a string, keyword, integer,
+ * uuid, date, bytes, symbol or char -- or the map is refused with
+ * {@see KeyNotAllowed} (`key/not-allowed`).
  *
- * Without the mark, `:x` and `"x"` would collapse to the exact same
- * PHP array slot with no way to tell them apart again on encode --
- * which used to mean `Text\Printer`/`Text\Formatter` and
- * `Binary\Encoder` disagreed with each other about which one to
- * assume (the text side always guessed "keyword" for an
- * identifier-shaped key; the binary side always assumed "string"), so
- * the exact same decoded PHP value could produce a `.dxn` and a
- * `.dxnb` that decoded back to two different things.
- * {@see self::toDxnMapKey()} is the reverse direction, used by both
- * encoders to recover which one a given PHP key actually was.
+ * **A native PHP array when it can hold the map exactly, a
+ * {@see DXNMap} when it cannot.** A native array holds a map whose keys
+ * are all integers, keywords or strings, where no two of them coerce to
+ * one array slot, no string key is one PHP would turn into an integer
+ * (`"5"`), and the result is not shaped like a list (an empty map, or
+ * one keyed `0..n-1`, which would read back as a DXN array). Anything
+ * else is a DXNMap, which keys by canonical form and loses nothing.
  *
- * Two *distinct* DXN keys that would still coerce to the same PHP
- * slot after all of the above (`1` and `"1"` as a bare int/canonical-
- * integer-string pair) is a decode error, not silent data loss --
- * ordinary duplicate keys (the same key appearing twice) still follow
- * normal last-write-wins map semantics.
+ * Within a native array a `DXNKeyword` reduces to its bare name string
+ * (matching `map_entry`'s shorthand form, and keeping the common case --
+ * `%{x: 1}` -- looking up as the ergonomic `$map['x']`), while a
+ * genuinely *string*-typed key with the same text is marked with a single
+ * leading {@see self::STRING_KEY_MARKER} byte, so `:x` and `"x"` stay two
+ * keys. {@see self::toDxnMapKey()} is the reverse, used by every encoder
+ * to recover which one a given PHP key was.
  */
 final class MapBuilder
 {
@@ -85,26 +65,36 @@ final class MapBuilder
      * @param (\Closure(string): \Throwable) $errorFactory builds the
      * caller's own exception type (`Text\ParseError`/
      * `Binary\BinaryError`) from a message.
-     * @return array<int|string, mixed>
+     * @return array<int|string, mixed>|DXNMap
      */
-    public static function build(array $pairs, \Closure $errorFactory): array
+    public static function build(array $pairs, \Closure $errorFactory): array|DXNMap
     {
+        MapKey::checkPairs($pairs);
         $result = [];
         /** @var array<int|string, string> $seenIdentity */
         $seenIdentity = [];
         foreach ($pairs as [$dxnKey, $value]) {
+            if (!($dxnKey instanceof DXNKeyword || is_string($dxnKey) || is_int($dxnKey))) {
+                return new DXNMap($pairs);
+            }
+            if (is_string($dxnKey) && self::isCanonicalIntegerString($dxnKey)) {
+                // PHP would turn the array key `"5"` into the integer 5, and
+                // the key would come back as one: a DXNMap keeps it a string.
+                return new DXNMap($pairs);
+            }
             $phpKey = self::mapKeyToPhpKey($dxnKey, $errorFactory);
             $identity = Equality::canonicalKey($dxnKey);
             if (isset($seenIdentity[$phpKey]) && $seenIdentity[$phpKey] !== $identity) {
-                throw $errorFactory(
-                    'map keys collide once coerced to a PHP array key (' . self::describeKey($phpKey) . '): '
-                    . 'two distinct DXN keys cannot share one map slot in this port',
-                );
+                // Two distinct DXN keys PHP would coerce to one array key --
+                // `1` and `"1"` -- so the map is one a native array cannot hold.
+                return new DXNMap($pairs);
             }
             $seenIdentity[$phpKey] = $identity;
             $result[$phpKey] = $value;
         }
-        return $result;
+        // A native array shaped like a list reads back as a DXN array, so
+        // an empty map, or one keyed 0..n-1, is a DXNMap too.
+        return array_is_list($result) ? new DXNMap($pairs) : $result;
     }
 
     /** @param (\Closure(string): \Throwable) $errorFactory */
@@ -114,9 +104,6 @@ final class MapBuilder
             $dxnKey instanceof DXNKeyword => $dxnKey->name,
             is_string($dxnKey) => self::markStringKey($dxnKey),
             is_int($dxnKey) => $dxnKey,
-            is_bool($dxnKey) => $dxnKey ? 1 : 0,
-            is_float($dxnKey) => (int) $dxnKey,
-            $dxnKey === null => '',
             default => throw $errorFactory(
                 'map key of kind "' . Equality::kindOf($dxnKey) . '" has no PHP array-key representation',
             ),
@@ -163,12 +150,10 @@ final class MapBuilder
      * The reverse of {@see self::mapKeyToPhpKey()}'s `DXNKeyword`/
      * `string` handling, for `Text\Printer`/`Text\Formatter`/
      * `Binary\Encoder` to recover which one a bare `map`'s PHP array
-     * key actually started out as. An `int` key needs no translation
-     * -- it only ever came from a `DXNInteger`/`bool`/`float`/
-     * canonical-integer-`string` key to begin with, and re-encoding it
-     * as a plain integer is correct either way (see this class's own
-     * doc on why a canonical-integer-string key is deliberately left
-     * to collide with an `integer` key rather than marked apart).
+     * key actually started out as. An `int` key needs no translation:
+     * {@see self::build()} only ever leaves one there for a DXN integer,
+     * since a string key PHP would coerce to an integer makes a
+     * {@see DXNMap} instead.
      */
     public static function toDxnMapKey(int|string $phpKey): DXNKeyword|string|int
     {
@@ -179,14 +164,5 @@ final class MapBuilder
             return substr($phpKey, strlen(self::STRING_KEY_MARKER));
         }
         return new DXNKeyword($phpKey);
-    }
-
-    private static function describeKey(int|string $phpKey): string
-    {
-        if (is_int($phpKey)) {
-            return (string) $phpKey;
-        }
-        $unmarked = str_starts_with($phpKey, self::STRING_KEY_MARKER) ? substr($phpKey, 1) : $phpKey;
-        return "\"{$unmarked}\"";
     }
 }

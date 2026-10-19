@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Text;
 
 use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\MapKey;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
-use JOetjen\Dextrin\Schema\Validator;
+use JOetjen\Dextrin\DXNError;
+use JOetjen\Dextrin\Schema\Reader;
+use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -31,9 +34,9 @@ use JOetjen\Dextrin\Value\DXNUuid;
  * {@see Printer}, built directly on {@see Lexer}'s token stream.
  *
  * A `struct` decodes against a compiled schema when `$registry` has
- * one for that name ({@see Validator::materialize()}, same as the
- * binary decoder); with no registry, or no schema registered for that
- * name, it decodes to an opaque {@see DXNStruct}. Same story for a
+ * one for that name ({@see Reader::read()}, which picks the schema by
+ * the struct's version, same as the binary decoder); with no registry,
+ * or no schema registered for that name, it decodes to an opaque {@see DXNStruct}. Same story for a
  * non-built-in tag against the registry's own tag table -- falls back
  * to {@see DXNCustomTag} -- never a hard failure, matching
  * `dxn/DXN.md` §1.4's "opaque tagged value, not an error" contract.
@@ -50,11 +53,95 @@ final class Parser
     private int $pos = 0;
     private ?Registry $registry;
 
+    /**
+     * The syntax tree being recorded, when one was asked for
+     * ({@see self::parseTree()}): a stack of open nodes, the document at
+     * its bottom.
+     *
+     * @var list<SyntaxNode>|null
+     */
+    private ?array $recording;
+
     /** @param list<Token> $tokens */
-    private function __construct(array $tokens, ?Registry $registry)
+    private function __construct(array $tokens, ?Registry $registry, bool $record = false)
     {
         $this->tokens = $tokens;
         $this->registry = $registry;
+        $this->recording = $record ? [new SyntaxNode('document', 0)] : null;
+    }
+
+    /**
+     * `$text` parsed the way {@see self::parse()} parses it -- the same
+     * parser, the same errors -- with the syntax tree beside the value.
+     * What {@see \JOetjen\Dextrin\Document::parse()} reads with.
+     *
+     * @return array{0: mixed, 1: SyntaxNode, 2: list<Token>}
+     */
+    public static function parseTree(string $text, ?Registry $registry = null): array
+    {
+        $tokens = Lexer::tokenize($text);
+        $parser = new self($tokens, $registry, true);
+        $value = Validated::strip($parser->parseDocument());
+        /** @var list<SyntaxNode> $recording */
+        $recording = $parser->recording;
+        return [$value, $recording[0], $tokens];
+    }
+
+    /** Opens a node of `$kind` at the next token -- or at token `$first` -- when a tree is being recorded. */
+    private function begin(string $kind, ?int $first = null): void
+    {
+        if ($this->recording !== null) {
+            $this->recording[] = new SyntaxNode($kind, $first ?? $this->pos);
+        }
+    }
+
+    /** Closes the innermost open node at the last token consumed, under its parent. */
+    private function end(): void
+    {
+        if ($this->recording === null) {
+            return;
+        }
+        $node = array_pop($this->recording);
+        if ($node === null || $this->recording === []) {
+            throw new \LogicException('a node was closed that was never opened');
+        }
+        $node->last = $this->pos - 1;
+        $this->recording[count($this->recording) - 1]->children[] = $node;
+    }
+
+    /** Notes on the innermost open node that the last token consumed is its `$field`. */
+    private function mark(string $field): void
+    {
+        if ($this->recording === null) {
+            return;
+        }
+        $node = $this->recording[count($this->recording) - 1];
+        match ($field) {
+            'open' => $node->open = $this->pos - 1,
+            'key' => $node->key = $this->pos - 1,
+            'arrow' => $node->arrow = $this->pos - 1,
+            'name' => $node->name = $this->pos - 1,
+            default => throw new \LogicException("a node has no field {$field}"),
+        };
+    }
+
+    /**
+     * Makes the value just recorded, starting at token `$first`, the key
+     * of a new entry: a positional struct's item turns out to be an extra
+     * field's key once `=>` follows it.
+     */
+    private function rewrapAsEntry(int $first): void
+    {
+        if ($this->recording === null) {
+            return;
+        }
+        $parent = $this->recording[count($this->recording) - 1];
+        $key = array_pop($parent->children);
+        $entry = new SyntaxNode('entry', $first);
+        if ($key !== null) {
+            $entry->children[] = $key;
+        }
+        $this->recording[] = $entry;
     }
 
     public static function parse(string $text, ?Registry $registry = null): mixed
@@ -102,6 +189,9 @@ final class Parser
         $this->tryConsumeHeader();
         $value = $this->parseValue();
         $this->next('EOF');
+        if ($this->recording !== null) {
+            $this->recording[0]->last = $this->pos - 1;
+        }
         return $value;
     }
 
@@ -111,7 +201,9 @@ final class Parser
         $second = $this->tokens[$this->pos + 1] ?? null;
         $third = $this->tokens[$this->pos + 2] ?? null;
         if ($this->at('AT') && $second?->type === 'IDENTIFIER' && $second->value === 'dxn' && $third?->type === 'STRING') {
+            $this->begin('header');
             $this->pos += 3;
+            $this->end();
         } else {
             $this->pos = $save;
         }
@@ -120,8 +212,13 @@ final class Parser
     /** `value = {skip}, value_body` -- `skip` here is only ever a discard; comments never reach the token stream. */
     private function parseValue(): mixed
     {
+        $this->begin('value');
         $this->skipDiscards();
-        return $this->parseValueBody();
+        $this->begin('body');
+        $value = $this->parseValueBody();
+        $this->end();
+        $this->end();
+        return $value;
     }
 
     private function isDiscard(): bool
@@ -133,8 +230,10 @@ final class Parser
     private function skipDiscards(): void
     {
         while ($this->at('AT') && $this->isDiscard()) {
+            $this->begin('discard');
             $this->pos += 2; // AT, IDENTIFIER "_"
             $this->parseValue(); // parse and throw away
+            $this->end();
         }
     }
 
@@ -255,65 +354,170 @@ final class Parser
 
     private function parseList(): DXNList
     {
-        return new DXNList($this->parseBracketedItems('LBRACKET', 'RBRACKET'));
+        return new DXNList($this->parseBracketedItems('list', 'LBRACKET', 'RBRACKET'));
     }
 
     private function parseTuple(): DXNTuple
     {
-        return new DXNTuple($this->parseBracketedItems('LBRACE', 'RBRACE'));
+        return new DXNTuple($this->parseBracketedItems('tuple', 'LBRACE', 'RBRACE'));
     }
 
-    private function parseSet(): DXNSet
+    /** @param int $at the index of the set's `@`, already consumed. */
+    private function parseSet(int $at): DXNSet
     {
-        return new DXNSet($this->parseBracketedItems('LBRACE', 'RBRACE'));
+        return new DXNSet($this->parseBracketedItems('set', 'LBRACE', 'RBRACE', $at));
     }
 
     /** @return list<mixed> */
-    private function parseBracketedItems(string $open, string $close): array
+    private function parseBracketedItems(string $kind, string $open, string $close, ?int $first = null): array
     {
+        $this->begin($kind, $first);
         $this->next($open);
+        $this->mark('open');
         $items = [];
         while (!$this->at($close)) {
             $items[] = $this->parseValue();
         }
         $this->next($close);
+        $this->end();
         return $items;
     }
 
-    /** `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct). */
+    /**
+     * `%{...}` (map) or `%Name{...}`/`%Name[...]` (struct), the struct
+     * optionally carrying the version it was written with: `%Name(3){...}`.
+     */
     private function parsePercent(): mixed
     {
+        $at = $this->pos;
         $this->next('PERCENT');
         if ($this->at('LBRACE')) {
-            return $this->buildMap($this->parseEntries());
+            $this->begin('map', $at);
+            $pairs = $this->parseEntries(false);
+            $this->end();
+            return $this->buildMap($pairs);
         }
+        $this->begin('struct', $at);
+        try {
+            return $this->parseStructBody();
+        } finally {
+            $this->end();
+        }
+    }
+
+    /** The rest of a struct after its `%`: its name, its version, and its keyed or positional body. */
+    private function parseStructBody(): mixed
+    {
         $name = $this->next('IDENTIFIER')->value;
+        $version = $this->parseStructVersion();
         if ($this->at('LBRACE')) {
-            $pairs = array_map(
-                fn (array $pair) => [$this->structFieldName($pair[0]), $pair[1]],
-                $this->parseEntries(),
-            );
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs));
+            // Entries keyed by a name are the struct's fields; any other
+            // map key (DXN.md §1.6) is an extra field's (§4.7).
+            $entries = $this->parseEntries(true);
+            MapKey::checkPairs($entries);
+            $pairs = [];
+            $extra = [];
+            foreach ($entries as [$key, $value]) {
+                $field = DXNStruct::extraKey($key);
+                if (is_string($field)) {
+                    $pairs[] = [$field, $value];
+                } else {
+                    $extra[] = [$key, $value];
+                }
+            }
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra));
         }
-        $values = $this->parseBracketedItems('LBRACKET', 'RBRACKET');
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values));
+        [$values, $extra] = $this->parsePositionalBody();
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra));
+    }
+
+    /**
+     * `[items... entries...]`: a positional struct's items, then its extra
+     * fields as entries (DXN.md §4.7). An item is a value not followed by
+     * `=>`; once an entry has begun, an item is a syntax error.
+     *
+     * @return array{0: list<mixed>, 1: list<array{0: mixed, 1: mixed}>}
+     */
+    private function parsePositionalBody(): array
+    {
+        $this->begin('positional');
+        $this->next('LBRACKET');
+        $this->mark('open');
+        $values = [];
+        $entries = [];
+        while (!$this->at('RBRACKET')) {
+            if ($this->at('MAP_KEY')) {
+                $this->begin('entry');
+                $key = new DXNKeyword($this->next('MAP_KEY')->value);
+                $this->mark('key');
+                $entries[] = [$key, $this->parseValue()];
+                $this->end();
+                continue;
+            }
+            $start = $this->peek()->start;
+            $keyAt = $this->pos;
+            $value = $this->parseValue();
+            if ($this->at('ARROW')) {
+                $this->rewrapAsEntry($keyAt);
+                $this->next('ARROW');
+                $this->mark('arrow');
+                $entries[] = [$value, $this->parseValue()];
+                $this->end();
+            } elseif ($entries !== []) {
+                throw new ParseError("a positional struct's items come before its extra fields", $start);
+            } else {
+                $values[] = $value;
+            }
+        }
+        $this->next('RBRACKET');
+        $this->end();
+        MapKey::checkPairs($entries);
+        return [$values, array_map(static fn (array $entry): array => [DXNStruct::extraKey($entry[0]), $entry[1]], $entries)];
+    }
+
+    /**
+     * The `(3)` of `%Name(3){...}` -- the schema version a struct was
+     * written with (DXN.md §4.8), a positive integer -- or `null` when
+     * there is none.
+     */
+    private function parseStructVersion(): ?int
+    {
+        if (!$this->at('LPAREN')) {
+            return null;
+        }
+        $this->next('LPAREN');
+        $tok = $this->next('INTEGER');
+        $version = filter_var($tok->value, FILTER_VALIDATE_INT);
+        if ($version === false || $version <= 0) {
+            throw new ParseError("a struct version is a positive integer, got {$tok->value}", $tok->start);
+        }
+        $this->next('RPAREN');
+        return $version;
     }
 
     private function materializeStruct(string $name, DXNStruct $struct): mixed
     {
-        $found = $this->registry?->fetchStructSchema($name);
-        if ($found === null) {
+        if ($this->registry === null) {
             return $struct;
         }
-        $this->registry = $found->registry;
-        $materializer = $this->registry->fetchMaterializer($name);
         try {
             // Fail-fast, decode-time enforcement -- a schema violation
             // is an ordinary parse error, same channel as bad syntax.
-            return Validator::materialize($found->compiled, $struct, $materializer, $this->registry);
+            // Which schema a struct is read with depends on its version
+            // ({@see Reader}).
+            $read = Reader::read($this->registry, $struct);
+        } catch (DXNError | SchemaValidationError $err) {
+            // A schema violation keeps its own category (DXN.md §5); it
+            // is not a syntax error for having been found here.
+            throw $err;
         } catch (\Throwable $err) {
             throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
         }
+        if ($read === null) {
+            return $struct;
+        }
+        [$value, $this->registry] = $read;
+        return $value;
     }
 
     /**
@@ -327,52 +531,60 @@ final class Parser
      *
      * @return list<array{0: mixed, 1: mixed}>
      */
-    private function parseEntries(): array
+    private function parseEntries(bool $ownNode): array
     {
+        if ($ownNode) {
+            $this->begin('keyed');
+        }
         $this->next('LBRACE');
+        $this->mark('open');
         $pairs = [];
         while (!$this->at('RBRACE')) {
+            $this->begin('entry');
             if ($this->at('MAP_KEY')) {
                 $key = new DXNKeyword($this->next('MAP_KEY')->value);
+                $this->mark('key');
                 $pairs[] = [$key, $this->parseValue()];
             } else {
                 $key = $this->parseValue();
                 $this->next('ARROW');
+                $this->mark('arrow');
                 $pairs[] = [$key, $this->parseValue()];
             }
+            $this->end();
         }
         $this->next('RBRACE');
+        if ($ownNode) {
+            $this->end();
+        }
         return $pairs;
     }
 
     /**
      * @param list<array{0: mixed, 1: mixed}> $pairs
-     * @return array<int|string, mixed>
+     * @return array<int|string, mixed>|\JOetjen\Dextrin\Value\DXNMap
      */
-    private function buildMap(array $pairs): array
+    private function buildMap(array $pairs): array|\JOetjen\Dextrin\Value\DXNMap
     {
         return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
-    }
-
-    private function structFieldName(mixed $key): string
-    {
-        return match (true) {
-            $key instanceof DXNKeyword => $key->name,
-            $key instanceof DXNSymbol => $key->name,
-            is_string($key) => $key,
-            default => throw new ParseError('struct field name must be an identifier or string'),
-        };
     }
 
     /** `@{...}` (set), or `@identifier value` (tag_form). Discard is already stripped in {@see self::parseValue()}. */
     private function parseAt(): mixed
     {
+        $at = $this->pos;
         $this->next('AT');
         if ($this->at('LBRACE')) {
-            return $this->parseSet();
+            return $this->parseSet($at);
         }
+        $this->begin('tag', $at);
         $nameTok = $this->next('IDENTIFIER');
-        return $this->dispatchTag($nameTok->value, $nameTok->start);
+        $this->mark('name');
+        try {
+            return $this->dispatchTag($nameTok->value, $nameTok->start);
+        } finally {
+            $this->end();
+        }
     }
 
     private function dispatchTag(string $name, int $offset): mixed
@@ -405,17 +617,28 @@ final class Parser
         };
     }
 
+    // The map is read here rather than through parseValue(), which would
+    // build a map that forgets its order; the tree records the same
+    // value, body and map nodes parseValue() would.
     private function parseOrderedTag(int $offset): DXNOrderedMap
     {
+        $this->begin('value');
         $this->skipDiscards();
         if (!$this->at('PERCENT')) {
             throw new ParseError('@ordered requires a map literal argument', $offset);
         }
+        $this->begin('body');
+        $this->begin('map');
         $this->next('PERCENT');
         if (!$this->at('LBRACE')) {
             throw new ParseError('@ordered requires a map literal argument', $offset);
         }
-        return new DXNOrderedMap($this->parseEntries());
+        $pairs = $this->parseEntries(false);
+        $this->end();
+        $this->end();
+        $this->end();
+        \JOetjen\Dextrin\MapKey::checkPairs($pairs);
+        return new DXNOrderedMap($pairs);
     }
 
     private function parseSortedSetTag(int $offset): DXNSortedSet

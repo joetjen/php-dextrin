@@ -44,6 +44,17 @@ final class DXNDateTime implements DXNValueInterface
         return new self($timestamp->epochMicroseconds, $offsetMinutes ?? intdiv($date->getOffset(), 60));
     }
 
+    /**
+     * A native date, as the `datetime` it always means (DXN.md §4.7):
+     * its instant, with the offset its own zone carries at that instant.
+     * A host value means the same DXN type with or without a schema, and
+     * a native date always has a zone, which `datetime` keeps.
+     */
+    public static function fromNative(\DateTimeInterface $date): self
+    {
+        return self::fromDateTimeImmutable(\DateTimeImmutable::createFromInterface($date));
+    }
+
     /** @return numeric-string */
     private static function asString(int|DXNInteger $value): string
     {

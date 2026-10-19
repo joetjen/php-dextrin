@@ -6,8 +6,6 @@ namespace JOetjen\Dextrin\Schema;
 
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNKeyword;
-use JOetjen\Dextrin\Value\DXNList;
-use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTuple;
@@ -38,7 +36,7 @@ use JOetjen\Dextrin\Value\DXNTuple;
  * A struct's field names, and a document's own top-level entry names,
  * are always plain PHP strings by the time they reach this class --
  * {@see \JOetjen\Dextrin\Text\Parser} already reduces a `%schema{}`'s
- * own keys (`fields:`, `closed:`, ...) to strings on the way in (its
+ * own keys -- its field names -- to strings on the way in (its
  * own `structFieldName()`), and the document's top-level `map` keys
  * were already coerced to PHP array keys by `MapBuilder` -- unlike the
  * JS port's own `entryName()`/`normalizeKeywords()` helpers, neither
@@ -54,10 +52,12 @@ final class Compiler
 
     /**
      * Compiles every entry of a decoded `.dxns` document into
-     * `$baseRegistry` -- a struct schema for each `%schema{}` entry, a
-     * named type_expr for every other entry. `$predicates` resolves
-     * `refine-fn:` names -- a plain array, not the struct registry
-     * itself, since a refine-fn is a validity check, not a decoder.
+     * `$baseRegistry` -- a struct schema for each `%schema(N){}` entry,
+     * a named type_expr for every other entry. A refusal is a
+     * {@see SchemaCompileError} (category `schema/compile`), or a
+     * {@see \JOetjen\Dextrin\DXNError} of category
+     * `schema/duplicate-version` for a version the registry has loaded
+     * already (DXN.md §4.8).
      *
      * Named types defined in *this* document may reference any type
      * already known to `$baseRegistry` (from an earlier `compile()`
@@ -65,10 +65,8 @@ final class Compiler
      * -- `.dxns`'s own `map` type has no ordering guarantee to resolve
      * forward references against. A schema's *fields*, compiled
      * afterwards, can freely use any named type from either source.
-     *
-     * @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates
      */
-    public static function compile(mixed $schemaDoc, Registry $baseRegistry, array $predicates = []): Registry
+    public static function compile(mixed $schemaDoc, Registry $baseRegistry): Registry
     {
         if (!is_array($schemaDoc)) {
             throw new SchemaCompileError('expected a .dxns document (a map), got ' . self::describe($schemaDoc));
@@ -89,8 +87,12 @@ final class Compiler
 
         $registry = self::compileAliases($aliasEntries, $baseRegistry);
         foreach ($schemaEntries as [$name, $entry]) {
-            $compiled = self::compileEntry($entry, $predicates, $registry->typeAliases())->withName($name);
-            $registry = $registry->putStructSchema($name, $compiled);
+            try {
+                $compiled = self::compileEntry($entry, $registry->typeAliases())->withName($name);
+            } catch (SchemaCompileError $err) {
+                throw new SchemaCompileError("schema \"{$name}\": {$err->getMessage()}");
+            }
+            $registry = $registry->addStructSchema($name, $compiled);
         }
         return $registry;
     }
@@ -117,52 +119,42 @@ final class Compiler
     }
 
     /**
-     * @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates
+     * One `%schema(N){field: type, ...}` entry: the body is the fields,
+     * in the order they are written; the header is the version, 1 when
+     * there is none.
+     *
      * @param array<string, TypeExpr> $aliases
      */
-    private static function compileEntry(DXNStruct $entry, array $predicates, array $aliases): Compiled
+    private static function compileEntry(DXNStruct $entry, array $aliases): Compiled
     {
         if (!$entry->isKeyed()) {
-            throw new SchemaCompileError('expected a %schema{} entry with named fields, got a positional struct');
+            throw new SchemaCompileError('a schema lists its fields by name: %schema(N){field: type, ...}');
         }
-        $pairs = $entry->pairs();
-        $fieldsValue = self::getField($pairs, 'fields');
-        $closed = self::getField($pairs, 'closed', false) === true;
-        $forbiddenValue = self::getField($pairs, 'forbidden');
-        $forbidden = $forbiddenValue instanceof DXNList ? array_map(self::literalName(...), $forbiddenValue->items) : [];
-        $refineFnName = self::getField($pairs, 'refine-fn');
-
-        $fields = self::compileFields($fieldsValue, $aliases);
-        $refineFn = self::resolveRefineFn($refineFnName, $predicates);
-        return new Compiled(fields: $fields, closed: $closed, forbidden: $forbidden, refineFn: $refineFn);
+        $fields = [];
+        $seen = [];
+        foreach ($entry->pairs() as [$key, $value]) {
+            try {
+                $field = self::compileField($key, $value, $aliases);
+            } catch (SchemaCompileError $err) {
+                throw new SchemaCompileError("field \"{$key}\": {$err->getMessage()}");
+            }
+            if (isset($seen[$field->name])) {
+                throw new SchemaCompileError("field \"{$field->name}\" is named twice");
+            }
+            $seen[$field->name] = true;
+            $fields[] = $field;
+        }
+        return new Compiled(fields: $fields, version: $entry->version ?? 1);
     }
 
     /**
+     * @param string $key a field name as a struct's keyed pairs hold it.
      * @param array<string, TypeExpr> $aliases
-     * @return list<Field>
      */
-    private static function compileFields(mixed $value, array $aliases): array
+    private static function compileField(string $key, mixed $value, array $aliases): Field
     {
-        if (!$value instanceof DXNOrderedMap) {
-            throw new SchemaCompileError(
-                'expected fields: to be an @ordered %{...} (field order is load-bearing for .dxnb\'s positional '
-                . 'encoding), got ' . self::describe($value),
-            );
-        }
-        return array_map(
-            static fn (array $pair): Field => self::compileField($pair[0], $pair[1], $aliases),
-            $value->pairs,
-        );
-    }
-
-    /** @param array<string, TypeExpr> $aliases */
-    private static function compileField(mixed $key, mixed $value, array $aliases): Field
-    {
-        if (!$key instanceof DXNKeyword) {
-            throw new SchemaCompileError('expected a field name (keyword), got ' . self::describe($key));
-        }
-        $optional = str_ends_with($key->name, '?');
-        $name = $optional ? substr($key->name, 0, -1) : $key->name;
+        $optional = str_ends_with($key, '?');
+        $name = $optional ? substr($key, 0, -1) : $key;
 
         if ($value instanceof DXNStruct && $value->name === 'field' && $value->isKeyed()) {
             $fieldPairs = $value->pairs();
@@ -280,32 +272,6 @@ final class Compiler
             }
         }
         return false;
-    }
-
-    private static function literalName(mixed $value): string
-    {
-        return match (true) {
-            $value instanceof DXNKeyword => $value->name,
-            $value instanceof DXNSymbol => $value->name,
-            is_string($value) => $value,
-            default => throw new SchemaCompileError('expected an identifier or string, got ' . self::describe($value)),
-        };
-    }
-
-    /**
-     * @param array<string, (\Closure(array<string, mixed>): (bool|string))> $predicates
-     * @return (\Closure(array<string, mixed>): (bool|string))|null
-     */
-    private static function resolveRefineFn(mixed $nameValue, array $predicates): ?\Closure
-    {
-        if ($nameValue === null) {
-            return null;
-        }
-        $name = self::literalName($nameValue);
-        if (!isset($predicates[$name])) {
-            throw new SchemaCompileError("refine-fn \"{$name}\" not found in the predicates given to compile()");
-        }
-        return $predicates[$name];
     }
 
     private static function describe(mixed $value): string

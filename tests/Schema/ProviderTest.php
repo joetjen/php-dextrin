@@ -9,6 +9,7 @@ use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema;
 use JOetjen\Dextrin\Schema\DXNSchemaMaterializingProvider;
 use JOetjen\Dextrin\Schema\DXNSchemaProvider;
+use JOetjen\Dextrin\Value\DXNStruct;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -31,7 +32,7 @@ final class ProviderTestPointProvider implements DXNSchemaMaterializingProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }';
+        return '%{ Point: %schema{ x: :float, y: :float } }';
     }
 
     public function dxnSchemaName(): string
@@ -44,9 +45,9 @@ final class ProviderTestPointProvider implements DXNSchemaMaterializingProvider
         return ProviderTestPoint::class;
     }
 
-    public function dxnMaterialize(array $resolved): ProviderTestPoint
+    public function dxnMaterialize(string $name, int $version, array $fields): ProviderTestPoint
     {
-        return new ProviderTestPoint($resolved['x'], $resolved['y']);
+        return new ProviderTestPoint($fields['x'], $fields['y']);
     }
 }
 
@@ -54,7 +55,7 @@ final class ProviderTestNonMaterializingProvider implements DXNSchemaProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float, y: :float } } }';
+        return '%{ Point: %schema{ x: :float, y: :float } }';
     }
 
     public function dxnSchemaName(): string
@@ -72,7 +73,7 @@ final class ProviderTestMismatchedNameProvider implements DXNSchemaProvider
 {
     public function dxnSchema(): string
     {
-        return '%{ Point: %schema{ fields: @ordered %{ x: :float } } }';
+        return '%{ Point: %schema{ x: :float } }';
     }
 
     public function dxnSchemaName(): string
@@ -105,13 +106,13 @@ final class ProviderTest extends TestCase
         self::assertSame(2.0, $value->y);
     }
 
-    public function testAProviderWithNoMaterializerFallsBackToThePlainFieldMap(): void
+    public function testAProviderWithNoMaterializerFallsBackToTheGenericStruct(): void
     {
         $registry = Schema::registerProvider(new Registry(), new ProviderTestNonMaterializingProvider());
         self::assertNull($registry->fetchMaterializer('Point'));
         $value = Dextrin::decode('%Point{x: 1.0, y: 2.0}', $registry);
         // Marked string keys, not keywords -- see MapBuilder::markStringKey().
-        self::assertSame(["\0x" => 1.0, "\0y" => 2.0], $value);
+        self::assertTrue(DXNStruct::keyed('Point', [['x', 1.0], ['y', 2.0]], 1)->equals($value));
     }
 
     public function testEncodingARegisteredApplicationInstanceValidatesItAgainstItsSchema(): void
@@ -126,7 +127,7 @@ final class ProviderTest extends TestCase
         $registry = Schema::registerProvider(new Registry(), new ProviderTestPointProvider());
         $point = new ProviderTestPoint(1.0, 2.0);
         $text = Dextrin::encode($point, registry: $registry);
-        self::assertSame('%Point{x:1.0,y:2.0}', $text);
+        self::assertSame('%Point(1){x:1.0,y:2.0}', $text);
     }
 
     public function testAMismatchedSchemaNameThrows(): void

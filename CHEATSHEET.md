@@ -8,22 +8,20 @@ lookups.
 ## Decode / encode
 
 ```php
-Dextrin::decode(string $text, ?Registry $registry = null): mixed
+Dextrin::decode(string $text, ?Registry $registry = null, ?bool $strict = null): mixed
 Dextrin::encode(
     mixed $value,
     bool $pretty = false,
     int $indent = 2,
     ?Registry $registry = null,
     bool $validate = true,
-    bool $coerce = true,
     ?string $schema = null,
 ): string
-Dextrin::decodeBinary(string $bytes, ?Registry $registry = null): mixed
+Dextrin::decodeBinary(string $bytes, ?Registry $registry = null, ?bool $strict = null): mixed
 Dextrin::encodeBinary(
     mixed $value,
     ?Registry $registry = null,
     bool $validate = true,
-    bool $coerce = true,
     ?string $schema = null,
 ): string
 ```
@@ -36,10 +34,9 @@ knows; also lets a registered application class encode under its
 schema's name rather than its own PHP class name.
 `$schema` (encode only): validate the top-level value against one
 named schema. `$validate` (encode only, default `true`): set `false`
-to skip the automatic whole-tree schema check. `$coerce` (encode only,
-default `true`): let a mismatched field be coerced toward its
-declared type via that DXN type's `fromX` conversion helper before
-failing validation; no Elixir `dextrin` equivalent. `$pretty`/`$indent`
+to skip the automatic whole-tree schema check; nothing is ever
+converted to match a field's type (DXN.md §4.7). `$strict` (decode
+only): refuse extra fields on schema-backed structs. `$pretty`/`$indent`
 (encode only): multi-line, indented output instead of single-line/
 compact, and spaces per nesting level when `$pretty` is `true`
 (default 2).
@@ -75,6 +72,19 @@ only changes rendering, never what the value decodes back to.
 dextrin format data.dxn --mode pretty|condense [--in-place]
 ```
 
+## Documents: keeping comments
+
+```php
+$doc = Document::parse($source, $registry, $strict);   // decode()'s options and errors
+$doc->toValue();                                       // what decode() gives
+$doc->render();                                        // the source, byte for byte
+$doc->format();                                        // laid out, comments kept
+$doc = $doc->replace(['version'], '2.0.0');
+$doc = $doc->delete(['deps', 0]);                      // with its own comments
+$doc = $doc->insert(['deps'], -1, 'new');              // index, or a map's new key
+[$doc, $changes] = $doc->update($newValue, 'safe');    // 'safe' | 'guess' | 'error'
+```
+
 ## Value-type cheatsheet
 
 ```text
@@ -108,6 +118,9 @@ regex        DXNRegex{pattern, flags}                    `~r/.../flags`
 custom-tag   DXNCustomTag{name, value}                   `@tag value`, no decoder registered
 ```
 
+A native `\DateTimeInterface` always means a `datetime`, keeping its
+offset; it decodes back as a `DXNDateTime`.
+
 Every wrapper class with a close native counterpart also has
 `toX()`/`DXN*::fromX()` conversion helpers (`DXNDate::toDateTimeImmutable()`,
 `DXNUuid::fromString()`, ...) — see each class's own file under
@@ -131,15 +144,20 @@ $registry
 ## Registry: schemas
 
 ```php
-$registry = Schema::compile(mixed $schemaDoc, Registry $baseRegistry, array $predicates = []);
+$registry = Schema::compile(mixed $schemaDoc, Registry $baseRegistry);
 
 $registry
-    ->putStructMaterializer(string $name, \Closure $materializer)
+    ->addStructSchema(string $name, Compiled $compiled)      // a new version; throws schema/duplicate-version if loaded
+    ->replaceStructSchema(string $name, Compiled $compiled)  // hot-swap a loaded version; throws schema/not-loaded otherwise
+    ->putStructMaterializer(string $name, \Closure $materializer)   // fn (string $name, int $version, array $fields): mixed -- every version; result checked against the latest
     ->putStructModule(string $name, string $class)          // for {form: 'reference', name} checks on hand-built instances
     ->putResolver(\Closure $resolver);   // lazy/on-demand schema loading, (string $name): ?Compiled
 ```
 
-`FileResolver::forPaths(array $paths, array $predicates = [])` builds
+`$registry->fetchStructSchema($name)` answers the latest version, and
+`fetchStructSchema($name, $version)` exactly that one.
+
+`FileResolver::forPaths(array $paths)` builds
 a ready-made resolver for `Namespace/Name -> paths/Namespace.dxns`.
 
 ## Registry: third-party classes (`DXNSchemaProvider`)
@@ -155,7 +173,7 @@ $registry = Schema::registerProvider($registry, $someLibMoneyProvider);
 
 `$someLibMoneyProvider` implements `DXNSchemaProvider`
 (`dxnSchema()`, `dxnSchemaName()`, `dxnClass()`) or
-`DXNSchemaMaterializingProvider` (adds `dxnMaterialize()`) -- formal
+`DXNSchemaMaterializingProvider` (adds `dxnMaterialize(string $name, int $version, array $fields)`) -- formal
 PHP interfaces, unlike the JS port's duck-typed object shape, since
 PHP has no structural-typing equivalent to lean on instead.
 
@@ -163,8 +181,8 @@ PHP has no structural-typing equivalent to lean on instead.
 
 ```php
 Schema::validate(mixed $value, Registry $registry, string $schemaName): true;                    // throws on failure
-Schema::validateEncode(mixed $value, Registry $registry, string $schemaName, bool $coerce = true): mixed;  // one named schema, encode-side -- may coerce and return a new value
-Schema::validateEncodeTree(mixed $value, Registry $registry, bool $coerce = true): mixed;          // automatic whole-tree walk, encode-side -- may coerce and return a new value
+Schema::validateEncode(mixed $value, Registry $registry, string $schemaName): mixed;  // one named schema, encode-side -- checks, never converts
+Schema::validateEncodeTree(mixed $value, Registry $registry): mixed;          // automatic whole-tree walk, encode-side -- checks, never converts
 ```
 
 ## `.dxns` type_expr forms, at a glance
@@ -182,7 +200,7 @@ Address                        bare symbol -- a struct name or a named type
 {:all-of A B}                  intersection -- matches all
 {:nilable T}                   sugar for {:one-of :nil T}
 {:refine T %{constraints}}     base type + refine constraints (below)
-%schema{fields: @ordered %{}}  struct/record shape
+%schema(N){field: T, ...}      struct/record shape, version N (1 without a header)
 ```
 
 ## `refine` constraints
@@ -193,20 +211,33 @@ min-length / max-length / pattern                          -- string
 min-count / max-count                                      -- list/set/tuple/sorted-set
 ```
 
-## Struct schema options
+## Struct schemas
 
 ```
-%schema{
-  closed:    true              # no field outside `fields` may be present at all
-  forbidden: [legacy_field]    # explicit deny-list, reported by name
-  refine-fn: ns/predicate-name # cross-field/whole-value check, resolved from $predicates
-  fields: @ordered %{
-    required_field:  :integer
-    optional_field?: :string             # trailing `?` = optional
-    with_default:    %field{type: :integer, default: 0, description: "..."}
-  }
+%schema(2){
+  required_field:  :integer
+  optional_field?: :string             # trailing `?` = optional
+  with_default:    %field{type: :integer, default: 0, description: "..."}
 }
 ```
+
+The body is the fields, in order -- that order is the positional order.
+`(2)` is the version; a schema without one is version 1. A struct can
+say which version it was written with: `%Name(2){...}`.
+
+## Versions and extra fields
+
+```text
+%Point(2){x: 1, y: 2}            written with version 2; encoding always writes the latest
+%Point{x: 1, y: 2}               no version: read as the latest
+%Point[1 2 label: "a"]           extra fields after a positional struct's items
+%Point{x: 1, y: 2, label: "a"}   an undeclared name is an extra field
+```
+
+Newer than loaded: read against the latest (text by name, `.dxnb` by
+position). Older and loaded: the materializer upgrades it, else
+`schema/no-materializer`. Older and not loaded: `schema/unknown-version`.
+Reordering fields misreads silently in older `.dxnb` readers: append only.
 
 ## Standard named types (`Std`)
 
@@ -227,7 +258,8 @@ NonEmptyList, NonEmptySet
 dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
-dextrin format data.dxn [--mode pretty|condense] [--in-place]
+dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps comments
+dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 ```
 
 No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.unicode`: the
