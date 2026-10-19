@@ -105,6 +105,9 @@ regex        DXNRegex{pattern, flags}                    `~r/.../flags`
 custom-tag   DXNCustomTag{name, value}                   `@tag value`, no decoder registered
 ```
 
+A native `\DateTimeInterface` always means a `datetime`, keeping its
+offset; it decodes back as a `DXNDateTime`.
+
 Every wrapper class with a close native counterpart also has
 `toX()`/`DXN*::fromX()` conversion helpers (`DXNDate::toDateTimeImmutable()`,
 `DXNUuid::fromString()`, ...) — see each class's own file under

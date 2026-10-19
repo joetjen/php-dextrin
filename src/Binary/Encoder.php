@@ -6,6 +6,8 @@ namespace JOetjen\Dextrin\Binary;
 
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema\Field;
+use JOetjen\Dextrin\Schema\SchemaValidationError;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -117,6 +119,7 @@ final class Encoder
             $value instanceof DXNDate => Writer::tag(Tags::T_DATE, Writer::integerItem(self::epochDays($value))),
             $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem(self::totalMicroseconds($value))),
             $value instanceof DXNTimestamp => Writer::tag(Tags::T_TIMESTAMP, Writer::integerItem($value->epochMicroseconds)),
+            $value instanceof \DateTimeInterface => self::encodeItem(DXNDateTime::fromNative($value), $registry),
             $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME_OFFSET, Writer::arrayOf([
                 Writer::integerItem($value->epochMicroseconds),
                 Writer::integerItem($value->offsetMinutes),
@@ -227,7 +230,23 @@ final class Encoder
         foreach ($struct->pairs() as [$key, $value]) {
             $named[$key] = $value;
         }
-        return array_map(static fn (string $name): mixed => $named[$name] ?? null, $found->compiled->fieldNames());
+        // Every position must be filled, and null is not a stand-in for an
+        // absent field (DXN.md §4.3): a reader refuses null unless the type
+        // is nilable. So an absent field is written as its default where
+        // it has one, and is otherwise refused (`schema/missing-field`).
+        return array_map(static function (Field $field) use ($named, $struct): mixed {
+            if (array_key_exists($field->name, $named)) {
+                return $named[$field->name];
+            }
+            if ($field->default !== Field::NO_DEFAULT) {
+                return $field->default;
+            }
+            throw new SchemaValidationError(
+                "struct \"{$struct->name}\" has no \"{$field->name}\", and .dxnb fills every position: "
+                    . 'give it a value or a default, or declare it nilable',
+                'schema/missing-field',
+            );
+        }, $found->compiled->fields);
     }
 
     private static function shortClassName(string $className): string
@@ -250,8 +269,7 @@ final class Encoder
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                $values = array_map(static fn (array $p): mixed => $p[1], $found->compiled->fieldValues($value));
-                return self::encodeStruct(DXNStruct::positional($name, $values), $registry);
+                return self::encodeStruct($found->compiled->structOf($name, $value), $registry);
             }
         }
 

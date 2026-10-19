@@ -94,10 +94,13 @@ final class Validator
     {
         $resolved = [];
         foreach ($compiled->fields as $field) {
-            // An absent optional field still holds its position when a
-            // value goes out, as null.
+            // An absent optional field stays absent: null is not a
+            // stand-in for it (DXN.md §4.3), and each writer decides what
+            // absent means there.
             $value = self::resolveField($field, $given, $registry);
-            $resolved[$field->name] = $value instanceof Absent ? null : $value;
+            if (!$value instanceof Absent) {
+                $resolved[$field->name] = $value;
+            }
         }
         return $resolved;
     }
@@ -246,8 +249,8 @@ final class Validator
             return $rebuilt;
         }
         return DXNStruct::keyed($compiled->name ?? '', array_map(
-            static fn (string $name): array => [$name, $resolved[$name] ?? null],
-            $compiled->fieldNames(),
+            static fn (string $name): array => [$name, $resolved[$name]],
+            array_values(array_filter($compiled->fieldNames(), static fn (string $name): bool => array_key_exists($name, $resolved))),
         ));
     }
 
@@ -405,8 +408,9 @@ final class Validator
         }
         // A genuine application object with no schema of its own --
         // still worth reaching into, in case something deeper does
-        // have one. Same readonly-property caveat as rebuildChecked().
-        if (is_object($value) && !$value instanceof \Closure) {
+        // have one. Same readonly-property caveat as rebuildChecked(). A
+        // native date is a value, not something to reach into.
+        if (is_object($value) && !$value instanceof \Closure && !$value instanceof \DateTimeInterface) {
             $rebuilt = clone $value;
             foreach (get_object_vars($value) as $k => $v) {
                 if (property_exists($rebuilt, $k)) {

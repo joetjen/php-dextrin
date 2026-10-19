@@ -40,19 +40,31 @@ final class Compiled
     }
 
     /**
-     * Reads `$instance`'s fields (an arbitrary registered PHP class
-     * instance, not a {@see \JOetjen\Dextrin\Value\DXNStruct}) out in
-     * this schema's own canonical field order -- the same order
-     * `.dxnb`'s positional wire encoding needs. A field this schema
-     * declares but `$instance` doesn't have is `null`, same as any
-     * other absent field; extra instance properties the schema doesn't
-     * know about are simply not included.
-     *
-     * @return list<array{0: string, 1: mixed}>
+     * `$instance` -- a registered application class instance -- as the
+     * keyed struct named `$name` it is written as (DXN.md §4.3, §4.7), its fields in
+     * this schema's order. A field it does not have -- a property the
+     * class does not declare, or a typed one left uninitialised -- is
+     * absent, never null: a reader refuses null unless the type admits
+     * it, and a property holding null is a field holding nil. Any other
+     * public property is an extra field, written back with the struct,
+     * as an Elixir struct's undeclared keys are.
      */
-    public function fieldValues(object $instance): array
+    public function structOf(string $name, object $instance): \JOetjen\Dextrin\Value\DXNStruct
     {
         $vars = get_object_vars($instance);
-        return array_map(static fn (string $name): array => [$name, $vars[$name] ?? null], $this->fieldNames());
+        $declared = array_flip($this->fieldNames());
+        $pairs = [];
+        foreach ($this->fieldNames() as $field) {
+            if (array_key_exists($field, $vars)) {
+                $pairs[] = [$field, $vars[$field]];
+            }
+        }
+        $extra = [];
+        foreach ($vars as $key => $value) {
+            if (!isset($declared[$key])) {
+                $extra[] = [$key, $value];
+            }
+        }
+        return \JOetjen\Dextrin\Value\DXNStruct::keyed($name, $pairs, null, $extra);
     }
 }

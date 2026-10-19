@@ -100,6 +100,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A native `\DateTimeInterface` encodes as a `datetime`**, keeping its
+  offset, with or without a schema (DXN.md §4.7). It was written as an
+  empty struct named after its class. `DXNDateTime::fromNative()` is
+  new.
+- **A registered class instance carries extra fields**: a public
+  property its schema does not declare is written as an extra field, as
+  an Elixir struct's undeclared keys are. It was dropped.
+- **An absent field is never written as `nil`** (DXN.md §4.3): a property
+  an instance lacks, or a typed one left uninitialised, is left out of
+  text, and in `.dxnb`, which fills every position, written as its
+  default or refused (`schema/missing-field`). The writers and the
+  validator wrote `nil`, which the same schema then refused to read
+  back.
 - **Every schema violation carries its DXN.md §5 category**:
   `schema/field-count`, `schema/missing-field`, `schema/type-mismatch`
   and `schema/shadowed-field`, decoding text or binary and encoding

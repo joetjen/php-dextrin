@@ -247,7 +247,7 @@ final class TypeExpr
             'date' => $value instanceof DXNDate,
             'time' => $value instanceof DXNTime,
             'timestamp' => $value instanceof DXNTimestamp,
-            'datetime' => $value instanceof DXNDateTime,
+            'datetime' => $value instanceof DXNDateTime || $value instanceof \DateTimeInterface,
             'duration' => $value instanceof DXNDuration,
             'uuid' => $value instanceof DXNUuid,
             'uri' => $value instanceof DXNUri,

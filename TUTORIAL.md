@@ -323,6 +323,29 @@ and a materializer receives the extras with the declared fields. Pass
 instead (`schema/undeclared-field`): right for a config file written by
 hand, where an unknown field is a typo.
 
+A registered class instance is written the same way. A public property
+its schema does not declare is an extra field, and a field it does not
+have — a property the class lacks, or a typed one left uninitialised —
+is absent:
+
+```php
+final class LabelledPoint
+{
+    public string $label = 'origin';
+
+    public function __construct(public mixed $x, public mixed $y) {}
+}
+
+$registry4 = $registry->putStructModule('Point', LabelledPoint::class);
+Dextrin::encode(new LabelledPoint(1, 2), registry: $registry4);
+// => '%Point(1){x:1,y:2,label:"origin"}'
+```
+
+A property holding `null` is a field holding `nil`, which is refused
+unless its type is `{:nilable t}`. Text leaves an absent field out;
+`.dxnb` has to fill every position, so there an absent field is written
+as its default, or refused (`schema/missing-field`) when it has none.
+
 ## 8. Evolving a schema
 
 A schema changes; data written with the old one does not. Each `.dxns`

@@ -94,6 +94,7 @@ final class Canonical
             $value instanceof DXNTime => '~T[' . self::trimmed(Temporal::formatTime($value)) . ']',
             $value instanceof DXNTimestamp => '~U[' . self::trimmedInstant(Temporal::formatInstant($value)) . ']',
             $value instanceof DXNDateTime => '@datetime ' . self::quoted(self::trimmedInstant(Temporal::formatOffsetDateTime($value))),
+            $value instanceof \DateTimeInterface => self::text(DXNDateTime::fromNative($value)),
             $value instanceof DXNDuration => '@duration ' . self::quoted(Temporal::formatDuration($value)),
             $value instanceof DXNUuid => '@uuid ' . self::quoted(strtolower($value->toString())),
             $value instanceof DXNUri => '@uri ' . self::quoted($value->value),

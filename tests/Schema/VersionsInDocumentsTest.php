@@ -58,7 +58,9 @@ final class VersionsInDocumentsTest extends TestCase
 
     public function testItCarriesVersionOneWhenThatIsTheOnlyOneSoAReaderNeverHasToGuess(): void
     {
-        self::assertSame('%Point(1){x:1}', Dextrin::encode(new VersionedPoint(1), registry: self::loaded(self::V1)));
+        // `y`, which version 1 does not declare, is the class's own
+        // property, so it travels as an extra field.
+        self::assertSame('%Point(1){x:1,y:nil}', Dextrin::encode(new VersionedPoint(1), registry: self::loaded(self::V1)));
     }
 
     public function testItCarriesItWhenLaidOutOverSeveralLines(): void

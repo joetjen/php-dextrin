@@ -47,7 +47,7 @@ final class Formatter
 
     private static function render(mixed $value, int $depth, int $indentSize, ?Registry $registry): string
     {
-        if (is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure) {
+        if (is_object($value) && !$value instanceof DXNValueInterface && !$value instanceof \Closure && !$value instanceof \DateTimeInterface) {
             return self::renderPlainObject($value, $depth, $indentSize, $registry);
         }
         return match (true) {
@@ -146,9 +146,7 @@ final class Formatter
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                $head = Printer::writtenHead(DXNStruct::keyed($name, []), $registry);
-                $pairs = self::keywordPairs($found->compiled->fieldValues($value));
-                return $pairs === [] ? "{$head}{}" : $head . self::bracketedEntries('{', $pairs, '}', $depth, $indentSize, $registry);
+                return self::render($found->compiled->structOf($name, $value), $depth, $indentSize, $registry);
             }
         }
 

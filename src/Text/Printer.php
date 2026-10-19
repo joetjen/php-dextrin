@@ -96,6 +96,7 @@ final class Printer
             $value instanceof DXNTime => '~T[' . Temporal::formatTime($value) . ']',
             $value instanceof DXNTimestamp => '~U[' . Temporal::formatInstant($value) . ']',
             $value instanceof DXNDateTime => self::tagForm('datetime', self::quoteString(Temporal::formatOffsetDateTime($value))),
+            $value instanceof \DateTimeInterface => self::print(DXNDateTime::fromNative($value), $registry),
             $value instanceof DXNDuration => self::tagForm('duration', self::quoteString(Temporal::formatDuration($value))),
             $value instanceof DXNUuid => self::tagForm('uuid', self::quoteString($value->toString())),
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
@@ -314,7 +315,7 @@ final class Printer
         if ($name !== null) {
             $found = $registry->fetchStructSchema($name);
             if ($found !== null) {
-                return self::printStruct(DXNStruct::keyed($name, $found->compiled->fieldValues($value)), $registry);
+                return self::printStruct($found->compiled->structOf($name, $value), $registry);
             }
         }
 
