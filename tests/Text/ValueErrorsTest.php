@@ -6,6 +6,8 @@ namespace JOetjen\Dextrin\Tests\Text;
 
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Dextrin;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -56,6 +58,42 @@ final class ValueErrorsTest extends TestCase
     public function testAZeroDenominatorIsASyntaxErrorAtItsRational(): void
     {
         self::assertSame(['category' => 'syntax', 'offset' => 5], self::refusal('%{a: 1/0}'));
+    }
+
+    // As the reference places it: at the key, line 2, column 2.
+    public function testAMapKeyThatIsNotAllowedIsPlacedAtTheKey(): void
+    {
+        self::assertSame(['category' => 'key/not-allowed', 'offset' => 8], self::refusal("%{a: 1\n 1.5 => 2}"));
+    }
+
+    public function testInAStructsExtraFieldsToo(): void
+    {
+        self::assertSame(['category' => 'key/not-allowed', 'offset' => 9], self::refusal('%P{a: 1, 1.5 => 2}'));
+    }
+
+    // Written as DXN, as the reference writes it.
+    public function testARefusedKeyIsNamedAsWritten(): void
+    {
+        try {
+            Dextrin::decode('%{[1] => 2}');
+        } catch (DXNError $err) {
+            self::assertStringStartsWith('[1] cannot be a map key', $err->getMessage());
+            return;
+        }
+        self::fail('expected a refusal');
+    }
+
+    // As the reference places it: at the innermost struct, line 2, column 3.
+    public function testASchemaViolationIsPlacedAtItsInnermostStruct(): void
+    {
+        $registry = Schema::compile(Dextrin::decode('%{U: %schema{a: :string} V: %schema{u: U}}'), new Registry());
+        try {
+            Dextrin::decode("%V{u:\n  %U{a: 2}}", $registry);
+        } catch (DXNError $err) {
+            self::assertSame(['schema/type-mismatch', 8], [$err->category, $err->offset]);
+            return;
+        }
+        self::fail('expected a refusal');
     }
 
     // An error that has a category of its own keeps it.
