@@ -52,6 +52,29 @@ final class Schema
     }
 
     /**
+     * Compiles several decoded `.dxns` documents into one registry, in
+     * order, over `$baseRegistry` (a new one by default) -- each seeing the
+     * schemas and named types of those before it, as {@see compile()}
+     * called on each in turn. The first that does not compile throws,
+     * naming which it was (`schema/compile`). As the reference's
+     * `Dextrin.Schema.compile_all/2`.
+     *
+     * @param list<mixed> $schemaDocs
+     */
+    public static function compileAll(array $schemaDocs, ?Registry $baseRegistry = null): Registry
+    {
+        $registry = $baseRegistry ?? new Registry();
+        foreach ($schemaDocs as $index => $doc) {
+            try {
+                $registry = Compiler::compile($doc, $registry);
+            } catch (Schema\SchemaCompileError $err) {
+                throw new Schema\SchemaCompileError('document ' . ($index + 1) . ': ' . $err->getMessage());
+            }
+        }
+        return $registry;
+    }
+
+    /**
      * Validates an already-decoded value against a named, compiled
      * schema -- for the cases that aren't "check while decoding": a
      * value built directly in PHP before encoding, an opaque
