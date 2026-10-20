@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Encoded content** (Jan, 2026-10-20; DXN.md §4.2; as dextrin
+  6918cf8): `encoding:` (RFC 4648's base64, base64url, base32, base16),
+  `media-type:` and `content: T` on strings -- the string, decoded, is a
+  DXN document of type T, `.dxnb` under `application/dxnb` -- and
+  `encodes: T` and `encodes-seq: T` on bytes, CDDL's `.cbor` and
+  `.cborseq`. `Binary\Decoder::decodeSequence()` reads documents back to
+  back. The encodings are checked by their alphabet and padding, not by
+  `base64_decode()` alone, which takes forms the reference refuses.
+- **`format:`** (Jan, 2026-10-20; DXN.md §4.2a; as dextrin 71fbec0): a
+  string in one of a closed set of 22 formats -- `date`, `time`,
+  `datetime`, `local-datetime`, `duration`, `uuid`, `ipv4`, `ipv6`,
+  `hostname`, `idn-hostname`, `email`, `idn-email`, `uri`,
+  `uri-reference`, `iri`, `iri-reference`, `uri-template`,
+  `json-pointer`, `relative-json-pointer`, `semver`, `mac`, `host-port`
+  -- `Schema\Format`. A format DXN has a tag for is read by that tag's
+  reader; every other one by the reference's grammar, verbatim, under
+  PCRE's `u` modifier. A `datetime` or `local-datetime` outside
+  1677-2262 is refused, as everywhere in this port: 64 bits of
+  nanoseconds hold no more.
+
 - **Refine keys on scalars** (Jan, 2026-10-20; DXN.md §4.2; the
   superset's group 5; as dextrin 2f20707): `min-length`/`max-length` on
   keywords, symbols, bytes (in bytes) and bits (in bits, under `:bits`);
@@ -103,6 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Every refine argument is checked when the schema compiles** (as
+  dextrin 6918cf8): a count that is no non-negative integer, a flag that
+  is no boolean, `multiple-of: 0`, `bits: 5`, a `pattern` that is no
+  regex and the like are compile errors (`schema/compile`); before, they
+  refused every value at check time. `bits:` and `offsets:` take a list,
+  `[...]`, not an `@array[...]` (a native PHP list).
+
 - **A refine constraint refuses a value it does not apply to** (as
   dextrin 2f20707): a length on an integer, a range on a string, `bits`
   on a negative integer. Before, several such checks threw;
@@ -194,6 +221,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no known type.
 
 ### Fixed
+
+- **A `.dxnb` document read inside another keeps the outer one's
+  state** (as dextrin 6918cf8): each is read by a decoder of its own, as
+  it already was here; `decodeSequence()` gives every document in a
+  sequence one too.
+- **`@uuid` reads only 8-4-4-4-12 hex digits** (as dextrin 71fbec0): it
+  took them with a newline after, and warned.
+- **`@date` refuses a newline after the date**, as the reference does.
 
 - **A float written as text keeps every digit**: `Dextrin::encode()`
   wrote a float with PHP's `(string)`, which keeps 14 significant digits,

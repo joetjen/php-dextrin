@@ -7,7 +7,9 @@ namespace JOetjen\Dextrin\Schema;
 use JOetjen\Dextrin\Canonical;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Binary\Decoder;
 use JOetjen\Dextrin\Binary\FloatWidth;
+use JOetjen\Dextrin\Dextrin;
 use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
@@ -63,6 +65,14 @@ use JOetjen\Dextrin\Value\Nanos;
  */
 final class TypeExpr
 {
+    /**
+     * A refine's keys whose argument is a type (DXN.md §4.2), compiled,
+     * resolved and substituted as its base is.
+     *
+     * @internal
+     */
+    public const TYPE_KEYS = ['contains', 'content', 'encodes', 'encodes-seq'];
+
     private const PRIMITIVES = [
         'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
         'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
@@ -722,7 +732,7 @@ final class TypeExpr
                 'branches' => array_map(static fn (array $b): array => [$b[0], $b[1]->substitute($bound)], $this->branches ?? []),
                 'otherwise' => $sub($this->otherwise),
             ]),
-            'refine' => $this->with(['base' => $sub($this->base), 'constraints' => self::withContains(
+            'refine' => $this->with(['base' => $sub($this->base), 'constraints' => self::withTypes(
                 $this->constraints ?? [],
                 static fn (self $t): self => $t->substitute($bound),
             )]),
@@ -738,19 +748,40 @@ final class TypeExpr
     }
 
     /**
-     * A refine's `$constraints` with its `contains` type, if it has one,
-     * replaced by what `$map` makes of it.
+     * A refine's `$constraints` with each type they hold -- `contains`,
+     * `content`, `encodes`, `encodes-seq` -- replaced by what `$map`
+     * makes of it.
      *
      * @param array<string, mixed> $constraints
      * @param \Closure(self): self $map
      * @return array<string, mixed>
      */
-    public static function withContains(array $constraints, \Closure $map): array
+    public static function withTypes(array $constraints, \Closure $map): array
     {
-        if (($constraints['contains'] ?? null) instanceof self) {
-            $constraints['contains'] = $map($constraints['contains']);
+        foreach (self::TYPE_KEYS as $key) {
+            if (($constraints[$key] ?? null) instanceof self) {
+                $constraints[$key] = $map($constraints[$key]);
+            }
         }
         return $constraints;
+    }
+
+    /**
+     * The types a refine's `$constraints` hold, in {@see self::TYPE_KEYS}' order.
+     *
+     * @internal
+     * @param array<string, mixed> $constraints
+     * @return list<self>
+     */
+    public static function heldTypes(array $constraints): array
+    {
+        $held = [];
+        foreach (self::TYPE_KEYS as $key) {
+            if (($constraints[$key] ?? null) instanceof self) {
+                $held[] = $constraints[$key];
+            }
+        }
+        return $held;
     }
 
     private static function matchesReference(string $name, mixed $value, ?Registry $registry): bool
@@ -868,6 +899,9 @@ final class TypeExpr
         foreach ($constraints as $key => $arg) {
             $satisfied = match ($key) {
                 'contains' => $arg instanceof self && self::contains($arg, $constraints, $value, $ctx),
+                'content' => $arg instanceof self && self::hasContent($arg, $constraints, $value, $ctx),
+                'encodes' => $arg instanceof self && self::encodes($arg, $value, $ctx),
+                'encodes-seq' => $arg instanceof self && self::encodesSeq($arg, $value, $ctx),
                 'min-length' => self::within(self::lengthOf($value, $base), $arg, null),
                 'max-length' => self::within(self::lengthOf($value, $base), null, $arg),
                 default => self::satisfiesConstraint($key, $arg, $value),
@@ -898,6 +932,132 @@ final class TypeExpr
             }
         }
         return self::within($count, $constraints['min-contains'] ?? 1, $constraints['max-contains'] ?? null);
+    }
+
+    /**
+     * The string, decoded by its `encoding` when it has one, is a DXN
+     * document whose value is a `$type`: `.dxnb` under application/dxnb,
+     * text otherwise.
+     *
+     * @param array<string, mixed> $constraints
+     */
+    private static function hasContent(self $type, array $constraints, mixed $value, Context $ctx): bool
+    {
+        if (!is_string($value)) {
+            return false;
+        }
+        $encoding = $constraints['encoding'] ?? null;
+        $bytes = is_string($encoding) ? self::decoded($encoding, $value) : $value;
+        if ($bytes === null) {
+            return false;
+        }
+        $media = $constraints['media-type'] ?? null;
+        $binary = is_string($media) && strtolower($media) === 'application/dxnb';
+        if (!$binary && !mb_check_encoding($bytes, 'UTF-8')) {
+            return false;
+        }
+        $documents = self::read(static fn (): array => [$binary ? Dextrin::decodeBinary($bytes) : Dextrin::decode($bytes)]);
+        return $documents !== null && self::allConform($type, $documents, $ctx);
+    }
+
+    /** The bytes are a `.dxnb` document whose value is a `$type`. */
+    private static function encodes(self $type, mixed $value, Context $ctx): bool
+    {
+        if (!$value instanceof DXNBytes) {
+            return false;
+        }
+        $documents = self::read(static fn (): array => [Dextrin::decodeBinary($value->data)]);
+        return $documents !== null && self::allConform($type, $documents, $ctx);
+    }
+
+    /** The bytes are `.dxnb` documents back to back, each a `$type`; none at all too. */
+    private static function encodesSeq(self $type, mixed $value, Context $ctx): bool
+    {
+        if (!$value instanceof DXNBytes) {
+            return false;
+        }
+        $documents = self::read(static fn (): array => Decoder::decodeSequence($value->data));
+        return $documents !== null && self::allConform($type, $documents, $ctx);
+    }
+
+    /**
+     * What `$decode` reads, or `null` when it fails: a document that does
+     * not read is content of no type, never an error of the check.
+     *
+     * @param \Closure(): list<mixed> $decode
+     * @return list<mixed>|null
+     */
+    private static function read(\Closure $decode): ?array
+    {
+        try {
+            return $decode();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** @param list<mixed> $documents */
+    private static function allConform(self $type, array $documents, Context $ctx): bool
+    {
+        foreach ($documents as $document) {
+            if ($type->conform($document, $ctx) === NoMatch::Instance) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * `$text` decoded by RFC 4648's `$encoding`, `null` when it is not
+     * valid in it: base64 and base32 with their padding, base64url with
+     * or without it, base32 in upper case, base16 in either. The
+     * alphabet and the padding are checked here, as PHP's decoders take
+     * more than the reference's; the bits past the last byte are not,
+     * as the reference does not check them.
+     */
+    private static function decoded(string $encoding, string $text): ?string
+    {
+        return match ($encoding) {
+            'base64' => preg_match('/^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/D', $text) === 1
+                ? self::orNull(base64_decode($text, true))
+                : null,
+            'base64url' => preg_match(
+                str_contains($text, '=')
+                    ? '/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}==|[A-Za-z0-9_-]{3}=)?$/D'
+                    : '/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$/D',
+                $text,
+            ) === 1
+                ? self::orNull(base64_decode(strtr($text, '-_', '+/'), true))
+                : null,
+            'base32' => preg_match('/^(?:[A-Z2-7]{8})*(?:[A-Z2-7]{2}={6}|[A-Z2-7]{4}={4}|[A-Z2-7]{5}={3}|[A-Z2-7]{7}=)?$/D', $text) === 1
+                ? self::base32(rtrim($text, '='))
+                : null,
+            'base16' => preg_match('/^(?:[0-9A-Fa-f]{2})*$/D', $text) === 1 ? self::orNull(hex2bin($text)) : null,
+            default => null,
+        };
+    }
+
+    private static function orNull(string|false $bytes): ?string
+    {
+        return $bytes === false ? null : $bytes;
+    }
+
+    /** Unpadded upper-case base32, its alphabet checked by the caller, as bytes; leftover bits dropped. */
+    private static function base32(string $text): string
+    {
+        $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        $bytes = '';
+        $buffer = 0;
+        $bits = 0;
+        foreach (str_split($text) as $char) {
+            $buffer = (($buffer << 5) | (int) strpos($alphabet, $char)) & 0xFFF;
+            $bits += 5;
+            if ($bits >= 8) {
+                $bits -= 8;
+                $bytes .= chr(($buffer >> $bits) & 0xFF);
+            }
+        }
+        return $bytes;
     }
 
     /**
@@ -961,6 +1121,12 @@ final class TypeExpr
             'min-bytes' => self::within(self::utf8Size($value), $arg, null),
             'max-bytes' => self::within(self::utf8Size($value), null, $arg),
             'pattern' => self::matchesPattern($value, $arg),
+            // Valid in its RFC 4648 encoding.
+            'encoding' => is_string($value) && is_string($arg) && self::decoded($arg, $value) !== null,
+            // What the string holds; it checks nothing more (`content` reads it).
+            'media-type' => is_string($value),
+            // One of DXN.md §4.2a's formats, checked as Format says.
+            'format' => is_string($value) && is_string($arg) && Format::valid($arg, $value),
             'min-count' => self::within(self::countOf($value), $arg, null),
             'max-count' => self::within(self::countOf($value), null, $arg),
             // Counted with `contains`, which reads them.
@@ -1108,7 +1274,8 @@ final class TypeExpr
             return false;
         }
         foreach ($numbers as $number) {
-            if (!is_int($number)) {
+            // A big bit number names a bit past any value's: it allows nothing more.
+            if (!is_int($number) && !$number instanceof DXNInteger) {
                 return false;
             }
         }
@@ -1361,6 +1528,41 @@ final class TypeExpr
             return is_nan($p) || is_nan($q) ? null : $p <=> $q;
         }
         return bccomp(self::numeric($p), self::numeric($q), 0);
+    }
+
+    /**
+     * Whether `$value` has a place in some kind's order: a range's bound.
+     *
+     * @internal
+     */
+    public static function comparable(mixed $value): bool
+    {
+        return self::ordinal($value) !== null;
+    }
+
+    /**
+     * Whether `$value` is a finite number other than zero: a `multiple-of`.
+     *
+     * @internal
+     */
+    public static function nonzeroNumber(mixed $value): bool
+    {
+        $at = self::ordinal($value);
+        if ($at === null || $at[0] !== 'number') {
+            return false;
+        }
+        $n = $at[1];
+        return is_float($n) ? is_finite($n) && $n != 0.0 : bccomp(self::numeric($n), '0', 0) !== 0;
+    }
+
+    /**
+     * Whether `$value` is a duration of a fixed length: a `within`.
+     *
+     * @internal
+     */
+    public static function span(mixed $value): bool
+    {
+        return (self::ordinal($value)[0] ?? null) === 'duration';
     }
 
     /**

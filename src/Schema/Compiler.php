@@ -9,7 +9,9 @@ use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNRegex;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
@@ -247,7 +249,7 @@ final class Compiler
             case 'refine':
                 return $type->with([
                     'base' => $one($type->base),
-                    'constraints' => TypeExpr::withContains($type->constraints ?? [], static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path)),
+                    'constraints' => TypeExpr::withTypes($type->constraints ?? [], static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path)),
                 ]);
             case 'list-items':
                 return $type->with(['particles' => array_map(
@@ -725,14 +727,27 @@ final class Compiler
         'min-bytes', 'max-bytes', 'pattern', 'min-count', 'max-count', 'finite', 'float32', 'offsets',
         'version', 'prefix', 'contains', 'min-contains', 'max-contains', 'unique', 'unique-by',
         'min-precision', 'max-precision', 'min-exponent', 'max-exponent', 'bits', 'before-now',
-        'after-now', 'within', 'resolution',
+        'after-now', 'within', 'resolution', 'format', 'encoding', 'media-type', 'content', 'encodes',
+        'encodes-seq',
     ];
 
+    private const COUNTS = [
+        'min-length', 'max-length', 'min-bytes', 'max-bytes', 'min-count', 'max-count', 'min-contains',
+        'max-contains', 'min-precision', 'max-precision',
+    ];
+    private const FLAGS = ['finite', 'float32', 'unique', 'before-now', 'after-now', 'prefix'];
+    private const BOUNDS = ['min', 'max', 'exclusive-min', 'exclusive-max'];
+    private const ENCODINGS = ['base64', 'base64url', 'base32', 'base16'];
+
+    /** What `content` reads a string as, by its media type: none, or one of these. */
+    private const CONTENT_READERS = ['application/dxn', 'application/dxnb'];
+
     /**
-     * A refine's constraints by name, every key one DXN.md §4.2 knows: a
-     * misspelt key would otherwise refuse every value, silently.
-     * `contains` holds a type, compiled here; `unique-by` and
-     * `resolution` a name.
+     * A refine's constraints by name, every key one DXN.md §4.2 knows and
+     * every argument one it takes: a misspelt key would otherwise refuse
+     * every value, silently, and a bad argument fail at check time. The
+     * types ({@see TypeExpr::TYPE_KEYS}) are compiled here; `unique-by`,
+     * `format`, `resolution` and `encoding` become names.
      *
      * @param array<int|string, mixed>|DXNMap $constraints
      * @param array<string, TypeExpr> $aliases
@@ -741,6 +756,27 @@ final class Compiler
     private static function refineConstraints(array|DXNMap $constraints, array $aliases): array
     {
         $named = self::constraintNames($constraints);
+        self::knownKeys($named);
+        if (!array_key_exists('contains', $named) && (array_key_exists('min-contains', $named) || array_key_exists('max-contains', $named))) {
+            throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
+        }
+        $named = self::namedArg($named, 'unique-by', null);
+        $named = self::namedArg($named, 'format', Format::names());
+        $named = self::namedArg($named, 'resolution', TypeExpr::resolutions());
+        $named = self::namedArg($named, 'encoding', self::ENCODINGS);
+        self::arguments($named);
+        self::contentReadable($named);
+        foreach (TypeExpr::TYPE_KEYS as $key) {
+            if (array_key_exists($key, $named)) {
+                $named[$key] = self::compileTypeExpr($named[$key], $aliases);
+            }
+        }
+        return $named;
+    }
+
+    /** @param array<string, mixed> $named */
+    private static function knownKeys(array $named): void
+    {
         $keys = array_keys($named);
         sort($keys, SORT_STRING);
         foreach ($keys as $key) {
@@ -748,14 +784,105 @@ final class Compiler
                 throw new SchemaCompileError("{$key} is no refine constraint (DXN.md §4.2)");
             }
         }
-        if (!array_key_exists('contains', $named) && (array_key_exists('min-contains', $named) || array_key_exists('max-contains', $named))) {
-            throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
+    }
+
+    /**
+     * Every argument the kind its key takes, in key order.
+     *
+     * @param array<string, mixed> $named
+     */
+    private static function arguments(array $named): void
+    {
+        ksort($named, SORT_STRING);
+        foreach ($named as $key => $arg) {
+            $what = self::argument($key, $arg);
+            if ($what !== null) {
+                throw new SchemaCompileError("{$key} takes {$what}, not " . self::inspect($arg));
+            }
         }
-        if (array_key_exists('contains', $named)) {
-            $named['contains'] = self::compileTypeExpr($named['contains'], $aliases);
+    }
+
+    /** What `$key` takes when `$arg` is not one, `null` when it is. */
+    private static function argument(string $key, mixed $arg): ?string
+    {
+        return match (true) {
+            in_array($key, self::COUNTS, true) => self::isInteger($arg, true) ? null : 'a non-negative integer',
+            $key === 'min-exponent', $key === 'max-exponent' => self::isInteger($arg, false) ? null : 'an integer',
+            in_array($key, self::FLAGS, true) => is_bool($arg) ? null : 'true or false',
+            in_array($key, self::BOUNDS, true) => TypeExpr::comparable($arg)
+                ? null
+                : 'a number, date, time, datetime, local date-time or a duration without years or months',
+            $key === 'multiple-of' => TypeExpr::nonzeroNumber($arg) ? null : 'a number other than 0',
+            $key === 'pattern' => $arg instanceof DXNRegex ? null : 'a regex, @regex "..."',
+            $key === 'version' => in_array($arg, [4, 6], true) ? null : '4 or 6',
+            $key === 'offsets' => self::allOf($arg, self::isOffset(...)) ? null : 'a list of offsets, "Z" or "±HH:MM"',
+            $key === 'bits' => self::allOf($arg, static fn (mixed $n): bool => self::isInteger($n, true))
+                ? null
+                : 'a list of bit numbers, non-negative integers',
+            $key === 'within' => TypeExpr::span($arg) ? null : 'a duration without years or months',
+            // RFC 6838's type/subtype, without parameters.
+            $key === 'media-type' => is_string($arg) && preg_match('/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/', $arg) === 1
+                ? null
+                : 'a media type, "type/subtype"',
+            default => null,
+        };
+    }
+
+    /** An integer, a big one too, and not below zero when `$nonNegative`. */
+    private static function isInteger(mixed $arg, bool $nonNegative): bool
+    {
+        return match (true) {
+            is_int($arg) => !$nonNegative || $arg >= 0,
+            $arg instanceof DXNInteger => !$nonNegative || !str_starts_with($arg->toString(), '-'),
+            default => false,
+        };
+    }
+
+    /**
+     * Whether `$arg` is a list every item of which `$test` takes. A list,
+     * `[...]`, as the reference asks: a native PHP list is DXN's
+     * `@array[...]` here, which it refuses.
+     *
+     * @param \Closure(mixed): bool $test
+     */
+    private static function allOf(mixed $arg, \Closure $test): bool
+    {
+        if (!$arg instanceof DXNList) {
+            return false;
         }
-        $named = self::namedArg($named, 'unique-by', null);
-        return self::namedArg($named, 'resolution', TypeExpr::resolutions());
+        foreach ($arg->items as $item) {
+            if (!$test($item)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** `Z`, or `±HH:MM`. */
+    private static function isOffset(mixed $text): bool
+    {
+        return $text === 'Z' || (is_string($text) && preg_match('/^[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $text) === 1);
+    }
+
+    /**
+     * `content` reads a DXN document: text, or `.dxnb` under
+     * application/dxnb, which a string holds only encoded.
+     *
+     * @param array<string, mixed> $named
+     */
+    private static function contentReadable(array $named): void
+    {
+        if (!array_key_exists('content', $named)) {
+            return;
+        }
+        $media = $named['media-type'] ?? null;
+        $media = is_string($media) ? strtolower($media) : $media;
+        if ($media !== null && !in_array($media, self::CONTENT_READERS, true)) {
+            throw new SchemaCompileError('content reads application/dxn or application/dxnb, not ' . self::inspect($media));
+        }
+        if ($media === 'application/dxnb' && !array_key_exists('encoding', $named)) {
+            throw new SchemaCompileError('content under application/dxnb needs an encoding: a string holds no raw bytes');
+        }
     }
 
     /**

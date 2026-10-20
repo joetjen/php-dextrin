@@ -425,10 +425,9 @@ final class Tree
             'shape' => $all(array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? [])),
             'case' => $all([$type->otherwise, ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
             'generic' => self::typeReferences($type->base),
-            'refine' => [
-                ...self::typeReferences($type->base),
-                ...self::typeReferences(($type->constraints['contains'] ?? null) instanceof TypeExpr ? $type->constraints['contains'] : null),
-            ],
+            // A refine's base, and the types its `contains`, `content`,
+            // `encodes` and `encodes-seq` hold.
+            'refine' => $all([$type->base, ...TypeExpr::heldTypes($type->constraints ?? [])]),
             'list-items' => $all(array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? []))),
             'apply', 'tuple-of' => $all($type->elems),
             'one-of', 'any-of', 'all-of' => $all($type->variants),

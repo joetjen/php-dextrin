@@ -80,7 +80,41 @@ final class ScalarConstraintsTest extends TestCase
         self::assertStringContainsString(':millisecond', self::compileError('{:refine :time %{resolution: :fortnight}}'));
     }
 
+    public function testEveryConstraintsArgumentIsCheckedABadOneNeverReachesACheck(): void
+    {
+        foreach ([
+            ['{:refine :integer %{bits: 5}}', 'bits'],
+            ['{:refine :integer %{bits: [-1]}}', 'bits'],
+            ['{:refine :datetime %{before-now: 5}}', 'before-now'],
+            ['{:refine :integer %{multiple-of: 0}}', 'multiple-of'],
+            ['{:refine :string %{min-length: "x"}}', 'min-length'],
+            ['{:refine :string %{max-length: -1}}', 'max-length'],
+            ['{:refine :decimal %{min-exponent: 1.5}}', 'min-exponent'],
+            ['{:refine :ip %{version: 5}}', 'version'],
+            ['{:refine :string %{pattern: "a"}}', 'pattern'],
+            ['{:refine :datetime %{within: @duration "P1Y"}}', 'within'],
+            ['{:refine :datetime %{offsets: "Z"}}', 'offsets'],
+            ['{:refine :datetime %{offsets: ["UTC"]}}', 'offsets'],
+            ['{:refine :integer %{min: "x"}}', 'min'],
+        ] as [$type, $key]) {
+            self::assertStringContainsString($key, self::compileError($type), $type);
+        }
+    }
+
+    public function testAValueInAMessageIsWrittenInDxn(): void
+    {
+        self::assertStringContainsString('not :fortnight', self::compileError('{:refine :time %{resolution: :fortnight}}'));
+        self::assertStringContainsString('not "x"', self::compileError('{:refine :string %{min-length: "x"}}'));
+    }
+
     // ---- lengths -------------------------------------------------------------------
+
+    public function testAStringsCountsCodepointsNotWhatAReaderSeesAsOneCharacter(): void
+    {
+        $decomposed = "e\u{0301}";
+        self::assertTrue(self::takes('{:refine :string %{min-length: 2}}', "\"{$decomposed}\""));
+        self::assertFalse(self::takes('{:refine :string %{max-length: 1}}', "\"{$decomposed}\""));
+    }
 
     public function testAKeywordsOrASymbolsLengthIsItsNamesInCodepoints(): void
     {

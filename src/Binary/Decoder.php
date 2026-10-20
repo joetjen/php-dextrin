@@ -76,20 +76,54 @@ final class Decoder
         $this->registry = $registry;
     }
 
+    /**
+     * The one `.dxnb` document `$bytes` holds. Its shared-item and
+     * stringref state is its own: each document is read by a decoder of
+     * its own, so a schema check that reads a document inside a document
+     * (`encodes:`) leaves the outer one's state as it was.
+     */
     public static function decode(string $bytes, ?Registry $registry = null): mixed
     {
-        if (strlen($bytes) < 3 || $bytes[0] !== 'D' || $bytes[1] !== 'X' || ord($bytes[2]) !== 1) {
+        [$value, $end] = self::document($bytes, 0, $registry);
+        if ($end !== strlen($bytes)) {
+            $trailing = strlen($bytes) - $end;
+            throw new BinaryError("trailing bytes after top-level value ({$trailing} left over)", $end);
+        }
+        return $value;
+    }
+
+    /**
+     * `$bytes` read as `.dxnb` documents back to back, each with its own
+     * envelope -- a CBOR sequence of documents, as a schema's
+     * `encodes-seq:` reads one (DXN.md §4.2); no bytes at all are no
+     * documents.
+     *
+     * @return list<mixed>
+     */
+    public static function decodeSequence(string $bytes, ?Registry $registry = null): array
+    {
+        $documents = [];
+        for ($at = 0; $at < strlen($bytes);) {
+            [$documents[], $at] = self::document($bytes, $at, $registry);
+        }
+        return $documents;
+    }
+
+    /**
+     * The document at `$at` in `$bytes`, and the offset just past it.
+     *
+     * @return array{0: mixed, 1: int}
+     */
+    private static function document(string $bytes, int $at, ?Registry $registry): array
+    {
+        if (strlen($bytes) - $at < 3 || $bytes[$at] !== 'D' || $bytes[$at + 1] !== 'X' || ord($bytes[$at + 2]) !== 1) {
             throw new BinaryError('missing or invalid .dxnb envelope (expected magic "DX" + version 1)');
         }
-        $decoder = new self($bytes, 3, $registry);
+        $decoder = new self($bytes, $at + 3, $registry);
         $value = $decoder->decodeItem();
-        if ($decoder->pos !== strlen($bytes)) {
-            $trailing = strlen($bytes) - $decoder->pos;
-            throw new BinaryError("trailing bytes after top-level value ({$trailing} left over)", $decoder->pos);
-        }
         // The true top of decoding -- see Text\Parser::parse()'s
         // identical stripping and its own doc for why.
-        return Validated::strip($value);
+        return [Validated::strip($value), $decoder->pos];
     }
 
     private function readByte(): int
