@@ -42,10 +42,15 @@ final class DXNUuid implements DXNValueInterface
         return $this->toString();
     }
 
-    /** Case-insensitive on parse; {@see self::toString()} always lowercases. */
+    /**
+     * The 36-character hyphenated form, 8-4-4-4-12 hex digits in either
+     * case -- nothing else: hyphens elsewhere, or none, or a trailing
+     * newline, are refused, as every implementation refuses them.
+     * {@see self::toString()} always lowercases.
+     */
     public static function fromString(string $s): self
     {
-        if (!preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $s)) {
+        if (!preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/D', $s)) {
             throw new \InvalidArgumentException("not a valid UUID string: {$s}");
         }
         $bytes = hex2bin(str_replace('-', '', $s));

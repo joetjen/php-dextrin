@@ -27,7 +27,9 @@ use JOetjen\Dextrin\Value\Nanos;
  */
 final class Temporal
 {
-    private const DATE_RE = '/^(\d{4})-(\d{2})-(\d{2})$/';
+    // `D`: no trailing newline, as the reference reads a date; the
+    // others take one, as the reference's readers do.
+    private const DATE_RE = '/^(\d{4})-(\d{2})-(\d{2})$/D';
     private const TIME_RE = '/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/';
     private const DATETIME_RE = '/^(\d{4}-\d{2}-\d{2})T([^Z+-]+)(Z|[+-]\d{2}:\d{2})$/';
     private const LOCAL_RE = '/^(\d{4}-\d{2}-\d{2})T(.+)$/';
