@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New type forms** (DXN.md §4.1, as dextrin 47d6d1d): `{:not t}`,
+  `:never` (JSON Schema's `false`), and element types for the
+  collections that had none: `{:array-of t}`, `{:ordered-map-of k v}`,
+  `{:sorted-set-of t}`.
 - **`Format`** and the `Form` enum (DXN.md §6, as dextrin's
   `Dextrin.Format`): `mediaType()`, `extension()`, `form()` -- the three
   media types, and any `+dxn` suffix as text -- and `identifies($body,
@@ -39,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`{:one-of ...}` means exactly one variant matches** (Jan,
+  2026-10-20; JSON Schema's `oneOf`, as dextrin 47d6d1d), and
+  **`{:any-of ...}`** is the new "one or more" (`anyOf`) -- what `one-of`
+  meant before. Breaking: a schema whose `one-of` variants overlap now
+  refuses a value two of them match; write `any-of` to keep the old
+  meaning. `{:nilable t}` is sugar for `{:any-of :nil t}`.
 - **The pretty layout keeps short collections on one line** (Jan,
   2026-10-20), as `dextrin` does: the top-level collection still breaks,
   one entry per line, however short; a nested one is written on one

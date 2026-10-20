@@ -215,6 +215,9 @@ final class Compiler
             if ($value->name === self::PRIMITIVES_ANY) {
                 return TypeExpr::any();
             }
+            if ($value->name === 'never') {
+                return TypeExpr::never();
+            }
             if (TypeExpr::isPrimitiveName($value->name)) {
                 return TypeExpr::primitive($value->name);
             }
@@ -249,8 +252,26 @@ final class Compiler
             if ($tag === 'map-of' && count($rest) === 2) {
                 return TypeExpr::mapOf(self::compileTypeExpr($rest[0], $aliases), self::compileTypeExpr($rest[1], $aliases));
             }
+            if ($tag === 'array-of' && count($rest) === 1) {
+                return TypeExpr::arrayOf(self::compileTypeExpr($rest[0], $aliases));
+            }
+            if ($tag === 'sorted-set-of' && count($rest) === 1) {
+                return TypeExpr::sortedSetOf(self::compileTypeExpr($rest[0], $aliases));
+            }
+            if ($tag === 'ordered-map-of' && count($rest) === 2) {
+                return TypeExpr::orderedMapOf(self::compileTypeExpr($rest[0], $aliases), self::compileTypeExpr($rest[1], $aliases));
+            }
             if ($tag === 'enum') {
                 return TypeExpr::enum($rest);
+            }
+            if ($tag === 'any-of') {
+                return TypeExpr::anyOf(array_map(
+                    static fn (mixed $v): TypeExpr => self::compileTypeExpr($v, $aliases),
+                    $rest,
+                ));
+            }
+            if ($tag === 'not' && count($rest) === 1) {
+                return TypeExpr::not(self::compileTypeExpr($rest[0], $aliases));
             }
             if ($tag === 'one-of') {
                 return TypeExpr::oneOf(array_map(

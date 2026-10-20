@@ -320,7 +320,7 @@ cbor_map[30]{type,cbor_major_or_tag,payload,integrity_note}:
   boolean,"simple(20/21)","","false/true"
   integer,"major0/1; tag2/3","two's complement bignum bytes past 64-bit","arbitrary precision preserved exactly"
   float,"major7","IEEE 754 double","NaN/Infinity encode natively, no tag needed"
-  decimal,"tag4","[exponent,mantissa]",""
+  decimal,"tag4","[exponent,mantissa]","a negative zero has no mantissa of its own: `-0.0M` is written as `0.0M`, the one value `.dxnb` does not keep (text does, §1.5)"
   rational,"tag30","[numerator,denominator]",""
   string,"major3 (untagged)","UTF-8 bytes","default/untagged case"
   char,"tag T_CHAR","major0 codepoint",""
@@ -471,7 +471,9 @@ with any tag number cited normatively here.
 Every construct above is fully specified by §1.2 + §1.3; every field
 round-trips through §2 without loss (§2.2's `integrity_note` column
 records the two places — bignum and timestamp precision — where that
-took a specific encoding choice to guarantee).
+took a specific encoding choice to guarantee, and the one value that
+does not: a negative-zero decimal, which `.dxnb` writes as positive
+zero).
 
 ---
 
@@ -488,18 +490,24 @@ schema of their own, which would be circular.
 ### 4.1 `type_expr` forms
 
 ```toon
-type_expr[13]{form,dxn_shape,meaning}:
+type_expr[19]{form,dxn_shape,meaning}:
   any,":any","matches any value at all"
+  never,":never","matches no value at all (JSON Schema's false)"
   primitive,":integer / :string / ...","one keyword per §1.3 type name; :bits matches bits and bytes alike, :bytes only whole bytes"
   reference,"bare symbol, e.g. Address","names a struct schema or a named type in this document (or Ns/Name, §4.6)"
   list-of,"{:list-of elem}","list whose every element matches elem"
   set-of,"{:set-of elem}","set whose every element matches elem"
   tuple-of,"{:tuple-of a b c}","fixed-arity positional tuple, one type_expr per slot"
   map-of,"{:map-of key-type val-type}","every key matches key-type, every value matches val-type"
+  array-of,"{:array-of elem}","array whose every element matches elem"
+  ordered-map-of,"{:ordered-map-of key-type val-type}","ordered map: every key matches key-type, every value matches val-type"
+  sorted-set-of,"{:sorted-set-of elem}","sorted set whose every element matches elem"
   enum,"{:enum lit lit ...}","value must equal one of the given literals (any type)"
-  one-of,"{:one-of a b}","union — value must match at least one variant"
+  one-of,"{:one-of a b}","exactly one variant matches (JSON Schema's oneOf): none, or two or more, is a refusal"
+  any-of,"{:any-of a b}","union — one or more variants match (JSON Schema's anyOf)"
   all-of,"{:all-of a b}","intersection — value must match every variant"
-  nilable,"{:nilable t}","sugar for {:one-of :nil t}"
+  not,"{:not t}","value must not match t"
+  nilable,"{:nilable t}","sugar for {:any-of :nil t}"
   refine,"{:refine t %{constraints}}","base type plus constraints, §4.2"
   struct,"%schema{...}","struct/record shape, §4.4"
 ```
@@ -832,3 +840,39 @@ categories[20]{category,raised_when}:
   document/ambiguous,"an update finds a deleted item followed by an inserted one -- a replace, or the two -- and its setting refuses to choose: always, or where the deleted item owns a comment"
   document/not-a-collection,"an edit's path goes into a value that holds no entries"
 ```
+
+## 6. Media types and identification
+
+How a program that receives a body or meets a file names DXN's three
+forms, and decides cheaply whether a body is worth decoding as one. A
+reader MAY offer this; one that does answers as below, so every
+implementation sniffs the same way.
+
+```toon
+forms[3]{form,media_type,extension}:
+  text,application/vnd.dxn,.dxn
+  binary,application/vnd.dxnb,.dxnb
+  schema,application/vnd.dxns,.dxns
+```
+
+**A media type names its form.** The three above name theirs, and any
+media type with a structured `+dxn` suffix (`application/vnd.acme.event+dxn`)
+names text: a document in DXN text whose vocabulary is the type's own.
+There is no `+dxnb` suffix. Media types compare without regard to case;
+parameters (`; charset=...`) are not part of the type, and whoever reads
+the type strips them first. Anything else names no form.
+
+**Identification is a prefix test, not a parse**: *yes* means the body
+is worth decoding as the form, never that it decodes.
+
+- **Binary**: the envelope's magic, `DX`, followed by a version byte
+  (§2.1). Whether the version is one the reader supports is decoding's
+  business.
+- **Text and schemas**: skip whitespace (`ws`, commas included), `#`
+  comments, and an optional header (`@dxn "..."`, with any whitespace
+  and comments around it); then the first character is `%` -- a map
+  (`%{`), a struct (`%Name{`, `%ns/Name[`, `%Name(2){`) or a schema
+  document. Every other body is not identified, **lists and scalars
+  included**: they are DXN, but `[`, `"`, digits, `true` and the rest
+  begin JSON just as well, and telling DXN from JSON in a body that came
+  without a type is what this test is mostly for.
