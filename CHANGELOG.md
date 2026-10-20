@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   52 and 54; DXNS adds `:objectid`, `:ip` and the refine keys `version:`
   and `prefix:`. The text is read and written as the reference does it on
   every platform, not by `inet_pton()`/`inet_ntop()`, which on macOS read
-  a zone and write `::2` for `::0.0.0.2`. **`.dxnb` uses the smallest
+  a zone and write `::2` for `::0.0.0.2`; as of dextrin e8ece1f, a
+  link-local address such as `fe80:1::1` is written in RFC 5952's form
+  and reads back, and a sign (`+1.2.3.4`) is `syntax`. **`.dxnb` uses the smallest
   representation that keeps a value**, now said in DXN.md §2.2.
 - **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
   types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has

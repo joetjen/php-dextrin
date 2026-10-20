@@ -156,6 +156,23 @@ final class ObjectIdIpTest extends TestCase
         self::assertSame('@ip "1::2:0:0:3:4"', self::canonical('@ip "1:0:0:2:0:0:3:4"'));
     }
 
+    // Erlang's :inet.ntoa writes a link-local address with a non-zero
+    // second group as BSD's scope form, fe80::1%01, which is no RFC 5952
+    // and which no reader takes back (dextrin e8ece1f).
+    public function testEveryAddressIsWrittenInRfc5952sFormAndReadsBack(): void
+    {
+        foreach (['fe80:1::1', 'ff02:1::2', 'fe80::1', '::ffff:192.0.2.1', '1:2:3:4:5:6:7:0'] as $text) {
+            self::assertSame("@ip \"{$text}\"", self::canonical("@ip \"{$text}\""), $text);
+        }
+    }
+
+    public function testASignIsNoPartOfAnAddress(): void
+    {
+        foreach (['+1.2.3.4', '1.+2.3.4', '+::1'] as $bad) {
+            self::assertSame('syntax', self::category("@ip \"{$bad}\""), $bad);
+        }
+    }
+
     public function testAnIpv4PartWithALeadingZeroOrAGroupOfFiveDigitsIsRefused(): void
     {
         foreach (['010.0.0.1', '00001::', '::1.2.3.04', '1:2:3:4:5:6:7:8:9'] as $bad) {
