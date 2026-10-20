@@ -49,10 +49,11 @@ final class FormatterTest extends TestCase
         self::assertSame("%{\n  \"a\" => 1\n}", Formatter::pretty(["\0a" => 1]));
     }
 
+    // `width: 1` breaks every nested collection, so the indentation shows.
     public function testNestedCollectionsIndentByDepth(): void
     {
         $value = new DXNList([new DXNList([1, 2])]);
-        self::assertSame("[\n  [\n    1\n    2\n  ]\n]", Formatter::pretty($value));
+        self::assertSame("[\n  [\n    1\n    2\n  ]\n]", Formatter::pretty($value, width: 1));
     }
 
     public function testCustomIndentSize(): void
@@ -127,6 +128,55 @@ final class FormatterTest extends TestCase
         );
 
         self::assertSame('@my-app/money 500', Formatter::pretty($money, registry: $registry));
+    }
+
+    // Jan, 2026-10-20: the top-level collection always breaks, one entry
+    // per line; a nested one stays on one line when that line fits the
+    // width (80, `$width`), its entries single-space separated.
+
+    private static function laid(string $text, int $width = 80): string
+    {
+        return Formatter::pretty(\JOetjen\Dextrin\Dextrin::decode($text), width: $width);
+    }
+
+    public function testTheTopLevelBreaksHoweverShortItIs(): void
+    {
+        self::assertSame("[\n  1\n  2\n]", self::laid('[1 2]'));
+        self::assertSame("%{\n  a: 1\n}", self::laid('%{a: 1}'));
+    }
+
+    public function testANestedCollectionThatFitsIsWrittenOnOneLine(): void
+    {
+        self::assertSame("[\n  [1 2]\n  {3 \"a\"}\n]", self::laid('[[1 2] {3 "a"}]'));
+        self::assertSame("%{\n  a: %{b: @array[1]}\n}", self::laid('%{a: %{b: @array[1]}}'));
+        self::assertSame("[\n  @ordered %{y: 2 x: 1}\n]", self::laid('[@ordered %{y: 2 x: 1}]'));
+        self::assertSame("[\n  %P{q: 1 r: \"s\"}\n]", self::laid('[%P{q: 1 r: "s"}]'));
+        self::assertSame("[\n  %P[1 2]\n]", self::laid('[%P[1 2]]'));
+    }
+
+    public function testTheLineItFitsOnCountsItsIndentAndItsKey(): void
+    {
+        // "  key: [1 2 3]" is 14 columns.
+        self::assertSame("%{\n  key: [1 2 3]\n}", self::laid('%{key: [1 2 3]}', 14));
+        self::assertSame("%{\n  key: [\n    1\n    2\n    3\n  ]\n}", self::laid('%{key: [1 2 3]}', 13));
+    }
+
+    public function testOneThatDoesNotFitBreaksAndWhatItHoldsIsLaidOutAgain(): void
+    {
+        $long = str_repeat('x', 40);
+        self::assertSame(
+            "[\n  [\n    [1 2]\n    \"{$long}\"\n    \"{$long}\"\n  ]\n]",
+            self::laid("[[[1 2] \"{$long}\" \"{$long}\"]]"),
+        );
+    }
+
+    public function testTheWidthIs80UnlessGiven(): void
+    {
+        // '  ["' and '"]' leave 74 columns of 80 for the string.
+        $fits = str_repeat('x', 74);
+        self::assertSame("[\n  [\"{$fits}\"]\n]", self::laid("[[\"{$fits}\"]]"));
+        $over = str_repeat('x', 75);
+        self::assertSame("[\n  [\n    \"{$over}\"\n  ]\n]", self::laid("[[\"{$over}\"]]"));
     }
 }
 

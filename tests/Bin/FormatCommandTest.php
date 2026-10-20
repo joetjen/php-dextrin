@@ -33,7 +33,7 @@ final class FormatCommandTest extends TestCase
     public function testPrettyKeepsEveryCommentBesideItsEntry(): void
     {
         file_put_contents($this->path, "# the config\n%{name: \"acme\", # the name\n deps: [\"a\"]}\n");
-        self::assertSame("# the config\n%{\n  name: \"acme\"  # the name\n  deps: [\n    \"a\"\n  ]\n}", $this->format());
+        self::assertSame("# the config\n%{\n  name: \"acme\"  # the name\n  deps: [\"a\"]\n}", $this->format());
     }
 
     public function testCondenseDropsCommentsACommentEndingItsLine(): void

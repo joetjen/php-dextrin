@@ -51,10 +51,13 @@ final class Dextrin
     /**
      * Encodes a value back to `.dxn` text. Single-line,
      * minimal-whitespace by default; pass `pretty: true` for
-     * multi-line, indented output instead (`indent` then sets spaces
-     * per nesting level, default 2). Both produce the exact same
-     * value on the way back through `decode()` -- `pretty`/`indent`
-     * are a rendering choice, never a semantic one. Throws
+     * multi-line, indented output instead: the top-level collection
+     * one entry per line, a nested one on one line when it fits
+     * (`indent` then sets spaces per nesting level, default 2, and
+     * `width` the columns that line must fit in, default 80). Both
+     * produce the exact same value on the way back through `decode()`
+     * -- `pretty`/`indent`/`width` are a rendering choice, never a
+     * semantic one. Throws
      * {@see DXNError} for a value with no DXN representation, or that
      * fails schema validation.
      *
@@ -79,10 +82,13 @@ final class Dextrin
         ?Registry $registry = null,
         bool $validate = true,
         ?string $schema = null,
+        int $width = 80,
     ): string {
         try {
             $validated = self::maybeValidateEncode($value, $registry, $validate, $schema);
-            return $pretty ? Formatter::pretty($validated, $indent, $registry) : Printer::print($validated, $registry);
+            return $pretty
+                ? Formatter::pretty($validated, $indent, $registry, $width)
+                : Printer::print($validated, $registry);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'encode');
         }

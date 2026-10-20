@@ -31,14 +31,20 @@ use JOetjen\Dextrin\Text\SyntaxNode;
  */
 final class Formatter
 {
-    private function __construct(private readonly Document $doc, private readonly string $step)
-    {
+    private function __construct(
+        private readonly Document $doc,
+        private readonly string $step,
+        private readonly int $width,
+    ) {
     }
 
-    /** The text of `$doc`, laid out, `$indent` spaces per level. */
-    public static function format(Document $doc, int $indent = 2): string
+    /**
+     * The text of `$doc`, laid out, `$indent` spaces per level; `$width` is
+     * the columns a nested collection's one line must fit in.
+     */
+    public static function format(Document $doc, int $indent = 2, int $width = 80): string
     {
-        $self = new self($doc, str_repeat(' ', $indent));
+        $self = new self($doc, str_repeat(' ', $indent), $width);
         $head = '';
         $from = 0;
         $value = null;
@@ -63,7 +69,7 @@ final class Formatter
         // document without one comes out exactly as the pretty printer
         // writes its value.
         $ending = str_ends_with($doc->source, "\n") ? "\n" : '';
-        return $head . $self->lines($self->slots($sequence, false), '', fn (SyntaxNode $node): string => $self->valueText($node, '')) . $ending;
+        return $head . $self->lines($self->slots($sequence, false), '', fn (SyntaxNode $node): string => $self->valueText($node, '', $width)) . $ending;
     }
 
     // ---- slots: which comment belongs where -------------------------------
@@ -178,33 +184,37 @@ final class Formatter
 
     // ---- values -----------------------------------------------------------
 
-    private function valueText(SyntaxNode $node, string $indent): string
+    /**
+     * `$node` laid out at `$indent`, with `$room` columns left on its line;
+     * `$flat` inside a one-line collection.
+     */
+    private function valueText(SyntaxNode $node, string $indent, int $room, bool $flat = false): string
     {
         $parts = [];
         foreach ($node->children as $child) {
             if ($child->kind === 'discard') {
                 $inner = Document::items($child)[0];
-                $parts[] = '@_ ' . $this->valueText($inner, $indent);
+                $parts[] = '@_ ' . $this->valueText($inner, $indent, $room - 3, $flat);
             } else {
-                $parts[] = $this->bodyText($child, $indent);
+                $parts[] = $this->bodyText($child, $indent, $room, $flat);
             }
         }
         return implode(' ', $parts);
     }
 
-    private function bodyText(SyntaxNode $body, string $indent): string
+    private function bodyText(SyntaxNode $body, string $indent, int $room, bool $flat): string
     {
         $inner = $body->children[0] ?? null;
         if ($inner === null) {
             return $this->tokensText($body->first, $body->last);
         }
         if (in_array($inner->kind, ['list', 'tuple', 'set', 'map'], true)) {
-            return $this->collection($inner, '', $indent);
+            return $this->collection($inner, '', $indent, $room, $flat);
         }
         if ($inner->kind === 'struct') {
             foreach ($inner->children as $part) {
                 if ($part->kind === 'keyed' || $part->kind === 'positional') {
-                    return $this->collection($part, $this->tokensText($inner->first, $part->first - 1), $indent);
+                    return $this->collection($part, $this->tokensText($inner->first, $part->first - 1), $indent, $room, $flat);
                 }
             }
         }
@@ -217,9 +227,15 @@ final class Formatter
             $nameEnd = $this->doc->tokens[$inner->name]->end;
             $gap = substr($this->doc->source, $nameEnd, $this->start($value) - $nameEnd);
             if ($gap === '') {
-                return $name . $this->valueText($value, $indent);
+                return $name . $this->valueText($value, $indent, $room - mb_strlen($name), $flat);
             }
-            return $this->between($name, self::commentsIn($gap), fn (string $deeper): string => $this->valueText($value, $deeper), $indent);
+            return $this->between(
+                $name,
+                self::commentsIn($gap),
+                fn (string $deeper, int $left): string => $this->valueText($value, $deeper, $left, $flat),
+                $indent,
+                $room,
+            );
         }
         return $this->tokensText($inner->first, $inner->last);
     }
@@ -227,9 +243,10 @@ final class Formatter
     /**
      * A collection: its opening tokens after `$head`, its entries one per
      * line a level deeper, its closing token -- or `[]` when it holds
-     * nothing, not even a comment.
+     * nothing, not even a comment. Nested, holding no comment or blank
+     * line, and fitting `$room`, it goes on one line instead.
      */
-    private function collection(SyntaxNode $node, string $head, string $indent): string
+    private function collection(SyntaxNode $node, string $head, string $indent, int $room, bool $flat): string
     {
         $openAt = (int) $node->open;
         $open = $head . $this->tokensText($node->first, $openAt);
@@ -246,27 +263,65 @@ final class Formatter
         if ($laid['entries'] === [] && $laid['open'] === [] && $laid['terminal'] === []) {
             return $open . $close;
         }
+        if ($flat) {
+            return $this->oneLine($laid['entries'], $open, $close, $indent);
+        }
+        if ($indent !== '' && $this->plain($node)) {
+            $text = $this->oneLine($laid['entries'], $open, $close, $indent);
+            if (mb_strlen($text) <= $room) {
+                return $text;
+            }
+        }
         $deeper = $indent . $this->step;
-        $body = $this->lines($laid, $deeper, fn (SyntaxNode $child): string => $this->item($child, $deeper));
+        $left = $this->width - mb_strlen($deeper);
+        $body = $this->lines($laid, $deeper, fn (SyntaxNode $child): string => $this->item($child, $deeper, $left, false));
         return $this->trailed($open, $laid['open']) . "\n{$body}\n{$indent}{$close}";
     }
 
-    private function item(SyntaxNode $node, string $indent): string
+    /**
+     * A collection's entries single-space separated between its brackets.
+     *
+     * @param list<Slot> $entries
+     */
+    private function oneLine(array $entries, string $open, string $close, string $indent): string
+    {
+        $items = array_map(fn (Slot $slot): string => $this->item($slot->node, $indent, 0, true), $entries);
+        return $open . implode(' ', $items) . $close;
+    }
+
+    /**
+     * Whether `$node` holds no comment and no blank line between any of
+     * its tokens, however deep: what may go on one line.
+     */
+    private function plain(SyntaxNode $node): bool
+    {
+        for ($i = $node->first; $i < $node->last; $i++) {
+            $from = $this->doc->tokens[$i]->end;
+            $gap = substr($this->doc->source, $from, $this->doc->tokens[$i + 1]->start - $from);
+            if (str_contains($gap, '#') || substr_count($gap, "\n") >= 2) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function item(SyntaxNode $node, string $indent, int $room, bool $flat): string
     {
         if ($node->kind !== 'entry') {
-            return $this->valueText($node, $indent);
+            return $this->valueText($node, $indent, $room, $flat);
         }
         $values = Document::items($node);
         $value = $values[count($values) - 1];
-        $render = fn (string $deeper): string => $this->valueText($value, $deeper);
+        $render = fn (string $deeper, int $left): string => $this->valueText($value, $deeper, $left, $flat);
         if ($node->key !== null) {
             $keyEnd = $this->doc->tokens[$node->key]->end;
             $gap = substr($this->doc->source, $keyEnd, $this->start($value) - $keyEnd);
-            return $this->between($this->tokensText($node->key, $node->key), self::commentsIn($gap), $render, $indent);
+            return $this->between($this->tokensText($node->key, $node->key), self::commentsIn($gap), $render, $indent, $room);
         }
         $key = $values[0];
         $gap = substr($this->doc->source, $this->end($key), $this->start($value) - $this->end($key));
-        return $this->between($this->valueText($key, $indent) . ' =>', self::commentsIn($gap), $render, $indent);
+        $prefix = $this->valueText($key, $indent, $room, $flat) . ' =>';
+        return $this->between($prefix, self::commentsIn($gap), $render, $indent, $room);
     }
 
     /**
@@ -275,15 +330,16 @@ final class Formatter
      * next line, a level deeper.
      *
      * @param list<string> $comments
-     * @param callable(string): string $render
+     * @param callable(string, int): string $render takes the indent of the value's line and the
+     *   room left on it
      */
-    private function between(string $prefix, array $comments, callable $render, string $indent): string
+    private function between(string $prefix, array $comments, callable $render, string $indent, int $room): string
     {
         if ($comments === []) {
-            return "{$prefix} " . $render($indent);
+            return "{$prefix} " . $render($indent, $room - mb_strlen($prefix) - 1);
         }
         $deeper = $indent . $this->step;
-        return $this->trailed($prefix, $comments) . "\n{$deeper}" . $render($deeper);
+        return $this->trailed($prefix, $comments) . "\n{$deeper}" . $render($deeper, $this->width - mb_strlen($deeper));
     }
 
     /** @return list<string> */
@@ -293,7 +349,6 @@ final class Formatter
         return array_map('rtrim', $matches[0]);
     }
 
-    /** The tokens `$first..$last`, written together without the trivia between them. */
     /**
      * The header, `@dxn "1.0"`: the tag, one space, and the version, each
      * as written, however they were spaced. The tag is two tokens here
@@ -304,6 +359,7 @@ final class Formatter
         return $this->tokensText($first, $last - 1) . ' ' . $this->tokensText($last, $last);
     }
 
+    /** The tokens `$first..$last`, written together without the trivia between them. */
     private function tokensText(int $first, int $last): string
     {
         $text = '';

@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The pretty layout keeps short collections on one line** (Jan,
+  2026-10-20), as `dextrin` does: the top-level collection still breaks,
+  one entry per line, however short; a nested one is written on one
+  line, its entries single-space separated, when that line -- indent and
+  key included -- fits the width (`width`, 80). `Dextrin::encode()` with
+  `pretty: true`, `Document::format()` and `dextrin format` all lay out
+  this way. A nested collection holding a comment, or a blank line
+  between its entries, stays over lines.
 - **A field typed with a namespaced reference takes a struct of that
   name** (DXN.md §4.7): a field typed `geo/Address` accepts
   `%geo/Address{...}` and refuses `%Address{...}` -- the other way round
