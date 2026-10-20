@@ -25,7 +25,7 @@ final class Equality
         'rational' => 5, 'string' => 6, 'char' => 7, 'symbol' => 8, 'keyword' => 9,
         'list' => 10, 'tuple' => 11, 'map' => 12, 'ordered-map' => 13, 'set' => 14,
         'sorted-set' => 15, 'struct' => 16, 'array' => 17, 'date' => 18, 'time' => 19,
-        'timestamp' => 20, 'datetime' => 21, 'duration' => 22, 'uuid' => 23,
+        'local-datetime' => 20, 'datetime' => 21, 'duration' => 22, 'uuid' => 23,
         'uri' => 24, 'bytes' => 25, 'bits' => 26, 'regex' => 27, 'custom-tag' => 28,
     ];
 
@@ -146,8 +146,8 @@ final class Equality
             $a instanceof DXNTuple && $b instanceof DXNTuple => self::listCompare($a->items, $b->items),
             $a instanceof DXNOrderedMap && $b instanceof DXNOrderedMap => self::pairsCompare($a->pairs, $b->pairs),
             $a instanceof DXNStruct => self::structCompare($a, $b),
-            // decimal/rational/char/symbol/keyword/date/time/timestamp
-            // /datetime/uuid/uri/bytes all implement their own natural
+            // decimal/rational/char/symbol/keyword/date/time
+            // /local-datetime/datetime/uuid/uri/bytes all implement their own natural
             // order via compareTo()'s same-class branch, safe to
             // delegate back to; set/sorted-set/duration/regex/custom
             // -tag have no meaningful natural order, so fall back to
@@ -161,7 +161,7 @@ final class Equality
         return match (true) {
             $a instanceof DXNInteger, $a instanceof DXNDecimal, $a instanceof DXNRational,
             $a instanceof DXNChar, $a instanceof DXNSymbol, $a instanceof DXNKeyword,
-            $a instanceof DXNDate, $a instanceof DXNTime, $a instanceof DXNTimestamp,
+            $a instanceof DXNDate, $a instanceof DXNTime, $a instanceof DXNLocalDateTime,
             $a instanceof DXNDateTime, $a instanceof DXNUuid, $a instanceof DXNUri,
             $a instanceof DXNBytes, $a instanceof DXNBits => $a->compareTo($b),
             default => self::canonicalKey($a) <=> self::canonicalKey($b),
@@ -244,9 +244,12 @@ final class Equality
             'struct' => self::structKey($value),
             'array' => 'array:[' . self::orderedItemsKey($value) . ']',
             'date' => "date:{$value->year}-{$value->month}-{$value->day}",
-            'time' => "time:{$value->hour}:{$value->minute}:{$value->second}.{$value->microsecond}",
-            'timestamp' => 'timestamp:' . (string) $value->epochMicroseconds,
-            'datetime' => 'datetime:' . (string) $value->epochMicroseconds . '@' . $value->offsetMinutes,
+            'time' => 'time:' . $value->nanosecondsSinceMidnight(),
+            'local-datetime' => 'local-datetime:' . $value->localNanoseconds,
+            // A native date is the datetime it always means.
+            'datetime' => $value instanceof \DateTimeInterface
+                ? self::canonicalKey(DXNDateTime::fromNative($value))
+                : 'datetime:' . $value->epochNanoseconds . '@' . $value->offsetMinutes,
             'duration' => self::durationKey($value),
             'uuid' => 'uuid:' . bin2hex($value->bytes),
             'uri' => 'uri:' . $value->value,
@@ -323,7 +326,7 @@ final class Equality
         return 'duration:' . implode(',', [
             $field($duration->years), $field($duration->months), $field($duration->weeks),
             $field($duration->days), $field($duration->hours), $field($duration->minutes),
-            $field($duration->microseconds),
+            $field($duration->nanoseconds),
         ]);
     }
 

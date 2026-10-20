@@ -225,6 +225,14 @@ final class Formatter
             $value = Document::items($inner)[0];
             $name = $this->tokensText($inner->first, $inner->name);
             $nameEnd = $this->doc->tokens[$inner->name]->end;
+            // A regex's flags header, `@regex(im)`, is part of its tag's
+            // head, written against it however it was spaced (DXN.md §1.2).
+            $after = $this->doc->tokens[$inner->name + 1] ?? null;
+            if ($after !== null && $after->type === 'LPAREN') {
+                $flags = $this->doc->tokens[$inner->name + 2];
+                $name .= '(' . $flags->value . ')';
+                $nameEnd = $this->doc->tokens[$inner->name + 3]->end;
+            }
             $gap = substr($this->doc->source, $nameEnd, $this->start($value) - $nameEnd);
             if ($gap === '') {
                 return $name . $this->valueText($value, $indent, $room - mb_strlen($name), $flat);

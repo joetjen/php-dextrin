@@ -234,6 +234,15 @@ final class DocumentTest extends TestCase
         self::assertSame("@dxn \"1.0\"\n[\n  1\n]", Document::parse("@dxn\"1.0\"\n[1]")->format());
     }
 
+    // A regex's flags header is written against its tag, however it was
+    // spaced, as the reference writes it; a comment after it is kept.
+    public function testARegexKeepsItsFlagsHeaderAgainstItsTag(): void
+    {
+        self::assertSame("%{\n  p: @regex(i) \"a\"\n}", Document::parse('%{p: @regex(i)   "a"}')->format());
+        self::assertSame("%{\n  p: @regex(i) \"a\"\n}", Document::parse('%{p: @regex (i) "a"}')->format());
+        self::assertSame("%{\n  p: @regex(i)  # c\n    \"a\"\n}", Document::parse("%{p: @regex(i) # c\n \"a\"}")->format());
+    }
+
     // A formatter run on save must not take a file's last newline away;
     // one the source did not end with, it does not add.
     public function testADocumentEndsWithANewlineExactlyWhenTheSourceDid(): void

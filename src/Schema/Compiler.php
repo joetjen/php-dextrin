@@ -515,6 +515,11 @@ final class Compiler
             if (TypeExpr::isPrimitiveName($value->name)) {
                 return TypeExpr::primitive($value->name);
             }
+            // DXN 0.2's timestamp type, now a datetime in UTC (DXN.md
+            // §4.2, Jan, 2026-10-20): a schema naming it keeps its meaning.
+            if ($value->name === 'timestamp') {
+                return TypeExpr::refine(TypeExpr::primitive('datetime'), ['offsets' => ['Z']]);
+            }
             throw new SchemaCompileError("unrecognized primitive type name \"{$value->name}\"");
         }
 

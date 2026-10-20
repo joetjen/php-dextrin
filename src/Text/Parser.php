@@ -49,8 +49,12 @@ final class Parser
 {
     private const BUILT_IN_TAGS = [
         'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true,
-        'uri' => true, 'bytes' => true, 'bits' => true, 'datetime' => true, 'duration' => true,
+        'uri' => true, 'bytes' => true, 'bits' => true, 'date' => true, 'time' => true,
+        'datetime' => true, 'local-datetime' => true, 'duration' => true, 'regex' => true,
     ];
+
+    /** A regex's flag letters, as a header may give them (DXN.md §1.2). */
+    private const REGEX_FLAGS = ['i', 'm', 's', 'u', 'x', 'f', 'r'];
 
     /** @var list<Token> */
     private readonly array $tokens;
@@ -283,10 +287,6 @@ final class Parser
             'LBRACE' => $this->parseTuple(),
             'PERCENT' => $this->parsePercent(),
             'AT' => $this->parseAt(),
-            'DATE_SIGIL' => Temporal::parseDate($this->advance()->value),
-            'TIME_SIGIL' => Temporal::parseTime($this->advance()->value),
-            'INSTANT_SIGIL' => Temporal::parseInstant($this->advance()->value),
-            'REGEX_SIGIL' => $this->parseRegexToken(),
             default => throw new ParseError("unexpected token {$tok->type}", $tok->start),
         };
     }
@@ -358,25 +358,30 @@ final class Parser
         return new DXNKeyword($name);
     }
 
-    private function parseRegexToken(): DXNRegex
+    /**
+     * `@regex "pattern"`, its flags the header's letters, each once
+     * (DXN.md §1.2). A pattern PCRE cannot compile is no regex: `syntax`,
+     * as the reference refuses one Erlang's `:re` cannot. `f` (firstline)
+     * has no PHP modifier, so the pattern is compiled without it.
+     *
+     * @throws \InvalidArgumentException for a flag given twice, an unknown one, or a pattern that is no regex.
+     */
+    private function parseRegexTag(string $flags, int $offset): DXNRegex
     {
-        $tok = $this->advance();
-        $sigil = $tok->value;
-        return new DXNRegex($sigil['pattern'], self::flagsStringToArray($sigil['flags']));
-    }
-
-    /** @return array<string, bool> */
-    private static function flagsStringToArray(string $flags): array
-    {
-        return [
-            'i' => str_contains($flags, 'i'),
-            'm' => str_contains($flags, 'm'),
-            's' => str_contains($flags, 's'),
-            'u' => str_contains($flags, 'u'),
-            'x' => str_contains($flags, 'x'),
-            'f' => str_contains($flags, 'f'),
-            'r' => str_contains($flags, 'r'),
-        ];
+        $letters = str_split($flags);
+        if ($flags !== '' && (array_diff($letters, self::REGEX_FLAGS) !== [] || count(array_unique($letters)) !== count($letters))) {
+            throw new \InvalidArgumentException("@regex({$flags}): the flags are i m s u x f r, each once");
+        }
+        $pattern = $this->parseStringValue('regex', $offset);
+        $set = [];
+        foreach (self::REGEX_FLAGS as $flag) {
+            $set[$flag] = str_contains($flags, $flag);
+        }
+        $probe = new DXNRegex($pattern, ['f' => false] + $set);
+        if (@preg_match($probe->toPcrePattern(), '') === false) {
+            throw new \InvalidArgumentException("invalid regex \"{$pattern}\": " . preg_last_error_msg());
+        }
+        return new DXNRegex($pattern, $set);
     }
 
     private function parseList(): DXNList
@@ -627,11 +632,16 @@ final class Parser
         return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
     }
 
-    /** `@{...}` (set), or `@identifier value` (tag_form). Discard is already stripped in {@see self::parseValue()}. */
+    /**
+     * `@{...}` (set), or `@identifier value` (tag_form), or
+     * `@regex(flags) value` -- a header carries a regex's flags, as
+     * `%Name(3)` carries a version, and stands on no other tag (DXN.md
+     * §1.2). Discard is already stripped in {@see self::parseValue()}.
+     */
     private function parseAt(): mixed
     {
         $at = $this->pos;
-        $this->next('AT');
+        $atTok = $this->next('AT');
         if ($this->at('LBRACE')) {
             return $this->parseSet($at);
         }
@@ -639,6 +649,15 @@ final class Parser
         $nameTok = $this->next('IDENTIFIER');
         $this->mark('name');
         try {
+            if ($this->at('LPAREN')) {
+                $this->next('LPAREN');
+                $flags = $this->next('IDENTIFIER')->value;
+                $this->next('RPAREN');
+                if ($nameTok->value !== 'regex') {
+                    throw new ParseError("@{$nameTok->value} takes no (...) header; only @regex(flags) does", $atTok->start);
+                }
+                return $this->parseRegexTag($flags, $nameTok->start);
+            }
             return $this->dispatchTag($nameTok->value, $nameTok->start);
         } finally {
             $this->end();
@@ -667,12 +686,18 @@ final class Parser
             'uri' => DXNUri::fromString($this->parseStringValue($name, $offset)),
             'bytes' => $this->parseBytesTag($name, $offset),
             'bits' => $this->parseBitsTag($offset),
-            'datetime' => Temporal::parseOffsetDateTime($this->parseStringValue($name, $offset)),
+            // Dates and times are ISO 8601 strings under their tag
+            // (DXN.md §1.2, Jan, 2026-10-20), read by Temporal.
+            'date' => Temporal::parseDate($this->parseStringValue($name, $offset)),
+            'time' => Temporal::parseTime($this->parseStringValue($name, $offset)),
+            'datetime' => Temporal::parseDateTime($this->parseStringValue($name, $offset)),
+            'local-datetime' => Temporal::parseLocalDateTime($this->parseStringValue($name, $offset)),
+            'duration' => Temporal::parseDuration($this->parseStringValue($name, $offset)),
             // No `default` arm: self::BUILT_IN_TAGS' keys are exactly
             // this match's arms, so PHPStan already proves this is
             // exhaustive -- adding a tag to that list without a
             // matching arm here is a static error, not a runtime one.
-            'duration' => Temporal::parseDuration($this->parseStringValue($name, $offset)),
+            'regex' => $this->parseRegexTag('', $offset),
         };
     }
 

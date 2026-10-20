@@ -128,21 +128,22 @@ final class LexerTest extends TestCase
         self::assertSame('\\n', Lexer::tokenize('?\\n')[0]->value);
     }
 
-    public function testTokenizesSigils(): void
+    // DXN 0.2's sigils are gone (Jan, 2026-10-20): `~` begins no token.
+    public function testASigilIsNoTokenAtAll(): void
     {
-        $date = Lexer::tokenize('~D[2024-06-01]');
-        self::assertSame('DATE_SIGIL', $date[0]->type);
-        self::assertSame('2024-06-01', $date[0]->value);
+        foreach (['~D[2024-06-01]', '~T[13:45:30]', '~U[2024-06-01 13:45:30Z]', '~r/foo/im'] as $old) {
+            try {
+                Lexer::tokenize($old);
+                self::fail("expected {$old} not to lex");
+            } catch (LexError $err) {
+                self::assertSame(0, $err->offset());
+            }
+        }
+    }
 
-        $time = Lexer::tokenize('~T[13:45:30]');
-        self::assertSame('TIME_SIGIL', $time[0]->type);
-
-        $instant = Lexer::tokenize('~U[2024-06-01 13:45:30Z]');
-        self::assertSame('INSTANT_SIGIL', $instant[0]->type);
-
-        $regex = Lexer::tokenize('~r/foo/im');
-        self::assertSame('REGEX_SIGIL', $regex[0]->type);
-        self::assertSame(['pattern' => 'foo', 'flags' => 'im'], $regex[0]->value);
+    public function testARegexHeaderIsTokensOfItsOwn(): void
+    {
+        self::assertSame(['AT', 'IDENTIFIER', 'LPAREN', 'IDENTIFIER', 'RPAREN', 'STRING', 'EOF'], $this->types('@regex(im) "a"'));
     }
 
     public function testTokenizesAtAndPercentAndArrow(): void

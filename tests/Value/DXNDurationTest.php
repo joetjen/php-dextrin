@@ -18,7 +18,7 @@ final class DXNDurationTest extends TestCase
         self::assertNull($d->days);
         self::assertNull($d->hours);
         self::assertNull($d->minutes);
-        self::assertNull($d->microseconds);
+        self::assertNull($d->nanoseconds);
     }
 
     public function testWeeksStaysIndependentFromDays(): void

@@ -19,6 +19,7 @@ use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -27,7 +28,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -120,13 +120,17 @@ final class Encoder
             $value instanceof DXNStruct => self::encodeStruct($value, $registry),
 
             $value instanceof DXNDate => Writer::tag(Tags::T_DATE, Writer::integerItem(self::epochDays($value))),
-            $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem(self::totalMicroseconds($value))),
-            $value instanceof DXNTimestamp => Writer::tag(Tags::T_TIMESTAMP, Writer::integerItem($value->epochMicroseconds)),
+            // Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20): a
+            // time since midnight, a datetime since the epoch with its
+            // offset in minutes (UTC is offset 0), a local date-time
+            // since 1970-01-01T00:00 on the wall clock.
+            $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem($value->nanosecondsSinceMidnight())),
             $value instanceof \DateTimeInterface => self::encodeItem(DXNDateTime::fromNative($value), $registry),
-            $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME_OFFSET, Writer::arrayOf([
-                Writer::integerItem($value->epochMicroseconds),
+            $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME, Writer::arrayOf([
+                Writer::integerItem($value->epochNanoseconds),
                 Writer::integerItem($value->offsetMinutes),
             ])),
+            $value instanceof DXNLocalDateTime => Writer::tag(Tags::T_LOCAL_DATETIME, Writer::integerItem($value->localNanoseconds)),
             $value instanceof DXNDuration => self::encodeDuration($value),
 
             $value instanceof DXNUuid => Writer::tag(Tags::T_UUID, Writer::bytesItem($value->bytes)),
@@ -302,14 +306,6 @@ final class Encoder
         $utcMidnight = $date->toDateTimeImmutable();
         $epoch = new \DateTimeImmutable('1970-01-01T00:00:00Z');
         return intdiv($utcMidnight->getTimestamp() - $epoch->getTimestamp(), 86_400);
-    }
-
-    private static function totalMicroseconds(DXNTime $time): int
-    {
-        return $time->hour * 3_600_000_000
-            + $time->minute * 60_000_000
-            + $time->second * 1_000_000
-            + $time->microsecond;
     }
 
     private static function encodeDuration(DXNDuration $d): string

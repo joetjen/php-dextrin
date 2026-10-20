@@ -17,7 +17,7 @@ PHP-API-level) examples.
     host:     "db.internal"
     port:     5432
     pool:     10
-    timeout:  ~T[00:00:30]
+    timeout:  @time "00:00:30"
   }
   features: @{:billing :notifications}
 }
@@ -69,14 +69,14 @@ $payload = <<<'DXN'
       id:      @uuid "550e8400-e29b-41d4-a716-446655440000"
       email:   "ada@example.com"
       role:    :admin
-      created: ~U[2024-01-01 00:00:00Z]
+      created: @datetime "2024-01-01T00:00:00Z"
     }
     DXN;
 
 Dextrin::decode($payload, $registry);
 // => DXNStruct{name: 'User', version: 1, pairs: [
 //      ['id', DXNUuid{...}], ['email', 'ada@example.com'],
-//      ['role', DXNKeyword{name: 'admin'}], ['created', DXNTimestamp{...}],
+//      ['role', DXNKeyword{name: 'admin'}], ['created', DXNDateTime{...}],
 //    ]}
 ```
 
@@ -89,8 +89,8 @@ absent — DXN tells an absent field from one written `nil`.
 
 ```php
 $events = [
-    Dextrin::decode('%{type: :login, user_id: 1, at: ~U[2024-01-01 08:00:00Z]}'),
-    Dextrin::decode('%{type: :purchase, user_id: 1, amount: 19.99M, at: ~U[2024-01-01 08:05:00Z]}'),
+    Dextrin::decode('%{type: :login, user_id: 1, at: @datetime "2024-01-01T08:00:00Z"}'),
+    Dextrin::decode('%{type: :purchase, user_id: 1, amount: 19.99M, at: @datetime "2024-01-01T08:05:00Z"}'),
 ];
 
 $encoded = array_map(fn (mixed $event): string => Dextrin::encodeBinary($event), $events);
@@ -98,9 +98,9 @@ $encoded = array_map(fn (mixed $event): string => Dextrin::encodeBinary($event),
 $decoded = array_map(fn (string $bytes): mixed => Dextrin::decodeBinary($bytes), $encoded);
 ```
 
-`.dxnb` is a good fit here specifically because `timestamp` uses tag
-1's *integer* microsecond form (never the lossy float form) and
-`decimal` maps directly to CBOR tag 4 — money and event timestamps
+`.dxnb` is a good fit here specifically because a `datetime` is
+*integer* nanoseconds since the epoch (never a lossy float) and
+`decimal` maps directly to CBOR tag 4 — money and event times
 round-trip exactly, unlike JSON-over-the-wire where both would need
 an app-level convention.
 

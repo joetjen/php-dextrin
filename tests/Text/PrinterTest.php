@@ -151,7 +151,7 @@ final class PrinterTest extends TestCase
 
     public function testPrintsRegex(): void
     {
-        self::assertSame('~r/foo/im', Printer::print(new DXNRegex('foo', ['i' => true, 'm' => true])));
+        self::assertSame('@regex(im) "foo"', Printer::print(new DXNRegex('foo', ['i' => true, 'm' => true])));
     }
 
     public function testPrintsCustomTag(): void
@@ -159,9 +159,9 @@ final class PrinterTest extends TestCase
         self::assertSame('@my-app/money 500', Printer::print(new DXNCustomTag('my-app/money', 500)));
     }
 
-    public function testPrintsDateSigil(): void
+    public function testPrintsADateAsATaggedString(): void
     {
-        self::assertSame('~D[2024-06-01]', Printer::print(new DXNDate(2024, 6, 1)));
+        self::assertSame('@date "2024-06-01"', Printer::print(new DXNDate(2024, 6, 1)));
     }
 
     public function testQuoteStringEscapesControlCharsAndQuotes(): void

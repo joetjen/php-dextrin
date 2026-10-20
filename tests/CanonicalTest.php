@@ -111,9 +111,10 @@ final class CanonicalTest extends TestCase
 
     public function testDatesAndTimes(): void
     {
-        self::assertSame('~D[2026-10-17]', self::canonicalOf('~D[2026-10-17]'));
-        self::assertSame('~T[10:00:00.5]', self::canonicalOf('~T[10:00:00.500000]'));
-        self::assertSame('~U[2026-10-17 10:00:00Z]', self::canonicalOf('~U[2026-10-17 10:00:00Z]'));
+        self::assertSame('@date "2026-10-17"', self::canonicalOf('@date "2026-10-17"'));
+        self::assertSame('@time "10:00:00.5"', self::canonicalOf('@time "10:00:00.500000"'));
+        self::assertSame('@datetime "2026-10-17T10:00:00Z"', self::canonicalOf('@datetime "2026-10-17T10:00:00Z"'));
+        self::assertSame('@datetime "2026-10-17T10:00:00.25Z"', self::canonicalOf('@datetime "2026-10-17T10:00:00.250000+00:00"'));
         self::assertSame(
             '@datetime "2026-10-17T10:00:00+02:00"',
             self::canonicalOf('@datetime "2026-10-17T10:00:00+02:00"'),
