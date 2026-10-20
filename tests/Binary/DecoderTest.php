@@ -55,10 +55,12 @@ final class DecoderTest extends TestCase
         self::assertSame('"', Decoder::decode($this->envelope("\x61\x22")));
     }
 
-    public function testDecodesHalfPrecisionFloatAsUnsupported(): void
+    // Every width CBOR has; the encoder writes the shortest exact one
+    // (DXN.md §2.2, Jan, 2026-10-20).
+    public function testDecodesHalfPrecisionFloat(): void
     {
-        $this->expectException(BinaryError::class);
-        Decoder::decode($this->envelope("\xf9\x00\x00"));
+        self::assertSame(1.0, Decoder::decode($this->envelope("\xf9\x3c\x00")));
+        self::assertSame(-2.0, Decoder::decode($this->envelope("\xf9\xc0\x00")));
     }
 
     public function testDecodesFloat32AndFloat64(): void

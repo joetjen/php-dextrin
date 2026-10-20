@@ -71,11 +71,17 @@ final class WriterTest extends TestCase
         self::assertSame("\xfb", Writer::floatHead());
     }
 
-    public function testFloatItemEncodesBigEndianDouble(): void
+    public function testFloatItemEncodesBigEndianDoubleWhenNothingShorterHoldsIt(): void
     {
-        $item = Writer::floatItem(1.0);
+        $item = Writer::floatItem(0.1);
         self::assertSame(9, strlen($item));
-        self::assertSame("\xfb\x3f\xf0\x00\x00\x00\x00\x00\x00", $item);
+        self::assertSame("\xfb\x3f\xb9\x99\x99\x99\x99\x99\x9a", $item);
+    }
+
+    public function testFloatItemEncodesTheShortestWidthThatHoldsTheFloatExactly(): void
+    {
+        self::assertSame("\xf9\x3c\x00", Writer::floatItem(1.0));
+        self::assertSame("\xfa\x47\x7f\xf0\x00", Writer::floatItem(65_520.0));
     }
 
     public function testBigDigitsToBytesAndBackRoundTripsArbitraryMagnitude(): void

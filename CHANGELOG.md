@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@objectid` and `@ip` are built in** (Jan, 2026-10-20; DXN.md §1.3,
+  as dextrin a25c34b), like `@uuid`: readable in text, their raw bytes in
+  `.dxnb`. `@objectid "507f1f77bcf86cd799439011"` is BSON's 12-byte
+  ObjectId (`DXNObjectId`, tag 221), and may be a map key. `@ip
+  "192.0.2.1"`, `"10.0.0.0/8"`, `"2001:db8::1"` and `"2001:db8::/32"` are
+  an address or a prefix (`DXNIp`), written as RFC 9164 says, CBOR tags
+  52 and 54; DXNS adds `:objectid`, `:ip` and the refine keys `version:`
+  and `prefix:`. The text is read and written as the reference does it on
+  every platform, not by `inet_pton()`/`inet_ntop()`, which on macOS read
+  a zone and write `::2` for `::0.0.0.2`; as of dextrin e8ece1f, a
+  link-local address such as `fe80:1::1` is written in RFC 5952's form
+  and reads back, and a sign (`+1.2.3.4`) is `syntax`. **`.dxnb` uses the smallest
+  representation that keeps a value**, now said in DXN.md §2.2.
 - **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
   types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has
   them: a shape is a named, unversioned plain-map type that fills its
@@ -70,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`.dxnb` writes the smallest form of a float, a UTC datetime and a
+  regex without flags** (Jan, 2026-10-20; DXN.md §2.2, as dextrin
+  8927a29): a float in the shortest of CBOR's half, single and double
+  precision that holds it exactly (NaN and the infinities in half), a
+  datetime in UTC as its bare nanoseconds, a regex without flags as its
+  bare pattern. A reader reads every form, half-precision floats
+  included, which it refused before.
 - **One way to write a value: every sigil is gone** (Jan, 2026-10-20;
   DXN.md §1.2, as dextrin 45d78bc). Breaking. Dates and times are ISO
   8601 strings under a tag -- `@date "2026-10-20"`, `@time "14:30:00.5"`,
@@ -146,6 +166,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A float written as text keeps every digit**: `Dextrin::encode()`
+  wrote a float with PHP's `(string)`, which keeps 14 significant digits,
+  so `15164.0947265625` read back as `15164.094726562`. It now writes the
+  canonical form's shortest digits that read back exactly.
+- **`Document::update()` with an empty array writes `@array[]`**: it took
+  an empty native array for an empty map, which decodes to a `DXNMap`.
 - **A field naming another file's named type resolves** (DXN.md §4.6):
   `FileResolver` compiled each file on its own, so a field naming another
   file's shape or named type named a struct that never came.

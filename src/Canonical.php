@@ -15,9 +15,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -101,6 +103,8 @@ final class Canonical
             $value instanceof \DateTimeInterface, $value instanceof DXNLocalDateTime,
             $value instanceof DXNDuration => self::temporal($value),
             $value instanceof DXNUuid => '@uuid ' . self::quoted(strtolower($value->toString())),
+            $value instanceof DXNObjectId => '@objectid ' . self::quoted($value->toString()),
+            $value instanceof DXNIp => '@ip ' . self::quoted($value->toString()),
             $value instanceof DXNUri => '@uri ' . self::quoted($value->value),
             // Its flags in §2.3's bit order.
             $value instanceof DXNRegex => Printer::regexForm(Printer::printRegexFlags($value->flags), self::quoted($value->pattern)),
@@ -206,9 +210,10 @@ final class Canonical
      * ECMAScript's thresholds, `.0` on a whole number, no `+` in an
      * exponent, and the sign of negative zero kept. The digits are found
      * by asking for more until they read back exactly, so no ini setting
-     * (`precision`, `serialize_precision`) can change them.
+     * (`precision`, `serialize_precision`) can change them. Public so
+     * {@see Text\Printer} writes a float the same way.
      */
-    private static function float(float $n): string
+    public static function float(float $n): string
     {
         if (is_nan($n)) {
             return 'NaN';

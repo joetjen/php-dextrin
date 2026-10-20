@@ -23,12 +23,15 @@ final class Tags
     public const T_RATIONAL = 30;
     public const T_URI = 32;
     public const T_UUID = 37;
+    // RFC 9164: an IPv4 or IPv6 address, or a prefix.
+    public const T_IPV4 = 52;
+    public const T_IPV6 = 54;
     public const T_STRINGREF_NAMESPACE = 256;
     public const T_STRINGREF = 25;
     public const T_SHAREABLE = 28;
     public const T_SHARED_REF = 29;
 
-    // ---- private tag block, DXN.md §2.3 (200-220) --------------------------
+    // ---- private tag block, DXN.md §2.3 (200-221) --------------------------
     public const T_CHAR = 200;
     public const T_SYMBOL = 201;
     public const T_KEYWORD = 202;
@@ -58,11 +61,17 @@ final class Tags
     /** Nanoseconds since midnight. */
     public const T_TIME = 218;
 
-    /** `[epoch-nanoseconds, offset-minutes]`; UTC is offset 0. */
+    /**
+     * `[epoch-nanoseconds, offset-minutes]`, or in UTC the bare
+     * epoch-nanoseconds (the smallest representation, DXN.md §2.2).
+     */
     public const T_DATETIME = 219;
 
     /** The duration bitmask, its seventh field nanoseconds. */
     public const T_DURATION = 220;
+
+    /** BSON's ObjectId: 12 raw bytes (Jan, 2026-10-20). */
+    public const T_OBJECTID = 221;
 
     /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
     public const DURATION_FIELDS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'nanoseconds'];
