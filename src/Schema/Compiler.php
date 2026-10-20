@@ -121,12 +121,13 @@ final class Compiler
     }
 
     /**
-     * Refuses a schema written in DXN 1.0's syntax -- `fields: @ordered
-     * %{...}`, `closed: true`, `forbidden: [...]` -- saying so, and what
-     * 1.1 writes instead (DXN.md §4.4), rather than that a field has no
-     * known type. Only those shapes: in 1.1 `fields`, `closed` and
-     * `forbidden` are ordinary field names, whose values are type
-     * expressions.
+     * Refuses a schema written in Dextrin 0.1's syntax -- `fields:
+     * @ordered %{...}`, `closed: true`, `forbidden: [...]` -- saying so,
+     * and what a schema is written as now (DXN.md §4.4), rather than that
+     * a field has no known type. Only those shapes: now `fields`, `closed`
+     * and `forbidden` are ordinary field names, whose values are type
+     * expressions. The format stays 1.0 until 1.0.0 (Jan, 2026-10-20), so
+     * the old syntax is named by the release that had it.
      *
      * @param iterable<array{0: string, 1: mixed}> $pairs
      */
@@ -137,7 +138,7 @@ final class Compiler
                 || ($key === 'closed' && is_bool($value))
                 || ($key === 'forbidden' && $value instanceof DXNList)) {
                 throw new SchemaCompileError(
-                    "this is DXN 1.0's schema syntax (fields:, closed:, forbidden:); DXN 1.1 lists the fields directly, "
+                    "this is Dextrin 0.1's schema syntax (fields:, closed:, forbidden:); a schema lists its fields directly, "
                     . '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXN.md §4.4)'
                 );
             }

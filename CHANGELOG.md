@@ -32,14 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version its schema's, one version found once, every version loaded. A
   resolver answers a list of every version found and throws
   `SchemaCompileError` for files it cannot use.
-- **`bits`**, as DXN.md 1.1 defines it (dextrin afbb00d): `DXNBits`
+- **`bits`**, as DXN.md defines it (dextrin afbb00d): `DXNBits`
   holds a run of bits that is not whole bytes -- the bytes, the unused
   bits zero, and the count -- written `@bits {"oA==" 3}` and `T_BITS`
   (216). `DXNBits::from()` answers `DXNBytes` for a whole number of
   bytes, as bits and bytes are one value space. `:bits` in a schema takes
   bits and bytes, `:bytes` only whole bytes; bits are no map key.
-- The format guides in `dxn/` are DXN.md 1.1's text: format version 1.1,
-  `bits`, the private range 200-216, and §5's `document/*` errors.
+- The format guides in `dxn/` are the reference's DXN.md: `bits`, the
+  private range 200-216, and §5's `document/*` errors, at format version
+  1.0, which it stays until 1.0.0 (Jan, 2026-10-20).
 
 ### Changed
 
@@ -67,10 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from before, when a resolved schema kept its file's name. Breaking for
   documents that wrote the bare name. `forPaths()`' resolver answers a
   list now, each schema under the name asked for.
-- **A 1.0 schema says it is one**, as the reference's (dextrin afbb00d):
-  `fields: @ordered %{...}`, `closed: true` and `forbidden: [...]` are
-  refused (`schema/compile`) naming DXN 1.0's syntax and what 1.1 writes
-  instead, rather than as a field of no known type.
+- **A 0.1 schema says it is one**, as the reference's (dextrin afbb00d,
+  a776312): `fields: @ordered %{...}`, `closed: true` and
+  `forbidden: [...]` are refused (`schema/compile`) naming Dextrin 0.1's
+  syntax and what a schema is written as now, rather than as a field of
+  no known type.
 
 ### Fixed
 
