@@ -83,7 +83,7 @@ final class PrinterTest extends TestCase
 
     public function testPrintsBareArrayAsArrayTag(): void
     {
-        self::assertSame('@array [1 2 3]', Printer::print([1, 2, 3]));
+        self::assertSame('@array[1 2 3]', Printer::print([1, 2, 3]));
     }
 
     public function testPrintsBareAssocArrayAsMap(): void
