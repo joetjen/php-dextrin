@@ -31,9 +31,10 @@ use JOetjen\Dextrin\Value\Equality;
 
 /**
  * Internal, compiled representation of a `.dxns` type expression -- the
- * 12-form vocabulary (`any`, `primitive`, `reference`, `list-of`,
- * `set-of`, `tuple-of`, `map-of`, `enum`, `one-of`, `all-of`,
- * `nilable`, `refine`) {@see Compiler} turns a parsed `.dxns` value
+ * vocabulary of DXN.md §4.1 (`any`, `never`, `primitive`, `reference`,
+ * `list-of`, `set-of`, `tuple-of`, `map-of`, `array-of`,
+ * `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`, `any-of`,
+ * `all-of`, `not`, `nilable`, `refine`) {@see Compiler} turns a parsed `.dxns` value
  * into, and what {@see self::matches()} checks a decoded/to-be-encoded
  * value against. (The 13th `dxn/DXN.md` §4 form, `struct`, isn't a
  * distinct compiled shape here either -- a `%schema{}` entry compiles
@@ -62,7 +63,7 @@ final class TypeExpr
     /**
      * @param list<self>|null $elems tuple-of
      * @param list<mixed>|null $literals enum
-     * @param list<self>|null $variants one-of / all-of
+     * @param list<self>|null $variants one-of / any-of / all-of
      * @param array<string, mixed>|null $constraints refine
      */
     private function __construct(
@@ -82,6 +83,11 @@ final class TypeExpr
     public static function any(): self
     {
         return new self('any');
+    }
+
+    public static function never(): self
+    {
+        return new self('never');
     }
 
     public static function primitive(string $name): self
@@ -115,6 +121,21 @@ final class TypeExpr
         return new self('map-of', key: $key, value: $value);
     }
 
+    public static function arrayOf(self $elem): self
+    {
+        return new self('array-of', elem: $elem);
+    }
+
+    public static function orderedMapOf(self $key, self $value): self
+    {
+        return new self('ordered-map-of', key: $key, value: $value);
+    }
+
+    public static function sortedSetOf(self $elem): self
+    {
+        return new self('sorted-set-of', elem: $elem);
+    }
+
     /** @param list<mixed> $literals */
     public static function enum(array $literals): self
     {
@@ -125,6 +146,17 @@ final class TypeExpr
     public static function oneOf(array $variants): self
     {
         return new self('one-of', variants: $variants);
+    }
+
+    /** @param list<self> $variants */
+    public static function anyOf(array $variants): self
+    {
+        return new self('any-of', variants: $variants);
+    }
+
+    public static function not(self $elem): self
+    {
+        return new self('not', elem: $elem);
     }
 
     /** @param list<self> $variants */
@@ -174,6 +206,9 @@ final class TypeExpr
         if ($this->form === 'any') {
             return true;
         }
+        if ($this->form === 'never') {
+            return false;
+        }
         if ($this->form === 'reference') {
             return self::matchesReference($this->name ?? '', $value, $registry);
         }
@@ -186,8 +221,15 @@ final class TypeExpr
             'set-of' => $value instanceof DXNSet && self::allMatch($this->elem, $value->items, $registry),
             'tuple-of' => $this->tupleMatches($value, $registry),
             'map-of' => is_array($value) && $this->mapMatches($value, $registry),
+            'array-of' => is_array($value) && array_is_list($value) && self::allMatch($this->elem, $value, $registry),
+            'ordered-map-of' => $value instanceof DXNOrderedMap && $this->pairsMatch($value->pairs, $registry),
+            'sorted-set-of' => $value instanceof DXNSortedSet && self::allMatch($this->elem, $value->items, $registry),
             'enum' => $this->enumMatches($value),
-            'one-of' => $this->anyVariantMatches($value, $registry),
+            // Exactly one variant matches (JSON Schema's oneOf; Jan,
+            // 2026-10-20); any-of is one or more.
+            'one-of' => $this->exactlyOneVariantMatches($value, $registry),
+            'any-of' => $this->anyVariantMatches($value, $registry),
+            'not' => !(($this->elem?->matches($value, $registry)) ?? false),
             'all-of' => $this->everyVariantMatches($value, $registry),
             'nilable' => $value === null || (($this->elem?->matches($value, $registry)) ?? false),
             'refine' => (($this->base?->matches($value, $registry)) ?? false)
@@ -320,6 +362,36 @@ final class TypeExpr
             }
         }
         return false;
+    }
+
+    /** Whether exactly one variant matches `$value`, stopping at a second. */
+    private function exactlyOneVariantMatches(mixed $value, ?Registry $registry): bool
+    {
+        $found = 0;
+        foreach ($this->variants ?? [] as $variant) {
+            if ($variant->matches($value, $registry) && ++$found > 1) {
+                return false;
+            }
+        }
+        return $found === 1;
+    }
+
+    /**
+     * Whether every pair of an ordered map matches this type's key and
+     * value types.
+     *
+     * @param list<array{0: mixed, 1: mixed}> $pairs
+     */
+    private function pairsMatch(array $pairs, ?Registry $registry): bool
+    {
+        $keyType = $this->key ?? throw new \LogicException('unreachable: ordered-map-of type expr missing key');
+        $valueType = $this->value ?? throw new \LogicException('unreachable: ordered-map-of type expr missing value');
+        foreach ($pairs as [$k, $v]) {
+            if (!$keyType->matches($k, $registry) || !$valueType->matches($v, $registry)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function anyVariantMatches(mixed $value, ?Registry $registry): bool
