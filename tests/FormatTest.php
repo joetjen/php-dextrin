@@ -54,7 +54,7 @@ final class FormatTest extends TestCase
 
     public function testAfterWhitespaceCommasCommentsAndAHeader(): void
     {
-        self::assertTrue(Format::identifies("\n  , # a comment\n# another\n@dxn \"1.1\"  # the version\n\n%{a: 1}", Form::Text));
+        self::assertTrue(Format::identifies("\n  , # a comment\n# another\n@dxn \"1.0\"  # the version\n\n%{a: 1}", Form::Text));
     }
 
     public function testAListOrAScalarIsLeftUnrecognisedOnPurpose(): void
