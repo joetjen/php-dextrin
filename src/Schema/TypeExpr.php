@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\Canonical;
+use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNBits;
@@ -37,7 +39,7 @@ use JOetjen\Dextrin\Value\Equality;
 /**
  * Internal, compiled representation of a `.dxns` type expression -- the
  * vocabulary of DXN.md §4.1 (`any`, `never`, `primitive`, `reference`,
- * `list-of`, `set-of`, `tuple-of`, `map-of`, `array-of`,
+ * `list-of`, `list-items`, `set-of`, `tuple-of`, `tuple-of-all`, `map-of`, `array-of`,
  * `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`, `any-of`,
  * `all-of`, `not`, `nilable`, `refine`) {@see Compiler} turns a parsed `.dxns` value
  * into, and what {@see self::matches()} checks a decoded/to-be-encoded
@@ -73,6 +75,7 @@ final class TypeExpr
      * @param list<Field>|null $fields shape
      * @param list<array{0: mixed, 1: self}>|null $branches case
      * @param list<string>|null $params generic
+     * @param list<Particle>|null $particles list-items
      */
     private function __construct(
         public readonly string $form,
@@ -89,6 +92,7 @@ final class TypeExpr
         public readonly ?array $branches = null,
         public readonly ?self $otherwise = null,
         public readonly ?array $params = null,
+        public readonly ?array $particles = null,
     ) {
     }
 
@@ -174,6 +178,22 @@ final class TypeExpr
     public static function listOf(self $elem): self
     {
         return new self('list-of', elem: $elem);
+    }
+
+    /**
+     * `{:list-items p ...}`: a list's items in order (DXN.md §4.1a).
+     *
+     * @param list<Particle> $particles
+     */
+    public static function listItems(array $particles): self
+    {
+        return new self('list-items', particles: $particles);
+    }
+
+    /** `{:tuple-of-all elem}`: a tuple of any length, every item an `$elem`. */
+    public static function tupleOfAll(self $elem): self
+    {
+        return new self('tuple-of-all', elem: $elem);
     }
 
     public static function setOf(self $elem): self
@@ -333,6 +353,13 @@ final class TypeExpr
                 }
                 $items = self::all($this->elem, $value->items, $ctx);
                 return $items === NoMatch::Instance ? NoMatch::Instance : new DXNList($items);
+            case 'list-items':
+                if (!$value instanceof DXNList) {
+                    return NoMatch::Instance;
+                }
+                $count = count($value->items);
+                $items = self::items($this->particles ?? [], 0, $value->items, 0, $ctx, static fn (int $at): array|NoMatch => self::allTaken($at, $count));
+                return $items === NoMatch::Instance ? NoMatch::Instance : new DXNList($items);
             case 'set-of':
                 if (!$value instanceof DXNSet) {
                     return NoMatch::Instance;
@@ -340,6 +367,12 @@ final class TypeExpr
                 return self::all($this->elem, $value->items, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
             case 'tuple-of':
                 return $this->conformTuple($value, $ctx);
+            case 'tuple-of-all':
+                if (!$value instanceof DXNTuple) {
+                    return NoMatch::Instance;
+                }
+                $items = self::all($this->elem, $value->items, $ctx);
+                return $items === NoMatch::Instance ? NoMatch::Instance : new DXNTuple($items);
             case 'map-of':
                 return is_array($value) ? $this->conformMap($value, $ctx) : NoMatch::Instance;
             case 'array-of':
@@ -399,7 +432,7 @@ final class TypeExpr
                 return $value === null ? null : ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance);
             case 'refine':
                 $c = $this->base?->conform($value, $ctx) ?? NoMatch::Instance;
-                return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? []) ? $c : NoMatch::Instance;
+                return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? [], $ctx) ? $c : NoMatch::Instance;
             default:
                 return NoMatch::Instance;
         }
@@ -424,6 +457,89 @@ final class TypeExpr
             $out[] = $c;
         }
         return $out;
+    }
+
+    // ---- list items -------------------------------------------------------------
+
+    /**
+     * `$particles` from the `$p`th matched against `$items` from the
+     * `$at`th, then `$rest` against the position they leave: the items
+     * conformed, in order, or {@see NoMatch}. A repeat takes as many
+     * items as it can while the rest still matches, and gives back one at
+     * a time until it does (DXN.md §4.1a).
+     *
+     * @param list<Particle> $particles
+     * @param list<mixed> $items
+     * @param \Closure(int): (list<mixed>|NoMatch) $rest
+     * @return list<mixed>|NoMatch
+     */
+    private static function items(array $particles, int $p, array $items, int $at, Context $ctx, \Closure $rest): array|NoMatch
+    {
+        if ($p === count($particles)) {
+            return $rest($at);
+        }
+        $particle = $particles[$p];
+        if ($particle->type !== null) {
+            if ($at === count($items)) {
+                return NoMatch::Instance;
+            }
+            $conformed = $particle->type->conform($items[$at], $ctx);
+            if ($conformed === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+            $tail = self::items($particles, $p + 1, $items, $at + 1, $ctx, $rest);
+            return $tail === NoMatch::Instance ? NoMatch::Instance : [$conformed, ...$tail];
+        }
+        return self::repeat(
+            $particle->group ?? [],
+            $particle->min,
+            $particle->max,
+            $items,
+            $at,
+            $ctx,
+            static fn (int $after): array|NoMatch => self::items($particles, $p + 1, $items, $after, $ctx, $rest),
+        );
+    }
+
+    /**
+     * One more repetition first, while `$most` allows it; stopping once
+     * `$least` is reached. A repetition that took no item is the last:
+     * every further one would take none either, so `$least` is met by them.
+     *
+     * @param list<Particle> $group
+     * @param list<mixed> $items
+     * @param \Closure(int): (list<mixed>|NoMatch) $rest
+     * @return list<mixed>|NoMatch
+     */
+    private static function repeat(array $group, int $least, ?int $most, array $items, int $at, Context $ctx, \Closure $rest): array|NoMatch
+    {
+        $again = NoMatch::Instance;
+        if ($most === null || $most > 0) {
+            $again = self::items(
+                $group,
+                0,
+                $items,
+                $at,
+                $ctx,
+                static fn (int $afterOne): array|NoMatch => $afterOne === $at
+                    ? $rest($afterOne)
+                    : self::repeat($group, max($least - 1, 0), $most === null ? null : $most - 1, $items, $afterOne, $ctx, $rest),
+            );
+        }
+        if ($again !== NoMatch::Instance) {
+            return $again;
+        }
+        return $least === 0 ? $rest($at) : NoMatch::Instance;
+    }
+
+    /**
+     * The end of a `{:list-items}`: every item taken.
+     *
+     * @return list<mixed>|NoMatch
+     */
+    private static function allTaken(int $at, int $count): array|NoMatch
+    {
+        return $at === $count ? [] : NoMatch::Instance;
     }
 
     private function conformTuple(mixed $value, Context $ctx): mixed
@@ -604,12 +720,35 @@ final class TypeExpr
                 'branches' => array_map(static fn (array $b): array => [$b[0], $b[1]->substitute($bound)], $this->branches ?? []),
                 'otherwise' => $sub($this->otherwise),
             ]),
-            'refine' => $this->with(['base' => $sub($this->base)]),
+            'refine' => $this->with(['base' => $sub($this->base), 'constraints' => self::withContains(
+                $this->constraints ?? [],
+                static fn (self $t): self => $t->substitute($bound),
+            )]),
+            'list-items' => $this->with(['particles' => array_map(
+                static fn (Particle $p): Particle => $p->map(static fn (self $t): self => $t->substitute($bound)),
+                $this->particles ?? [],
+            )]),
             'one-of', 'any-of', 'all-of' => $this->with(['variants' => $subAll($this->variants)]),
-            'list-of', 'set-of', 'array-of', 'sorted-set-of', 'not', 'nilable' => $this->with(['elem' => $sub($this->elem)]),
+            'list-of', 'set-of', 'array-of', 'sorted-set-of', 'tuple-of-all', 'not', 'nilable' => $this->with(['elem' => $sub($this->elem)]),
             'map-of', 'ordered-map-of' => $this->with(['key' => $sub($this->key), 'value' => $sub($this->value)]),
             default => $this,
         };
+    }
+
+    /**
+     * A refine's `$constraints` with its `contains` type, if it has one,
+     * replaced by what `$map` makes of it.
+     *
+     * @param array<string, mixed> $constraints
+     * @param \Closure(self): self $map
+     * @return array<string, mixed>
+     */
+    public static function withContains(array $constraints, \Closure $map): array
+    {
+        if (($constraints['contains'] ?? null) instanceof self) {
+            $constraints['contains'] = $map($constraints['contains']);
+        }
+        return $constraints;
     }
 
     private static function matchesReference(string $name, mixed $value, ?Registry $registry): bool
@@ -696,14 +835,40 @@ final class TypeExpr
     // ---- refine constraints ---------------------------------------------------
 
     /** @param array<string, mixed> $constraints */
-    private static function satisfiesConstraints(mixed $value, array $constraints): bool
+    private static function satisfiesConstraints(mixed $value, array $constraints, Context $ctx): bool
     {
         foreach ($constraints as $key => $arg) {
-            if (!self::satisfiesConstraint($key, $arg, $value)) {
+            $satisfied = $key === 'contains'
+                ? $arg instanceof self && self::contains($arg, $constraints, $value, $ctx)
+                : self::satisfiesConstraint($key, $arg, $value);
+            if (!$satisfied) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Whether between `min-contains` (1 when not given) and `max-contains`
+     * of the collection's items are a `$type`.
+     *
+     * @param array<string, mixed> $constraints
+     */
+    private static function contains(self $type, array $constraints, mixed $value, Context $ctx): bool
+    {
+        $items = self::itemsOf($value);
+        if ($items === null) {
+            return false;
+        }
+        $count = 0;
+        foreach ($items as $item) {
+            if ($type->conform($item, $ctx) !== NoMatch::Instance) {
+                $count++;
+            }
+        }
+        $most = $constraints['max-contains'] ?? null;
+        return $count >= self::toIntArg($constraints['min-contains'] ?? 1)
+            && ($most === null || $count <= self::toIntArg($most));
     }
 
     /**
@@ -725,6 +890,15 @@ final class TypeExpr
             'pattern' => is_string($value) && $arg instanceof DXNRegex && preg_match($arg->toPcrePattern(), $value) === 1,
             'min-count' => self::countOf($value) >= self::toIntArg($arg),
             'max-count' => self::countOf($value) <= self::toIntArg($arg),
+            // Counted with `contains`, which reads them.
+            'min-contains', 'max-contains' => true,
+            'unique' => match ($arg) {
+                false => true,
+                true => self::distinct(self::itemsOf($value), static fn (mixed $item): array => [self::identity($item)]),
+                default => false,
+            },
+            // Items without the field are compared with none.
+            'unique-by' => is_string($arg) && self::distinct(self::itemsOf($value), static fn (mixed $item): array => self::fieldIdentity($item, $arg)),
             // `finite: true` refuses NaN and both infinities.
             'finite' => $arg !== true || !is_float($value) || is_finite($value),
             'offsets' => self::hasOffsetIn($value, $arg),
@@ -751,10 +925,116 @@ final class TypeExpr
         return match (true) {
             $value instanceof DXNList, $value instanceof DXNTuple => count($value->items),
             $value instanceof DXNSet, $value instanceof DXNSortedSet => count($value->items),
+            is_array($value) && array_is_list($value) => count($value),
             default => throw new \InvalidArgumentException(
-                'min-count/max-count requires a list/tuple/set/sorted-set value, got ' . Equality::kindOf($value),
+                'min-count/max-count requires a list/tuple/set/sorted-set/array value, got ' . Equality::kindOf($value),
             ),
         };
+    }
+
+    /**
+     * A collection's items, `null` for a value that is none.
+     *
+     * @return list<mixed>|null
+     */
+    private static function itemsOf(mixed $value): ?array
+    {
+        return match (true) {
+            $value instanceof DXNList, $value instanceof DXNTuple => $value->items,
+            $value instanceof DXNSet, $value instanceof DXNSortedSet => $value->items,
+            is_array($value) && array_is_list($value) => $value,
+            default => null,
+        };
+    }
+
+    /**
+     * Whether no two of `$items` give the same identity; `$identify`
+     * answers `[identity]`, or `[]` for an item left out.
+     *
+     * @param list<mixed>|null $items
+     * @param \Closure(mixed): list<string> $identify
+     */
+    private static function distinct(?array $items, \Closure $identify): bool
+    {
+        if ($items === null) {
+            return false;
+        }
+        $seen = [];
+        foreach ($items as $item) {
+            foreach ($identify($item) as $id) {
+                if (isset($seen[$id])) {
+                    return false;
+                }
+                $seen[$id] = true;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Two values are the same when their canonical forms are (DXN.md
+     * §1.5): `1` and `1.0` differ, as `name:` and `"name" =>` do. A value
+     * with no DXN meaning, an application's object, is compared as itself.
+     */
+    private static function identity(mixed $value): string
+    {
+        try {
+            return 'dxn:' . Canonical::print(Validated::strip($value));
+        } catch (DXNError) {
+            return 'term:' . (is_object($value) ? spl_object_hash($value) : serialize($value));
+        }
+    }
+
+    /** @return list<string> */
+    private static function fieldIdentity(mixed $item, string $field): array
+    {
+        $found = self::fieldOf($item, $field);
+        return $found === [] ? [] : [self::identity($found[0])];
+    }
+
+    /**
+     * The value of the field named `$field`, whatever its key's spelling:
+     * `[value]`, or `[]` when there is none.
+     *
+     * @return list<mixed>
+     */
+    private static function fieldOf(mixed $value, string $field): array
+    {
+        if ($value instanceof Validated) {
+            return self::fieldOf($value->value, $field);
+        }
+        if ($value instanceof DXNStruct) {
+            if (!$value->isKeyed()) {
+                return [];
+            }
+            foreach ($value->pairs() as [$name, $v]) {
+                if ($name === $field) {
+                    return [$v];
+                }
+            }
+            return [];
+        }
+        if ($value instanceof DXNMap) {
+            foreach ($value->pairs() as [$key, $v]) {
+                if (self::keyName($key) === $field) {
+                    return [$v];
+                }
+            }
+            return [];
+        }
+        if (is_array($value)) {
+            foreach ($value as $key => $v) {
+                if (self::keyName(MapBuilder::toDxnMapKey($key)) === $field) {
+                    return [$v];
+                }
+            }
+            return [];
+        }
+        if (is_object($value)) {
+            $vars = get_object_vars($value);
+            return array_key_exists($field, $vars) ? [$vars[$field]] : [];
+        }
+        return [];
     }
 
     private static function isMultipleOf(float $a, float $b): bool

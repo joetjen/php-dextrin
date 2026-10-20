@@ -244,7 +244,15 @@ final class Compiler
                     'otherwise' => $one($type->otherwise),
                 ]);
             case 'refine':
-                return $type->with(['base' => $one($type->base)]);
+                return $type->with([
+                    'base' => $one($type->base),
+                    'constraints' => TypeExpr::withContains($type->constraints ?? [], static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path)),
+                ]);
+            case 'list-items':
+                return $type->with(['particles' => array_map(
+                    static fn (Particle $p): Particle => $p->map(static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path)),
+                    $type->particles ?? [],
+                )]);
             case 'tuple-of':
                 return $type->with(['elems' => $many($type->elems)]);
             case 'one-of':
@@ -255,6 +263,7 @@ final class Compiler
             case 'set-of':
             case 'array-of':
             case 'sorted-set-of':
+            case 'tuple-of-all':
             case 'not':
             case 'nilable':
                 return $type->with(['elem' => $one($type->elem)]);
@@ -320,6 +329,9 @@ final class Compiler
     private static function unguardedNames(TypeExpr $type): array
     {
         $all = static fn (array $ts): array => array_merge([], ...array_map(static fn (TypeExpr $t): array => self::unguardedNames($t), $ts));
+        // Everything not named here is a guard, or a leaf: a field, a
+        // collection's elements (list-items and tuple-of-all among them),
+        // and a refine's `contains`, each of which reads a smaller part.
         return match ($type->form) {
             'named' => [$type->name ?? ''],
             'apply' => [$type->name ?? '', ...$all($type->elems ?? [])],
@@ -652,14 +664,114 @@ final class Compiler
             if ($tag === 'generic') {
                 throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
             }
-            if ($tag === 'refine' && count($rest) === 2 && is_array($rest[1])) {
-                /** @var array<string, mixed> $constraints */
-                $constraints = $rest[1];
-                return TypeExpr::refine(self::compileTypeExpr($rest[0], $aliases), $constraints);
+            if ($tag === 'refine' && count($rest) === 2 && (is_array($rest[1]) || $rest[1] instanceof DXNMap)) {
+                $base = self::compileTypeExpr($rest[0], $aliases);
+                return TypeExpr::refine($base, self::refineConstraints($rest[1], $aliases));
+            }
+            // `{:list-items p ...}`: a list's items in order, each `p` a
+            // type for one item or a `{:repeat ...}` (DXN.md §4.1a).
+            if ($tag === 'list-items') {
+                return TypeExpr::listItems(self::particles($rest, $aliases));
+            }
+            if ($tag === 'tuple-of-all' && count($rest) === 1) {
+                return TypeExpr::tupleOfAll(self::compileTypeExpr($rest[0], $aliases));
+            }
+            if ($tag === 'repeat' || $tag === 'group') {
+                throw new SchemaCompileError("a {$tag} stands only among {:list-items ...}'s items");
             }
         }
 
         throw new SchemaCompileError('unrecognized type expression: ' . self::describe($value));
+    }
+
+    /**
+     * A `{:list-items}`'s or a group's items: {@see Particle::one()} for a
+     * type, {@see Particle::repeat()} for a repeat, its max `null` when
+     * there is no upper bound.
+     *
+     * @param list<mixed> $values
+     * @param array<string, TypeExpr> $aliases
+     * @return list<Particle>
+     */
+    private static function particles(array $values, array $aliases): array
+    {
+        return array_map(static fn (mixed $v): Particle => self::particle($v, $aliases), $values);
+    }
+
+    /** @param array<string, TypeExpr> $aliases */
+    private static function particle(mixed $value, array $aliases): Particle
+    {
+        $items = $value instanceof DXNTuple ? $value->items : [];
+        $tag = ($items[0] ?? null) instanceof DXNKeyword ? $items[0]->name : null;
+        if ($tag === 'repeat') {
+            [$inner, $least, $most] = [$items[1] ?? null, $items[2] ?? null, $items[3] ?? null];
+            if (count($items) !== 4 || !is_int($least) || $least < 0 || !($most === null || (is_int($most) && $most >= $least))) {
+                throw new SchemaCompileError('a repeat is {:repeat type min max}: 0 <= min <= max, max nil for no bound');
+            }
+            $group = $inner instanceof DXNTuple && ($inner->items[0] ?? null) instanceof DXNKeyword && $inner->items[0]->name === 'group'
+                ? array_slice($inner->items, 1)
+                : [$inner];
+            return Particle::repeat(self::particles($group, $aliases), $least, $most);
+        }
+        if ($tag === 'group') {
+            throw new SchemaCompileError('a group stands only in a repeat, {:repeat {:group a b ...} min max}');
+        }
+        return Particle::one(self::compileTypeExpr($value, $aliases));
+    }
+
+    private const REFINE_KEYS = [
+        'min', 'max', 'exclusive-min', 'exclusive-max', 'multiple-of', 'min-length', 'max-length',
+        'pattern', 'min-count', 'max-count', 'finite', 'offsets', 'version', 'prefix', 'contains',
+        'min-contains', 'max-contains', 'unique', 'unique-by',
+    ];
+
+    /**
+     * A refine's constraints by name, every key one DXN.md §4.2 knows: a
+     * misspelt key would otherwise refuse every value, silently.
+     * `contains` holds a type, compiled here; `unique-by` a field's name.
+     *
+     * @param array<int|string, mixed>|DXNMap $constraints
+     * @param array<string, TypeExpr> $aliases
+     * @return array<string, mixed>
+     */
+    private static function refineConstraints(array|DXNMap $constraints, array $aliases): array
+    {
+        $pairs = $constraints instanceof DXNMap
+            ? $constraints->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($constraints), array_values($constraints));
+        $named = [];
+        foreach ($pairs as [$key, $value]) {
+            $name = self::literalName($key) ?? throw new SchemaCompileError('a refine constraint is named by a keyword (DXN.md §4.2)');
+            $named[$name] = $value;
+        }
+        $keys = array_keys($named);
+        sort($keys, SORT_STRING);
+        foreach ($keys as $key) {
+            if (!in_array($key, self::REFINE_KEYS, true)) {
+                throw new SchemaCompileError("{$key} is no refine constraint (DXN.md §4.2)");
+            }
+        }
+        if (!array_key_exists('contains', $named) && (array_key_exists('min-contains', $named) || array_key_exists('max-contains', $named))) {
+            throw new SchemaCompileError('min-contains and max-contains count the items a contains matches');
+        }
+        if (array_key_exists('contains', $named)) {
+            $named['contains'] = self::compileTypeExpr($named['contains'], $aliases);
+        }
+        if (array_key_exists('unique-by', $named)) {
+            $named['unique-by'] = self::literalName($named['unique-by'])
+                ?? throw new SchemaCompileError('unique-by names a field: a keyword, symbol or string');
+        }
+        return $named;
+    }
+
+    /** The name a keyword, symbol or string gives, or `null`. */
+    private static function literalName(mixed $value): ?string
+    {
+        return match (true) {
+            $value instanceof DXNKeyword, $value instanceof DXNSymbol => $value->name,
+            is_string($value) => $value,
+            default => null,
+        };
     }
 
     // ---- helpers ----------------------------------------------------------------
