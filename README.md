@@ -1,5 +1,11 @@
 # php-dextrin
 
+> [!WARNING]
+> **Under heavy development: not for production use before `1.0.0`.**
+> Things can and will break, and the specification can and will change,
+> between any two releases until `1.0.0`. Do not use this library in a
+> production system yet.
+
 [![CI](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml)
 [![Packagist](https://img.shields.io/packagist/v/joetjen/dextrin.svg)](https://packagist.org/packages/joetjen/dextrin)
 [![Docs](https://img.shields.io/badge/docs-phpDocumentor-blue.svg)](https://joetjen.github.io/php-dextrin/)
