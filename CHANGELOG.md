@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bin/dextrin docs` and `Schema\Docs`** (as dextrin 808d580, Jan
+  2026-10-20): HTML documentation for a directory of `.dxns` schemas,
+  written byte for byte as the reference writes it -- a sidebar tree of
+  every namespace and definition, a section per namespace, the pages a
+  directory tree with an `index.html` per namespace, every reference a
+  link, every version shown, light or dark kept in localStorage.
+  `example/` holds the shared Acme schemas and their generated `doc/`; a
+  test checks the generated site against it.
 - **New type forms** (DXN.md §4.1, as dextrin 47d6d1d): `{:not t}`,
   `:never` (JSON Schema's `false`), and element types for the
   collections that had none: `{:array-of t}`, `{:ordered-map-of k v}`,
@@ -76,6 +84,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A document with a character of more than one byte garbled when it
+  was formatted or edited.** The lexer counts offsets in code points and
+  `Document` slices its source in bytes, so every offset after a `→` or
+  an `ä` was off: `Document::parse` now holds its tokens' offsets in
+  bytes.
 - **A map key that is not allowed, and a schema violation, say where
   they are** when decoding text: `key/not-allowed` at the key, a schema
   error at its struct's `%` (the innermost one), as the reference places

@@ -78,10 +78,37 @@ final class Document
         try {
             $read = $registry !== null && $strict !== null ? $registry->putStrict($strict) : $registry;
             [$value, $tree, $tokens] = Parser::parseTree($source, $read);
-            return new self($source, $tree, $tokens, $value, $registry, $strict);
+            return new self($source, $tree, self::inBytes($source, $tokens), $value, $registry, $strict);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'parse');
         }
+    }
+
+    /**
+     * `$tokens` with their offsets in bytes. The lexer counts code points,
+     * and everything here slices the source in bytes -- `substr`, `strpos`,
+     * `preg` offsets -- so a character of more than one byte before an
+     * entry put every offset after it off, and formatting or editing such
+     * a document garbled it.
+     *
+     * @param list<Token> $tokens
+     * @return list<Token>
+     */
+    private static function inBytes(string $source, array $tokens): array
+    {
+        if (strlen($source) === mb_strlen($source, 'UTF-8')) {
+            return $tokens;
+        }
+        $bytes = [0];
+        $at = 0;
+        foreach (preg_split('//u', $source, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+            $at += strlen($char);
+            $bytes[] = $at;
+        }
+        return array_map(
+            static fn (Token $t): Token => new Token($t->type, $t->value, $bytes[$t->start], $bytes[$t->end], $t->isQuoted),
+            $tokens,
+        );
     }
 
     /** The value this document holds: what {@see Dextrin::decode()} gives for its source. */

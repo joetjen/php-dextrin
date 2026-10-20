@@ -49,6 +49,7 @@ const USAGE = <<<'USAGE'
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
       compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+      docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
@@ -65,9 +66,28 @@ function main(array $argv): int
         'format' => run(static fn () => cmdFormat($rest)),
         'validate' => run(static fn () => cmdValidate($rest)),
         'compat' => run(static fn () => cmdCompat($rest)),
+        'docs' => run(static fn () => cmdDocs($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
+}
+
+/**
+ * `dextrin docs SCHEMAS [--out DIR] [--title TITLE]`: every `.dxns` file
+ * under `SCHEMAS` as HTML documentation in `DIR` (`doc/schemas` when not
+ * given), as `mix dextrin.docs` writes it.
+ *
+ * @param list<string> $argv
+ */
+function cmdDocs(array $argv): void
+{
+    ['positional' => $positional, 'options' => $options] = parseArgs($argv, optionNames: ['out', 'title']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin docs SCHEMAS [--out DIR] [--title TITLE]');
+    }
+    $out = $options['out'] ?? 'doc/schemas';
+    $written = \JOetjen\Dextrin\Schema\Docs::write($positional[0], $out, $options['title'] ?? null);
+    fwrite(STDOUT, 'wrote ' . count($written) . " files to {$out}\n");
 }
 
 /**

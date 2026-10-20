@@ -174,6 +174,16 @@ final class DocumentTest extends TestCase
     // the pretty printer writes it -- unless it holds a comment or a blank
     // line, which keep it over lines.
 
+    // The lexer counts in code points and a document slices its source in
+    // bytes: a character of more than one byte before an entry garbled
+    // every offset after it.
+    public function testADocumentWithMultiByteCharactersFormatsAndEditsAsAnyOther(): void
+    {
+        $doc = Document::parse("# a→b\n%{x: 1, ä: \"ö\"}");
+        self::assertSame("# a→b\n%{\n  x: 1\n  ä: \"ö\"\n}", $doc->format());
+        self::assertSame("# a→b\n%{x: 2, ä: \"ö\"}", $doc->replace([new \JOetjen\Dextrin\Value\DXNKeyword('x')], 2)->render());
+    }
+
     public function testFormatWritesANestedCollectionThatFitsOnOneLine(): void
     {
         self::assertSame(
