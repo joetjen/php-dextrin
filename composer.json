@@ -1,6 +1,6 @@
 {
   "name": "joetjen/dextrin",
-  "description": "DXN (Data eXchange Notation) for PHP -- .dxn text, .dxnb binary, and .dxns schema documents.",
+  "description": "Under heavy development: not for production use before 1.0.0. DXN (Data eXchange Notation) for PHP -- .dxn text, .dxnb binary, and .dxns schema documents.",
   "keywords": ["dxn", "dextrin", "serialization", "cbor", "codec"],
   "type": "library",
   "homepage": "http://github.com/joetjen/php-dextrin",
