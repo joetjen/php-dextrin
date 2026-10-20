@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
@@ -61,25 +63,50 @@ final class Compiler
      * `schema/duplicate-version` for a version the registry has loaded
      * already (DXN.md §4.8).
      *
-     * Named types defined in *this* document may reference any type
-     * already known to `$baseRegistry` (from an earlier `compile()`
-     * call), but not one declared alongside them in the same document
-     * -- `.dxns`'s own `map` type has no ordering guarantee to resolve
-     * forward references against. A schema's *fields*, compiled
-     * afterwards, can freely use any named type from either source.
+     * Every named type in a document sees every other, in any order, and
+     * may reach itself through a guard -- a field, or a collection's
+     * elements (DXN.md §4.5, Jan, 2026-10-20). `$names` maps an entry's
+     * key to the name it is registered under -- a tree's full names
+     * (DXN.md §4.6, {@see Layout}); a bare symbol naming a sibling
+     * resolves to it.
+     *
+     * @param array<string, string> $names
      */
-    public static function compile(mixed $schemaDoc, Registry $baseRegistry): Registry
+    public static function compile(mixed $schemaDoc, Registry $baseRegistry, array $names = []): Registry
     {
         if (!is_array($schemaDoc)) {
             throw new SchemaCompileError('expected a .dxns document (a map), got ' . self::describe($schemaDoc));
         }
+        $outer = self::$names;
+        self::$names = $names;
+        try {
+            return self::compileDocument($schemaDoc, $baseRegistry, $names);
+        } finally {
+            self::$names = $outer;
+        }
+    }
+
+    /**
+     * The names of the document being compiled (see {@see self::compile()}):
+     * set for one compile, which PHP runs one at a time.
+     *
+     * @var array<string, string>
+     */
+    private static array $names = [];
+
+    /**
+     * @param array<int|string, mixed> $schemaDoc
+     * @param array<string, string> $names
+     */
+    private static function compileDocument(array $schemaDoc, Registry $baseRegistry, array $names): Registry
+    {
 
         /** @var list<array{0: string, 1: DXNStruct}> $schemaEntries */
         $schemaEntries = [];
         /** @var list<array{0: string, 1: mixed}> $aliasEntries */
         $aliasEntries = [];
         foreach ($schemaDoc as $key => $value) {
-            $name = (string) $key;
+            $name = $names[(string) $key] ?? (string) $key;
             if ($value instanceof DXNStruct && $value->name === 'schema') {
                 $schemaEntries[] = [$name, $value];
             } else {
@@ -99,25 +126,247 @@ final class Compiler
         return $registry;
     }
 
-    /** @param list<array{0: string, 1: mixed}> $aliasEntries */
+    /**
+     * Every named type in a document sees every other (design/
+     * shapes-and-case.md): each is compiled with its siblings standing as
+     * `named`, and those are put in place once all are read -- so the
+     * order of a map's entries, which DXN does not give, never matters.
+     *
+     * @param list<array{0: string, 1: mixed}> $aliasEntries
+     */
     private static function compileAliases(array $aliasEntries, Registry $registry): Registry
     {
-        // `$baseAliases` is a frozen snapshot, not the accumulating
-        // registry -- every alias in *this* document resolves
-        // references against only what `$registry` already knew
-        // coming in, never against a sibling compiled earlier in this
-        // same loop (see this class's own doc for why).
-        $baseAliases = $registry->typeAliases();
-        $result = $registry;
+        $scope = $registry->typeAliases();
+        foreach ($aliasEntries as [$name]) {
+            $scope[$name] = TypeExpr::named($name);
+        }
+        $compiled = [];
         foreach ($aliasEntries as [$name, $rawValue]) {
             try {
-                $typeExpr = self::compileTypeExpr($rawValue, $baseAliases);
+                $compiled[$name] = self::compileNamed($name, $rawValue, $scope);
+            } catch (SchemaCompileError $err) {
+                throw new SchemaCompileError("named type \"{$name}\": {$err->getMessage()}");
+            }
+        }
+        self::guarded($compiled);
+        $known = array_merge($registry->typeAliases(), $compiled);
+        $result = $registry;
+        foreach ($aliasEntries as [$name]) {
+            try {
+                $own = $compiled[$name];
+                $typeExpr = $own->form === 'generic'
+                    ? $own->with(['base' => self::resolved($own->base ?? TypeExpr::any(), $known, [$name])])
+                    : self::resolved($own, $known, [$name]);
             } catch (SchemaCompileError $err) {
                 throw new SchemaCompileError("named type \"{$name}\": {$err->getMessage()}");
             }
             $result = $result->putTypeAlias($name, $typeExpr);
         }
         return $result;
+    }
+
+    /**
+     * A named type's definition: a generic's parameters and body, a shape
+     * carrying its own name, or a type.
+     *
+     * @param array<string, TypeExpr> $scope
+     */
+    private static function compileNamed(string $name, mixed $raw, array $scope): TypeExpr
+    {
+        if ($raw instanceof DXNTuple && ($raw->items[0] ?? null) instanceof DXNKeyword && $raw->items[0]->name === 'generic') {
+            $params = $raw->items[1] ?? null;
+            $list = $params instanceof DXNList ? $params->items : (is_array($params) ? $params : null);
+            if (count($raw->items) !== 3 || $list === null || $list === []) {
+                throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
+            }
+            $names = [];
+            foreach ($list as $p) {
+                if (!$p instanceof DXNSymbol) {
+                    throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
+                }
+                $names[] = $p->name;
+            }
+            if (count(array_unique($names)) !== count($names)) {
+                throw new SchemaCompileError('a generic names a parameter twice');
+            }
+            $body = $raw->items[2];
+            if ($body instanceof DXNStruct && $body->name === 'schema') {
+                throw new SchemaCompileError(
+                    'a struct schema cannot be generic: a struct goes on the wire under its one name; '
+                    . 'make the generic a %shape, or give each use a schema of its own'
+                );
+            }
+            foreach ($names as $n) {
+                $scope[$n] = TypeExpr::param($n);
+            }
+            return TypeExpr::generic($names, self::compileNamed($name, $body, $scope));
+        }
+        $type = self::compileTypeExpr($raw, $scope);
+        return $type->form === 'shape' && $type->name === null ? $type->with(['name' => $name]) : $type;
+    }
+
+    /**
+     * `$type` with every `named` replaced by that named type; a reference
+     * back to a type being resolved closes a cycle, which {@see
+     * self::guarded()} has passed, and stays a reference by name.
+     *
+     * @param array<string, TypeExpr> $known
+     * @param list<string> $path
+     */
+    private static function resolved(TypeExpr $type, array $known, array $path): TypeExpr
+    {
+        $one = static fn (?TypeExpr $t): ?TypeExpr => $t === null ? null : self::resolved($t, $known, $path);
+        $many = static fn (?array $ts): ?array => $ts === null ? null : array_map(static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path), $ts);
+        switch ($type->form) {
+            case 'named':
+                $name = $type->name ?? '';
+                if (in_array($name, $path, true)) {
+                    return $type;
+                }
+                $target = $known[$name];
+                if ($target->form === 'generic') {
+                    throw new SchemaCompileError(self::takesArguments($name, $target));
+                }
+                return self::resolved($target, $known, [$name, ...$path]);
+            case 'apply':
+                self::applies($type->name ?? '', count($type->elems ?? []), $known);
+                return $type->with(['elems' => $many($type->elems)]);
+            case 'generic':
+                throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
+            case 'shape':
+                return $type->with(['fields' => array_map(
+                    static fn (Field $f): Field => new Field($f->name, $f->required, self::resolved($f->type, $known, $path), $f->default, $f->description),
+                    $type->fields ?? [],
+                )]);
+            case 'case':
+                return $type->with([
+                    'branches' => array_map(static fn (array $b): array => [$b[0], self::resolved($b[1], $known, $path)], $type->branches ?? []),
+                    'otherwise' => $one($type->otherwise),
+                ]);
+            case 'refine':
+                return $type->with(['base' => $one($type->base)]);
+            case 'tuple-of':
+                return $type->with(['elems' => $many($type->elems)]);
+            case 'one-of':
+            case 'any-of':
+            case 'all-of':
+                return $type->with(['variants' => $many($type->variants)]);
+            case 'list-of':
+            case 'set-of':
+            case 'array-of':
+            case 'sorted-set-of':
+            case 'not':
+            case 'nilable':
+                return $type->with(['elem' => $one($type->elem)]);
+            case 'map-of':
+            case 'ordered-map-of':
+                return $type->with(['key' => $one($type->key), 'value' => $one($type->value)]);
+            default:
+                return $type;
+        }
+    }
+
+    /**
+     * Every cycle among `$compiled`'s named types passes a guard: a field
+     * of a shape, or a collection's elements, so that each step of a
+     * check reads a smaller part of the value. A cycle with none --
+     * `A: {:nilable A}` -- describes no value and would never finish.
+     *
+     * @param array<string, TypeExpr> $compiled
+     */
+    private static function guarded(array $compiled): void
+    {
+        $edges = array_map(static fn (TypeExpr $t): array => self::unguardedNames($t), $compiled);
+        $starts = array_keys($edges);
+        sort($starts);
+        foreach ($starts as $start) {
+            $cycle = self::unguardedCycle((string) $start, $edges, []);
+            if ($cycle !== null) {
+                throw new SchemaCompileError(
+                    "named type \"{$cycle[0]}\": reaches itself with no field or collection between ("
+                    . implode(' -> ', $cycle) . '); it describes no value'
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<string, list<string>> $edges
+     * @param list<string> $path
+     * @return list<string>|null
+     */
+    private static function unguardedCycle(string $name, array $edges, array $path): ?array
+    {
+        if ($path !== [] && $name === $path[0]) {
+            return [...$path, $name];
+        }
+        if (in_array($name, $path, true)) {
+            return null;
+        }
+        foreach ($edges[$name] ?? [] as $next) {
+            $found = self::unguardedCycle($next, $edges, [...$path, $name]);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The named types `$type` refers to without a guard on the way.
+     *
+     * @return list<string>
+     */
+    private static function unguardedNames(TypeExpr $type): array
+    {
+        $all = static fn (array $ts): array => array_merge([], ...array_map(static fn (TypeExpr $t): array => self::unguardedNames($t), $ts));
+        return match ($type->form) {
+            'named' => [$type->name ?? ''],
+            'apply' => [$type->name ?? '', ...$all($type->elems ?? [])],
+            'generic' => self::unguardedNames($type->base ?? TypeExpr::any()),
+            'one-of', 'any-of', 'all-of' => $all($type->variants ?? []),
+            'not', 'nilable' => self::unguardedNames($type->elem ?? TypeExpr::any()),
+            'refine' => self::unguardedNames($type->base ?? TypeExpr::any()),
+            'case' => $all([...($type->otherwise ? [$type->otherwise] : []), ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
+            default => [],
+        };
+    }
+
+    /**
+     * Whether `$name` is a generic taking `$count` arguments.
+     *
+     * @param array<string, TypeExpr> $known
+     */
+    private static function applies(string $name, int $count, array $known): void
+    {
+        $target = $known[$name] ?? null;
+        if ($target !== null && $target->form === 'named') {
+            return;
+        }
+        if ($target === null || $target->form !== 'generic') {
+            throw new SchemaCompileError("{:of {$name} ...} names no generic");
+        }
+        $want = count($target->params ?? []);
+        if ($want !== $count) {
+            throw new SchemaCompileError("{$name} takes {$want} type argument(s), {:of {$name} ...} gives {$count}");
+        }
+    }
+
+    private static function takesArguments(string $name, TypeExpr $generic): string
+    {
+        return "{$name} is generic: write {:of {$name} " . implode(' ', $generic->params ?? []) . '}, with a type for each';
+    }
+
+    /**
+     * The name a written symbol stands for: itself where it is in scope
+     * already (a generic's parameter, a name known so), otherwise the full
+     * name this document's names give it.
+     *
+     * @param array<string, TypeExpr> $aliases
+     */
+    private static function fullName(string $written, array $aliases): string
+    {
+        return isset($aliases[$written]) ? $written : (self::$names[$written] ?? $written);
     }
 
     /**
@@ -172,7 +421,51 @@ final class Compiler
             $seen[$field->name] = true;
             $fields[] = $field;
         }
+        self::casesNameFields($entry->pairs(), $fields);
         return new Compiled(fields: $fields, version: $entry->version ?? 1);
+    }
+
+    /**
+     * Every `{:case field ...}` written in `$pairs`' field types names one
+     * of `$fields` -- told from the source, so a named type the case
+     * reaches through is not looked into.
+     *
+     * @param iterable<array{0: string, 1: mixed}> $pairs
+     * @param list<Field> $fields
+     */
+    private static function casesNameFields(iterable $pairs, array $fields): void
+    {
+        $names = array_map(static fn (Field $f): string => $f->name, $fields);
+        foreach ($pairs as [, $value]) {
+            foreach (self::caseFields($value) as $field) {
+                if (!in_array($field, $names, true)) {
+                    throw new SchemaCompileError("{:case {$field} ...} names no field of its schema or shape");
+                }
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private static function caseFields(mixed $value): array
+    {
+        if ($value instanceof DXNTuple) {
+            $head = $value->items[0] ?? null;
+            $second = $value->items[1] ?? null;
+            if ($head instanceof DXNKeyword && $head->name === 'case' && $second instanceof DXNSymbol) {
+                return [$second->name, ...array_merge([], ...array_map(self::caseFields(...), array_slice($value->items, 2)))];
+            }
+            return array_merge([], ...array_map(self::caseFields(...), $value->items));
+        }
+        if ($value instanceof DXNStruct && $value->name === 'shape') {
+            return [];
+        }
+        if ($value instanceof DXNStruct && $value->name === 'field' && $value->isKeyed()) {
+            return self::caseFields(self::getField($value->pairs(), 'type'));
+        }
+        if (is_array($value)) {
+            return array_merge([], ...array_map(self::caseFields(...), array_values($value)));
+        }
+        return [];
     }
 
     /**
@@ -226,10 +519,40 @@ final class Compiler
         }
 
         if ($value instanceof DXNSymbol) {
-            if (isset($aliases[$value->name])) {
-                return $aliases[$value->name];
+            $name = self::fullName($value->name, $aliases);
+            $known = $aliases[$name] ?? null;
+            if ($known !== null && $known->form === 'generic') {
+                throw new SchemaCompileError(self::takesArguments($name, $known));
             }
-            return TypeExpr::reference($value->name);
+            return $known ?? TypeExpr::reference($name);
+        }
+
+        // `%shape{field: type, ...}` (design/shapes-and-case.md): a plain
+        // map's fields, as a schema's are written; no version, never
+        // positional.
+        if ($value instanceof DXNStruct && $value->name === 'shape') {
+            if (!$value->isKeyed()) {
+                throw new SchemaCompileError('a shape lists its fields by name: %shape{field: type, ...}');
+            }
+            if ($value->version !== null) {
+                throw new SchemaCompileError('a shape has no version: %shape{field: type, ...}');
+            }
+            $fields = [];
+            $seen = [];
+            foreach ($value->pairs() as [$key, $v]) {
+                try {
+                    $field = self::compileField($key, $v, $aliases);
+                } catch (SchemaCompileError $err) {
+                    throw new SchemaCompileError("field \"{$key}\": {$err->getMessage()}");
+                }
+                if (isset($seen[$field->name])) {
+                    throw new SchemaCompileError("field \"{$field->name}\" is named twice");
+                }
+                $seen[$field->name] = true;
+                $fields[] = $field;
+            }
+            self::casesNameFields($value->pairs(), $fields);
+            return TypeExpr::shape(null, $fields);
         }
 
         if ($value instanceof DXNTuple) {
@@ -288,6 +611,41 @@ final class Compiler
             }
             if ($tag === 'nilable' && count($rest) === 1) {
                 return TypeExpr::nilable(self::compileTypeExpr($rest[0], $aliases));
+            }
+            // `{:case field %{value => type, ..., :else => type}}`: the type
+            // the sibling `field`'s value chooses.
+            if ($tag === 'case') {
+                if (count($rest) !== 2 || !$rest[0] instanceof DXNSymbol || !(is_array($rest[1]) || $rest[1] instanceof DXNMap)) {
+                    throw new SchemaCompileError('a case is {:case field %{value => type, ..., :else => type}}');
+                }
+                $pairs = $rest[1] instanceof DXNMap
+                    ? $rest[1]->pairs()
+                    : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($rest[1]), array_values($rest[1]));
+                $otherwise = null;
+                $branches = [];
+                foreach ($pairs as [$k, $v]) {
+                    if ($k instanceof DXNKeyword && $k->name === 'else') {
+                        $otherwise = self::compileTypeExpr($v, $aliases);
+                    } else {
+                        $branches[] = [$k, self::compileTypeExpr($v, $aliases)];
+                    }
+                }
+                return TypeExpr::case($rest[0]->name, $branches, $otherwise);
+            }
+            // `{:of Name type ...}`: one use of the generic `Name`.
+            if ($tag === 'of') {
+                if (!(($rest[0] ?? null) instanceof DXNSymbol) || count($rest) < 2) {
+                    throw new SchemaCompileError('a use of a generic is {:of Name type ...}');
+                }
+                $name = self::fullName($rest[0]->name, $aliases);
+                self::applies($name, count($rest) - 1, $aliases);
+                return TypeExpr::apply($name, array_map(
+                    static fn (mixed $v): TypeExpr => self::compileTypeExpr($v, $aliases),
+                    array_slice($rest, 1),
+                ));
+            }
+            if ($tag === 'generic') {
+                throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
             }
             if ($tag === 'refine' && count($rest) === 2 && is_array($rest[1])) {
                 /** @var array<string, mixed> $constraints */

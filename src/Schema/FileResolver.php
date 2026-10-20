@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Text\Parser;
 
@@ -69,7 +71,7 @@ final class FileResolver
         [$entry, $candidates] = self::candidates($dir, $name);
         $found = [];
         foreach ($candidates as [$file, $expected]) {
-            foreach (self::load($file, $entry, $expected) as $one) {
+            foreach (self::load($file, $entry, $expected, $dir, $name) as $one) {
                 $found[] = $one;
             }
         }
@@ -166,9 +168,14 @@ final class FileResolver
      * or holds no such entry. A file that does not compile, or holds
      * another version than its name says, is refused.
      *
+     * The file is compiled as a tree compiles it ({@see Tree}): its entries
+     * under their full names (DXN.md §4.6), over the named types the rest
+     * of its search path `$dir` defines -- so a field naming another
+     * file's shape or named type resolves.
+     *
      * @return list<array{0: int, 1: Compiled, 2: string}>
      */
-    private static function load(string $file, string $entry, ?int $expected): array
+    private static function load(string $file, string $entry, ?int $expected, string $dir, string $name): array
     {
         if (!is_file($file)) {
             return [];
@@ -178,11 +185,18 @@ final class FileResolver
             return [];
         }
         try {
-            $registry = Compiler::compile(Parser::parse($source), new Registry());
+            $doc = Parser::parse($source);
+            $base = new Registry();
+            foreach (Tree::namedTypes([$dir]) as $typeName => $type) {
+                $base = $base->putTypeAlias($typeName, $type);
+            }
+            $relative = ltrim(substr(self::normalized($file), strlen(rtrim(self::normalized($dir), '/'))), '/');
+            $keys = is_array($doc) ? array_map(static fn (int|string $k): string => self::keyName(MapBuilder::toDxnMapKey($k)), array_keys($doc)) : [];
+            $registry = Compiler::compile($doc, $base, Layout::of($relative, $keys)->names);
         } catch (\Throwable $err) {
             throw new SchemaCompileError("{$file}: {$err->getMessage()}");
         }
-        $versions = $registry->structSchemas()[$entry] ?? [];
+        $versions = $registry->structSchemas()[$name] ?? $registry->structSchemas()[$entry] ?? [];
         if ($versions === []) {
             return [];
         }
@@ -197,5 +211,13 @@ final class FileResolver
             $found[] = [$version, $compiled, $file];
         }
         return $found;
+    }
+
+    private static function keyName(mixed $key): string
+    {
+        return match (true) {
+            $key instanceof DXNKeyword => $key->name,
+            default => is_scalar($key) ? (string) $key : '',
+        };
     }
 }

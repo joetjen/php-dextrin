@@ -288,11 +288,6 @@ final class Docs
         return $merged;
     }
 
-    private static function join(string $namespace, string $name): string
-    {
-        return $namespace === '' ? $name : "{$namespace}/{$name}";
-    }
-
     public static function namespaceOf(string $name): string
     {
         $slash = strpos($name, '/');
@@ -305,21 +300,13 @@ final class Docs
      */
     private static function definitionsOf(array $file): array
     {
-        $stem = $file['stem'];
-        $own = $stem[count($stem) - 1];
-        $holder = null;
-        foreach ($file['entries'] as $entry) {
-            if ($entry['key'] === $own) {
-                $holder = $entry;
-                break;
-            }
-        }
-        $namespace = implode('.', array_slice($stem, 0, -1));
-        $owner = $holder === null ? null : self::join($namespace, $own);
-        $names = [];
-        foreach ($file['entries'] as $entry) {
-            $names[$entry['key']] = $entry['key'] === $own ? (string) $owner : self::join(implode('.', $stem), $entry['key']);
-        }
+        // The names every reader of a tree gives them ({@see Layout},
+        // DXN.md §4.6).
+        $layout = Layout::of($file['file'], array_map(static fn (array $e): string => $e['key'], $file['entries']));
+        $names = $layout->names;
+        $own = $layout->holder;
+        $holder = $own;
+        $owner = $own === null ? null : $names[$own];
         $out = [];
         foreach ($file['entries'] as $entry) {
             $name = $names[$entry['key']];
