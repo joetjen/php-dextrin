@@ -7,6 +7,7 @@ namespace JOetjen\Dextrin\Schema;
 use JOetjen\Dextrin\Canonical;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Binary\FloatWidth;
 use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
@@ -35,6 +36,7 @@ use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
 use JOetjen\Dextrin\Value\Equality;
+use JOetjen\Dextrin\Value\Nanos;
 
 /**
  * Internal, compiled representation of a `.dxns` type expression -- the
@@ -432,7 +434,7 @@ final class TypeExpr
                 return $value === null ? null : ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance);
             case 'refine':
                 $c = $this->base?->conform($value, $ctx) ?? NoMatch::Instance;
-                return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? [], $ctx) ? $c : NoMatch::Instance;
+                return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? [], $this->base, $ctx) ? $c : NoMatch::Instance;
             default:
                 return NoMatch::Instance;
         }
@@ -834,13 +836,42 @@ final class TypeExpr
 
     // ---- refine constraints ---------------------------------------------------
 
-    /** @param array<string, mixed> $constraints */
-    private static function satisfiesConstraints(mixed $value, array $constraints, Context $ctx): bool
+    /** A resolution's unit, in nanoseconds. */
+    private const RESOLUTIONS = [
+        'second' => 1_000_000_000,
+        'millisecond' => 1_000_000,
+        'microsecond' => 1_000,
+        'nanosecond' => 1,
+    ];
+
+    /**
+     * The units `resolution` takes, for {@see Compiler} to check.
+     *
+     * @internal
+     * @return list<string>
+     */
+    public static function resolutions(): array
+    {
+        return array_keys(self::RESOLUTIONS);
+    }
+
+    /**
+     * Every constraint holds. A constraint on a value it does not apply
+     * to -- a length on an integer, a range on a string -- refuses it
+     * (DXN.md §4.2, Jan, 2026-10-20). `$base` is the type refined, which
+     * says whether a length counts bytes or bits.
+     *
+     * @param array<string, mixed> $constraints
+     */
+    private static function satisfiesConstraints(mixed $value, array $constraints, ?self $base, Context $ctx): bool
     {
         foreach ($constraints as $key => $arg) {
-            $satisfied = $key === 'contains'
-                ? $arg instanceof self && self::contains($arg, $constraints, $value, $ctx)
-                : self::satisfiesConstraint($key, $arg, $value);
+            $satisfied = match ($key) {
+                'contains' => $arg instanceof self && self::contains($arg, $constraints, $value, $ctx),
+                'min-length' => self::within(self::lengthOf($value, $base), $arg, null),
+                'max-length' => self::within(self::lengthOf($value, $base), null, $arg),
+                default => self::satisfiesConstraint($key, $arg, $value),
+            };
             if (!$satisfied) {
                 return false;
             }
@@ -866,45 +897,95 @@ final class TypeExpr
                 $count++;
             }
         }
-        $most = $constraints['max-contains'] ?? null;
-        return $count >= self::toIntArg($constraints['min-contains'] ?? 1)
-            && ($most === null || $count <= self::toIntArg($most));
+        return self::within($count, $constraints['min-contains'] ?? 1, $constraints['max-contains'] ?? null);
+    }
+
+    /**
+     * Whether `$count` lies between `$least` and `$most`, either `null`
+     * for no bound; a `null` count, of a value that has none, never does,
+     * nor does a bound that is no number.
+     */
+    private static function within(?int $count, mixed $least, mixed $most): bool
+    {
+        if ($count === null) {
+            return false;
+        }
+        if ($least !== null && !(self::compareCount($count, $least) >= 0)) {
+            return false;
+        }
+        return $most === null || self::compareCount($count, $most) <= 0;
+    }
+
+    /**
+     * `$count` against a bound, -1, 0 or 1; `null` for a bound that is
+     * no number, which the caller's comparisons with -1, 0 and 1 refuse.
+     */
+    private static function compareCount(int $count, mixed $bound): ?int
+    {
+        return match (true) {
+            is_int($bound) => $count <=> $bound,
+            is_float($bound) && !is_nan($bound) => $count <=> $bound,
+            $bound instanceof DXNInteger => bccomp((string) $count, $bound->toString(), 0),
+            default => null,
+        };
     }
 
     /**
      * One refine key against `$value` (DXN.md §4.2). NaN lies outside
-     * every range, as every IEEE 754 comparison with it is false, which
-     * PHP's own float comparisons already answer; the infinities compare
-     * as the numbers they are (Jan, 2026-10-20).
+     * every range, as every IEEE 754 comparison with it is false; the
+     * infinities compare as the numbers they are (Jan, 2026-10-20).
+     * Dates, times and durations compare with their own kind.
      */
     private static function satisfiesConstraint(string $key, mixed $arg, mixed $value): bool
     {
         return match ($key) {
-            'min' => self::toComparableFloat($value) >= self::toComparableFloat($arg),
-            'max' => self::toComparableFloat($value) <= self::toComparableFloat($arg),
-            'exclusive-min' => self::toComparableFloat($value) > self::toComparableFloat($arg),
-            'exclusive-max' => self::toComparableFloat($value) < self::toComparableFloat($arg),
-            'multiple-of' => self::isMultipleOf(self::toComparableFloat($value), self::toComparableFloat($arg)),
-            'min-length' => is_string($value) && mb_strlen($value, 'UTF-8') >= self::toIntArg($arg),
-            'max-length' => is_string($value) && mb_strlen($value, 'UTF-8') <= self::toIntArg($arg),
-            'pattern' => is_string($value) && $arg instanceof DXNRegex && preg_match($arg->toPcrePattern(), $value) === 1,
-            'min-count' => self::countOf($value) >= self::toIntArg($arg),
-            'max-count' => self::countOf($value) <= self::toIntArg($arg),
+            'min' => in_array(self::compare($value, $arg), [1, 0], true),
+            'max' => in_array(self::compare($value, $arg), [-1, 0], true),
+            'exclusive-min' => self::compare($value, $arg) === 1,
+            'exclusive-max' => self::compare($value, $arg) === -1,
+            // `finite: true` refuses NaN and both infinities; either asks for a number.
+            'finite' => match ($arg) {
+                true => self::isNumber($value) && (!is_float($value) || is_finite($value)),
+                false => self::isNumber($value),
+                default => false,
+            },
+            // A float single precision holds exactly; NaN and the infinities it holds.
+            'float32' => $arg === true && is_float($value) && is_finite($value)
+                ? FloatWidth::single($value)
+                : is_float($value),
+            // An ip's version, 4 or 6, and whether it is a prefix.
+            'version' => $value instanceof DXNIp && $value->version() === $arg,
+            'prefix' => $value instanceof DXNIp && ($value->prefix !== null) === $arg,
+            'offsets' => self::hasOffsetIn($value, $arg),
+            'multiple-of' => self::isMultipleOf($value, $arg),
+            'min-bytes' => self::within(self::utf8Size($value), $arg, null),
+            'max-bytes' => self::within(self::utf8Size($value), null, $arg),
+            'pattern' => self::matchesPattern($value, $arg),
+            'min-count' => self::within(self::countOf($value), $arg, null),
+            'max-count' => self::within(self::countOf($value), null, $arg),
             // Counted with `contains`, which reads them.
             'min-contains', 'max-contains' => true,
             'unique' => match ($arg) {
-                false => true,
+                false => self::itemsOf($value) !== null,
                 true => self::distinct(self::itemsOf($value), static fn (mixed $item): array => [self::identity($item)]),
                 default => false,
             },
             // Items without the field are compared with none.
             'unique-by' => is_string($arg) && self::distinct(self::itemsOf($value), static fn (mixed $item): array => self::fieldIdentity($item, $arg)),
-            // `finite: true` refuses NaN and both infinities.
-            'finite' => $arg !== true || !is_float($value) || is_finite($value),
-            'offsets' => self::hasOffsetIn($value, $arg),
-            // An ip's version, 4 or 6, and whether it is a prefix.
-            'version' => $value instanceof DXNIp && $value->version() === $arg,
-            'prefix' => $value instanceof DXNIp && ($value->prefix !== null) === $arg,
+            // A decimal's precision is its coefficient's digit count, as
+            // written (`1.50M` has three); its exponent the power of ten
+            // that scales them.
+            'min-precision' => self::within(self::precision($value), $arg, null),
+            'max-precision' => self::within(self::precision($value), null, $arg),
+            'min-exponent' => self::within(self::exponent($value), $arg, null),
+            'max-exponent' => self::within(self::exponent($value), null, $arg),
+            'bits' => self::onlyBits($value, $arg),
+            // Against the time of the check.
+            'before-now' => self::fromNow($value, $arg, static fn (string $d): bool => bccomp(self::numeric($d), '0', 0) < 0),
+            'after-now' => self::fromNow($value, $arg, static fn (string $d): bool => bccomp(self::numeric($d), '0', 0) > 0),
+            'within' => self::withinOfNow($value, $arg),
+            // No part of the value is finer than the unit.
+            'resolution' => self::hasResolution($value, $arg),
             default => false,
         };
     }
@@ -920,16 +1001,240 @@ final class TypeExpr
         return is_array($names) && in_array(Temporal::offsetName($datetime->offsetMinutes), $names, true);
     }
 
-    private static function countOf(mixed $value): int
+    /** Whether `$value` is a number, NaN and the infinities included. */
+    private static function isNumber(mixed $value): bool
+    {
+        return (self::ordinal($value)[0] ?? null) === 'number';
+    }
+
+    /**
+     * Whether the number `$value` is an exact multiple of `$n`: two
+     * integers by their remainder, anything else by the floats' (which a
+     * zero, NaN or an infinity never is).
+     */
+    private static function isMultipleOf(mixed $value, mixed $n): bool
+    {
+        $v = self::ordinal($value);
+        $by = self::ordinal($n);
+        if ($v === null || $by === null || $v[0] !== 'number' || $by[0] !== 'number') {
+            return false;
+        }
+        [, $a] = $v;
+        [, $b] = $by;
+        if (is_float($a) && !is_finite($a)) {
+            return false;
+        }
+        if (!is_float($a) && !is_float($b)) {
+            return bccomp(self::numeric($b), '0', 0) !== 0 && bccomp(bcmod(self::numeric($a), self::numeric($b), 0), '0', 0) === 0;
+        }
+        return fmod((float) $a, (float) $b) === 0.0;
+    }
+
+    /**
+     * A string's, keyword's or symbol's length in codepoints; a byte
+     * string's in bytes, in bits under `:bits`; `null` for anything else.
+     */
+    private static function lengthOf(mixed $value, ?self $base): ?int
+    {
+        $bits = $base !== null && $base->form === 'primitive' && $base->name === 'bits';
+        return match (true) {
+            is_string($value) => mb_strlen($value, 'UTF-8'),
+            $value instanceof DXNKeyword, $value instanceof DXNSymbol => mb_strlen($value->name, 'UTF-8'),
+            $value instanceof DXNBytes => $bits ? strlen($value->data) * 8 : strlen($value->data),
+            $value instanceof DXNBits => $bits ? $value->bitLength : intdiv($value->bitLength + 7, 8),
+            default => null,
+        };
+    }
+
+    /** A string's, keyword's or symbol's UTF-8 byte count; `null` for anything else. */
+    private static function utf8Size(mixed $value): ?int
     {
         return match (true) {
-            $value instanceof DXNList, $value instanceof DXNTuple => count($value->items),
-            $value instanceof DXNSet, $value instanceof DXNSortedSet => count($value->items),
-            is_array($value) && array_is_list($value) => count($value),
-            default => throw new \InvalidArgumentException(
-                'min-count/max-count requires a list/tuple/set/sorted-set/array value, got ' . Equality::kindOf($value),
-            ),
+            is_string($value) => strlen($value),
+            $value instanceof DXNKeyword, $value instanceof DXNSymbol => strlen($value->name),
+            default => null,
         };
+    }
+
+    /**
+     * Whether `$value` matches the regex `$re`: a name's text, or a byte
+     * string one character per byte -- its bytes as they are, or, for a
+     * pattern with the `u` flag, as the Latin-1 characters they are.
+     */
+    private static function matchesPattern(mixed $value, mixed $re): bool
+    {
+        if (!$re instanceof DXNRegex) {
+            return false;
+        }
+        $text = match (true) {
+            is_string($value) => $value,
+            $value instanceof DXNKeyword, $value instanceof DXNSymbol => $value->name,
+            $value instanceof DXNBytes => $re->flags['u'] ? mb_convert_encoding($value->data, 'UTF-8', 'ISO-8859-1') : $value->data,
+            default => null,
+        };
+        if ($text === null) {
+            return false;
+        }
+        try {
+            return preg_match($re->toPcrePattern(), $text) === 1;
+        } catch (\LogicException) {
+            // A flag PHP's PCRE has no modifier for.
+            return false;
+        }
+    }
+
+    /** A decimal's coefficient's digit count, as written; `null` for anything else. */
+    private static function precision(mixed $value): ?int
+    {
+        return $value instanceof DXNDecimal ? strlen($value->unscaledValue) : null;
+    }
+
+    /** A decimal's exponent; `null` for anything else. */
+    private static function exponent(mixed $value): ?int
+    {
+        return $value instanceof DXNDecimal ? $value->exponent : null;
+    }
+
+    /**
+     * Whether only the bits numbered in `$allowed` are set (RFC 8610's
+     * `.bits`): a non-negative integer's from its lowest, a byte
+     * string's from its first byte's lowest. Both are read as bytes,
+     * the integer's lowest first.
+     */
+    private static function onlyBits(mixed $value, mixed $allowed): bool
+    {
+        $numbers = $allowed instanceof DXNList ? $allowed->items : $allowed;
+        if (!is_array($numbers)) {
+            return false;
+        }
+        foreach ($numbers as $number) {
+            if (!is_int($number)) {
+                return false;
+            }
+        }
+        $bytes = self::bitBytes($value);
+        if ($bytes === null) {
+            return false;
+        }
+        foreach (str_split($bytes) as $i => $byte) {
+            if ((ord($byte) & ~self::mask($numbers, $i * 8)) !== 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The bytes `bits` reads: a byte string's own, a non-negative
+     * integer's lowest first; `null` for anything else.
+     */
+    private static function bitBytes(mixed $value): ?string
+    {
+        if ($value instanceof DXNBytes) {
+            return $value->data;
+        }
+        if (is_int($value) && $value >= 0) {
+            $bytes = '';
+            for ($n = $value; $n > 0; $n >>= 8) {
+                $bytes .= chr($n & 0xFF);
+            }
+            return $bytes;
+        }
+        if ($value instanceof DXNInteger && !str_starts_with($value->toString(), '-')) {
+            $bytes = '';
+            for ($n = $value->toString(); bccomp($n, '0', 0) > 0; $n = bcdiv($n, '256', 0)) {
+                $bytes .= chr((int) bcmod($n, '256', 0));
+            }
+            return $bytes;
+        }
+        return null;
+    }
+
+    /**
+     * The bits of `$allowed` that fall in the byte starting at bit
+     * `$from`, shifted down to it.
+     *
+     * @param array<mixed> $allowed integers, checked by the caller
+     */
+    private static function mask(array $allowed, int $from): int
+    {
+        $mask = 0;
+        foreach ($allowed as $bit) {
+            if (is_int($bit) && $bit >= $from && $bit < $from + 8) {
+                $mask |= 1 << ($bit - $from);
+            }
+        }
+        return $mask;
+    }
+
+    /**
+     * A datetime's distance from now, in nanoseconds, given to `$test`;
+     * `$wanted` false asks nothing, and anything but a boolean refuses.
+     *
+     * @param \Closure(string): bool $test
+     */
+    private static function fromNow(mixed $value, mixed $wanted, \Closure $test): bool
+    {
+        if ($wanted === false) {
+            return true;
+        }
+        $at = self::ordinal($value);
+        if ($wanted !== true || $at === null || $at[0] !== 'datetime') {
+            return false;
+        }
+        return $test(bcsub(self::numeric($at[1]), self::nowNanos(), 0));
+    }
+
+    /** Whether a datetime is no further from now than the duration `$span`, either way. */
+    private static function withinOfNow(mixed $value, mixed $span): bool
+    {
+        $duration = self::ordinal($span);
+        if ($duration === null || $duration[0] !== 'duration') {
+            return false;
+        }
+        $most = self::numeric($duration[1]);
+        return self::fromNow($value, true, static fn (string $d): bool => bccomp(self::numeric(ltrim($d, '-')), $most, 0) <= 0);
+    }
+
+    /**
+     * The time of the check, as nanoseconds since 1970, a decimal string.
+     *
+     * @return numeric-string
+     */
+    private static function nowNanos(): string
+    {
+        $now = new \DateTimeImmutable('now');
+        return bcadd(bcmul((string) $now->getTimestamp(), (string) Nanos::PER_SECOND, 0), (string) ((int) $now->format('u') * 1000), 0);
+    }
+
+    /** Whether no part of a time, datetime, local date-time or duration is finer than `$unit`. */
+    private static function hasResolution(mixed $value, mixed $unit): bool
+    {
+        if (!is_string($unit) || !array_key_exists($unit, self::RESOLUTIONS)) {
+            return false;
+        }
+        $nanos = self::nanosOf($value);
+        return $nanos !== null && $nanos % self::RESOLUTIONS[$unit] === 0;
+    }
+
+    /**
+     * A time's, datetime's, local date-time's or duration's nanoseconds,
+     * the part a resolution looks at; `null` for anything else.
+     */
+    private static function nanosOf(mixed $value): ?int
+    {
+        if ($value instanceof DXNDuration) {
+            return $value->nanoseconds ?? 0;
+        }
+        $at = self::ordinal($value);
+        return $at !== null && in_array($at[0], ['time', 'datetime', 'local'], true) && is_int($at[1]) ? $at[1] : null;
+    }
+
+    /** A collection's item count, `null` for a value that is none. */
+    private static function countOf(mixed $value): ?int
+    {
+        $items = self::itemsOf($value);
+        return $items === null ? null : count($items);
     }
 
     /**
@@ -1037,33 +1342,100 @@ final class TypeExpr
         return [];
     }
 
-    private static function isMultipleOf(float $a, float $b): bool
+    /**
+     * -1, 0 or 1, or `null` for two values that do not compare: NaN with
+     * anything, or two values of different kinds.
+     */
+    private static function compare(mixed $a, mixed $b): ?int
     {
-        return fmod($a, $b) === 0.0;
+        $x = self::ordinal($a);
+        $y = self::ordinal($b);
+        if ($x === null || $y === null || $x[0] !== $y[0]) {
+            return null;
+        }
+        [, $p] = $x;
+        [, $q] = $y;
+        if (is_float($p) || is_float($q)) {
+            $p = (float) $p;
+            $q = (float) $q;
+            return is_nan($p) || is_nan($q) ? null : $p <=> $q;
+        }
+        return bccomp(self::numeric($p), self::numeric($q), 0);
     }
 
-    private static function toComparableFloat(mixed $value): float
+    /**
+     * A value as its kind and its place in that kind's order: a number
+     * (an integer exactly, as an int or a big one's digits; anything else
+     * as a float, NaN and the infinities included), or a date, time,
+     * datetime, local date-time or duration as a count of days or
+     * nanoseconds. A duration with years or months has no place: their
+     * length varies. `null` for a value of no ordered kind.
+     *
+     * @return array{0: string, 1: int|float|string}|null
+     */
+    private static function ordinal(mixed $value): ?array
     {
         return match (true) {
-            is_int($value) => (float) $value,
-            $value instanceof DXNInteger => (float) $value->toString(),
-            is_float($value) => $value,
-            $value instanceof DXNDecimal => $value->toFloat(),
-            $value instanceof DXNRational => $value->toFloat(),
-            default => throw new \InvalidArgumentException(
-                'cannot compare a non-numeric value in a refine constraint: ' . Equality::kindOf($value),
-            ),
+            is_int($value), is_float($value) => ['number', $value],
+            $value instanceof DXNInteger => ['number', $value->toString()],
+            $value instanceof DXNDecimal, $value instanceof DXNRational => ['number', $value->toFloat()],
+            $value instanceof DXNDate => ['date', Nanos::epochDays($value)],
+            $value instanceof DXNTime => ['time', $value->nanosecondsSinceMidnight()],
+            $value instanceof DXNDateTime => ['datetime', $value->epochNanoseconds],
+            $value instanceof \DateTimeInterface => self::nativeOrdinal($value),
+            $value instanceof DXNLocalDateTime => ['local', $value->localNanoseconds],
+            $value instanceof DXNDuration => self::durationOrdinal($value),
+            default => null,
         };
     }
 
-    private static function toIntArg(mixed $arg): int
+    /**
+     * A native datetime's place, `null` past 64 bits of nanoseconds.
+     *
+     * @return array{0: string, 1: int}|null
+     */
+    private static function nativeOrdinal(\DateTimeInterface $value): ?array
     {
-        if (is_int($arg)) {
-            return $arg;
+        try {
+            return ['datetime', Nanos::ofNative($value)];
+        } catch (\InvalidArgumentException) {
+            return null;
         }
-        if ($arg instanceof DXNInteger && $arg->fitsInInt()) {
-            return $arg->toInt();
+    }
+
+    /**
+     * A duration's total nanoseconds, a decimal string so no field's
+     * size overflows it; `null` with years or months.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    private static function durationOrdinal(DXNDuration $d): ?array
+    {
+        if (($d->years ?? 0) !== 0 || ($d->months ?? 0) !== 0) {
+            return null;
         }
-        throw new \InvalidArgumentException('expected an integer constraint argument, got ' . Equality::kindOf($arg));
+        $total = '0';
+        foreach ([
+            [$d->weeks, '604800000000000'],
+            [$d->days, '86400000000000'],
+            [$d->hours, '3600000000000'],
+            [$d->minutes, '60000000000'],
+            [$d->nanoseconds, '1'],
+        ] as [$count, $unit]) {
+            $total = bcadd($total, bcmul((string) ($count ?? 0), $unit, 0), 0);
+        }
+        return ['duration', $total];
+    }
+
+    /**
+     * An integer, or a big one's digits, as the numeric string bcmath
+     * takes.
+     *
+     * @return numeric-string
+     */
+    private static function numeric(int|float|string $n): string
+    {
+        $text = (string) $n;
+        return is_numeric($text) ? $text : throw new \LogicException("unreachable: {$text} is no number");
     }
 }
