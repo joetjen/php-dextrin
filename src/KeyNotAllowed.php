@@ -23,7 +23,7 @@ final class KeyNotAllowed extends \InvalidArgumentException implements HasCatego
         } catch (\Throwable) {
             $described = is_scalar($key) || $key === null ? var_export($key, true) : get_debug_type($key);
         }
-        return new self("{$described} cannot be a map key: a key is a string, keyword, integer, uuid, date, bytes, symbol or char");
+        return new self("{$described} cannot be a map key: a key is a string, keyword, integer, uuid, objectid, date, bytes, symbol or char");
     }
 
     /**
