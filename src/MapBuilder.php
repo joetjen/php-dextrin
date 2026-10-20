@@ -14,7 +14,7 @@ use JOetjen\Dextrin\Value\Equality;
  * {@see \JOetjen\Dextrin\Binary\Decoder}, which need identical logic.
  *
  * **Every key is one DXN.md §1.6 allows** -- a string, keyword, integer,
- * uuid, date, bytes, symbol or char -- or the map is refused with
+ * uuid, objectid, date, bytes, symbol or char -- or the map is refused with
  * {@see KeyNotAllowed} (`key/not-allowed`).
  *
  * **A native PHP array when it can hold the map exactly, a

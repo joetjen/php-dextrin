@@ -14,11 +14,13 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNMap;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -60,7 +62,7 @@ final class TypeExpr
     private const PRIMITIVES = [
         'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
         'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
-        'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex',
+        'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'objectid', 'ip', 'uri', 'bytes', 'bits', 'regex',
     ];
 
     /**
@@ -668,6 +670,8 @@ final class TypeExpr
             'local-datetime' => $value instanceof DXNLocalDateTime,
             'duration' => $value instanceof DXNDuration,
             'uuid' => $value instanceof DXNUuid,
+            'objectid' => $value instanceof DXNObjectId,
+            'ip' => $value instanceof DXNIp,
             'uri' => $value instanceof DXNUri,
             'bytes' => $value instanceof DXNBytes,
             // Bits and bytes are one value space (DXN.md §4.1): `:bits` takes both.
@@ -724,6 +728,9 @@ final class TypeExpr
             // `finite: true` refuses NaN and both infinities.
             'finite' => $arg !== true || !is_float($value) || is_finite($value),
             'offsets' => self::hasOffsetIn($value, $arg),
+            // An ip's version, 4 or 6, and whether it is a prefix.
+            'version' => $value instanceof DXNIp && $value->version() === $arg,
+            'prefix' => $value instanceof DXNIp && ($value->prefix !== null) === $arg,
             default => false,
         };
     }

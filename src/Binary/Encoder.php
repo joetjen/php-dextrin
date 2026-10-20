@@ -17,9 +17,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -122,23 +124,25 @@ final class Encoder
             $value instanceof DXNDate => Writer::tag(Tags::T_DATE, Writer::integerItem(self::epochDays($value))),
             // Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20): a
             // time since midnight, a datetime since the epoch with its
-            // offset in minutes (UTC is offset 0), a local date-time
-            // since 1970-01-01T00:00 on the wall clock.
+            // offset in minutes (in UTC the bare nanoseconds, the
+            // smallest representation), a local date-time since
+            // 1970-01-01T00:00 on the wall clock.
             $value instanceof DXNTime => Writer::tag(Tags::T_TIME, Writer::integerItem($value->nanosecondsSinceMidnight())),
             $value instanceof \DateTimeInterface => self::encodeItem(DXNDateTime::fromNative($value), $registry),
-            $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME, Writer::arrayOf([
-                Writer::integerItem($value->epochNanoseconds),
-                Writer::integerItem($value->offsetMinutes),
-            ])),
+            $value instanceof DXNDateTime => Writer::tag(Tags::T_DATETIME, $value->offsetMinutes === 0
+                ? Writer::integerItem($value->epochNanoseconds)
+                : Writer::arrayOf([
+                    Writer::integerItem($value->epochNanoseconds),
+                    Writer::integerItem($value->offsetMinutes),
+                ])),
             $value instanceof DXNLocalDateTime => Writer::tag(Tags::T_LOCAL_DATETIME, Writer::integerItem($value->localNanoseconds)),
             $value instanceof DXNDuration => self::encodeDuration($value),
 
             $value instanceof DXNUuid => Writer::tag(Tags::T_UUID, Writer::bytesItem($value->bytes)),
+            $value instanceof DXNObjectId => Writer::tag(Tags::T_OBJECTID, Writer::bytesItem($value->bytes)),
+            $value instanceof DXNIp => self::encodeIp($value),
             $value instanceof DXNUri => Writer::tag(Tags::T_URI, Writer::textItem($value->value)),
-            $value instanceof DXNRegex => Writer::tag(Tags::T_REGEX, Writer::arrayOf([
-                Writer::textItem($value->pattern),
-                Writer::integerItem(Tags::regexFlagsToByte($value->flags)),
-            ])),
+            $value instanceof DXNRegex => self::encodeRegex($value),
             $value instanceof DXNCustomTag => Writer::tag(Tags::T_CUSTOM, Writer::arrayOf([Writer::textItem($value->name), self::encodeItem($value->value, $registry)])),
 
             // Any plain PHP object with public properties (not just
@@ -306,6 +310,35 @@ final class Encoder
         $utcMidnight = $date->toDateTimeImmutable();
         $epoch = new \DateTimeImmutable('1970-01-01T00:00:00Z');
         return intdiv($utcMidnight->getTimestamp() - $epoch->getTimestamp(), 86_400);
+    }
+
+    /**
+     * RFC 9164, its smallest form: an address as its raw bytes, a prefix
+     * as its length and the bytes without their trailing zero bytes.
+     */
+    private static function encodeIp(DXNIp $ip): string
+    {
+        $tag = $ip->version() === 4 ? Tags::T_IPV4 : Tags::T_IPV6;
+        if ($ip->prefix === null) {
+            return Writer::tag($tag, Writer::bytesItem($ip->address));
+        }
+        return Writer::tag($tag, Writer::arrayOf([
+            Writer::integerItem($ip->prefix),
+            Writer::bytesItem(rtrim($ip->address, "\0")),
+        ]));
+    }
+
+    /** With no flags, the bare pattern (the smallest representation, DXN.md §2.2). */
+    private static function encodeRegex(DXNRegex $regex): string
+    {
+        $flags = Tags::regexFlagsToByte($regex->flags);
+        if ($flags === 0) {
+            return Writer::tag(Tags::T_REGEX, Writer::textItem($regex->pattern));
+        }
+        return Writer::tag(Tags::T_REGEX, Writer::arrayOf([
+            Writer::textItem($regex->pattern),
+            Writer::integerItem($flags),
+        ]));
     }
 
     private static function encodeDuration(DXNDuration $d): string

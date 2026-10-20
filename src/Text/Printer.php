@@ -15,9 +15,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -103,6 +105,8 @@ final class Printer
             $value instanceof \DateTimeInterface, $value instanceof DXNLocalDateTime,
             $value instanceof DXNDuration => self::temporalForm($value),
             $value instanceof DXNUuid => self::tagForm('uuid', self::quoteString($value->toString())),
+            $value instanceof DXNObjectId => self::tagForm('objectid', self::quoteString($value->toString())),
+            $value instanceof DXNIp => self::tagForm('ip', self::quoteString($value->toString())),
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
             $value instanceof DXNRegex => self::regexForm(self::printRegexFlags($value->flags), self::quoteString($value->pattern)),
             $value instanceof DXNCustomTag => self::tagForm($value->name, self::print($value->value, $registry)),
@@ -123,24 +127,14 @@ final class Printer
         };
     }
 
+    /**
+     * The shortest digits that read back exactly, as the canonical form
+     * writes them -- not `(string) $n`, which keeps only `precision` (14)
+     * digits and so wrote `15164.0947265625` as `15164.094726562`.
+     */
     private static function printFloat(float $n): string
     {
-        if (is_nan($n)) {
-            return 'NaN';
-        }
-        if ($n === INF) {
-            return 'Infinity';
-        }
-        if ($n === -INF) {
-            return '-Infinity';
-        }
-        $s = (string) $n;
-        // PHP omits the decimal point for integer-valued floats
-        // ((string) 1.0 === "1"), which .dxn needs to stay distinct
-        // from `integer` -- append ".0" whenever the native rendering
-        // has neither a fraction nor an exponent to make that
-        // distinction implicit already.
-        return preg_match('/[.eE]/', $s) === 1 ? $s : "{$s}.0";
+        return \JOetjen\Dextrin\Canonical::float($n);
     }
 
     private static function printCharBody(int $codepoint): string

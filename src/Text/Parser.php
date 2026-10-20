@@ -20,8 +20,10 @@ use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -48,7 +50,7 @@ use JOetjen\Dextrin\Value\DXNUuid;
 final class Parser
 {
     private const BUILT_IN_TAGS = [
-        'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true,
+        'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true, 'objectid' => true, 'ip' => true,
         'uri' => true, 'bytes' => true, 'bits' => true, 'date' => true, 'time' => true,
         'datetime' => true, 'local-datetime' => true, 'duration' => true, 'regex' => true,
     ];
@@ -683,6 +685,8 @@ final class Parser
             'sorted-set' => $this->parseSortedSetTag($offset),
             'array' => $this->parseArrayTag($offset),
             'uuid' => DXNUuid::fromString($this->parseStringValue($name, $offset)),
+            'objectid' => DXNObjectId::fromString($this->parseStringValue($name, $offset)),
+            'ip' => DXNIp::fromString($this->parseStringValue($name, $offset)),
             'uri' => DXNUri::fromString($this->parseStringValue($name, $offset)),
             'bytes' => $this->parseBytesTag($name, $offset),
             'bits' => $this->parseBitsTag($offset),

@@ -27,6 +27,7 @@ final class Equality
         'sorted-set' => 15, 'struct' => 16, 'array' => 17, 'date' => 18, 'time' => 19,
         'local-datetime' => 20, 'datetime' => 21, 'duration' => 22, 'uuid' => 23,
         'uri' => 24, 'bytes' => 25, 'bits' => 26, 'regex' => 27, 'custom-tag' => 28,
+        'objectid' => 29, 'ip' => 30,
     ];
 
     private function __construct()
@@ -147,7 +148,7 @@ final class Equality
             $a instanceof DXNOrderedMap && $b instanceof DXNOrderedMap => self::pairsCompare($a->pairs, $b->pairs),
             $a instanceof DXNStruct => self::structCompare($a, $b),
             // decimal/rational/char/symbol/keyword/date/time
-            // /local-datetime/datetime/uuid/uri/bytes all implement their own natural
+            // /local-datetime/datetime/uuid/objectid/ip/uri/bytes all implement their own natural
             // order via compareTo()'s same-class branch, safe to
             // delegate back to; set/sorted-set/duration/regex/custom
             // -tag have no meaningful natural order, so fall back to
@@ -162,7 +163,8 @@ final class Equality
             $a instanceof DXNInteger, $a instanceof DXNDecimal, $a instanceof DXNRational,
             $a instanceof DXNChar, $a instanceof DXNSymbol, $a instanceof DXNKeyword,
             $a instanceof DXNDate, $a instanceof DXNTime, $a instanceof DXNLocalDateTime,
-            $a instanceof DXNDateTime, $a instanceof DXNUuid, $a instanceof DXNUri,
+            $a instanceof DXNDateTime, $a instanceof DXNUuid, $a instanceof DXNObjectId,
+            $a instanceof DXNIp, $a instanceof DXNUri,
             $a instanceof DXNBytes, $a instanceof DXNBits => $a->compareTo($b),
             default => self::canonicalKey($a) <=> self::canonicalKey($b),
         };
@@ -252,6 +254,8 @@ final class Equality
                 : 'datetime:' . $value->epochNanoseconds . '@' . $value->offsetMinutes,
             'duration' => self::durationKey($value),
             'uuid' => 'uuid:' . bin2hex($value->bytes),
+            'objectid' => 'objectid:' . bin2hex($value->bytes),
+            'ip' => 'ip:' . $value->toString(),
             'uri' => 'uri:' . $value->value,
             'bytes' => 'bytes:' . bin2hex($value->data),
             'bits' => 'bits:' . bin2hex($value->data) . '/' . $value->bitLength,

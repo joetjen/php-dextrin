@@ -263,7 +263,9 @@ final class Document
         if ($value instanceof DXNMap) {
             return $value->pairs();
         }
-        if (is_array($value) && ($value === [] || !array_is_list($value))) {
+        // An empty native array is the DXN array `@array[]`, as
+        // Equality::kindOf() reads it: an empty map decodes to a DXNMap.
+        if (is_array($value) && !array_is_list($value)) {
             // A native array holds a keyword key as its bare name; the
             // document's key is the keyword.
             $pairs = [];

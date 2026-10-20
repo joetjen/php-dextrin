@@ -53,10 +53,17 @@ final class TagsTest extends TestCase
             Tags::T_ORDERED, Tags::T_SET, Tags::T_SORTED_SET, Tags::T_STRUCT, Tags::T_DATE,
             Tags::T_TIME_US, Tags::T_DATETIME_US, Tags::T_DURATION_US, Tags::T_REGEX, Tags::T_CUSTOM,
             Tags::T_EXTRA, Tags::T_BITS, Tags::T_LOCAL_DATETIME, Tags::T_TIME, Tags::T_DATETIME, Tags::T_DURATION,
+            Tags::T_OBJECTID,
         ] as $tag) {
             self::assertGreaterThanOrEqual(200, $tag);
-            self::assertLessThanOrEqual(220, $tag);
+            self::assertLessThanOrEqual(221, $tag);
         }
+    }
+
+    // BSON's ObjectId takes 221 (Jan, 2026-10-20); an ip is RFC 9164's.
+    public function testObjectIdAndIpHaveTheirTags(): void
+    {
+        self::assertSame([221, 52, 54], [Tags::T_OBJECTID, Tags::T_IPV4, Tags::T_IPV6]);
     }
 
     // A tag never changes its meaning (DXN.md §2.3): the nanosecond forms

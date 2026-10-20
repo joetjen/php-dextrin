@@ -112,6 +112,8 @@ datetime     DXNDateTime{epochNanoseconds, offsetMinutes} `@datetime "...Z"` / `
 local-dt     DXNLocalDateTime{localNanoseconds}         `@local-datetime "YYYY-MM-DDTHH:MM:SS"` -- no offset
 duration     DXNDuration{years, months, ..., nanoseconds} `@duration "P1Y2M"` -- 7 independent fields
 uuid         DXNUuid{bytes}                             `@uuid "..."` -- 16 raw bytes, not the text form
+objectid     DXNObjectId{bytes}                         `@objectid "..."` -- 12 raw bytes, BSON's ObjectId
+ip           DXNIp{address, prefix}                     `@ip "10.0.0.0/8"` -- an address or a prefix, raw bytes
 uri          DXNUri{value}                              `@uri "..."` -- raw string, not parsed
 bytes        DXNBytes{data}                             `@bytes "..."` (base64 in text)
 regex        DXNRegex{pattern, flags}                    `@regex "..."` / `@regex(im) "..."`

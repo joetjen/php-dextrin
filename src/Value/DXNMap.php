@@ -12,7 +12,7 @@ use JOetjen\Dextrin\Canonical;
  * A map decodes to a native array whenever it can: every key an integer,
  * a keyword or a string, no two of them colliding once PHP coerces them
  * to array keys, and not shaped like a list (which would read back as a
- * DXN array). Anything else -- a char, uuid, date, bytes or symbol key,
+ * DXN array). Anything else -- a char, uuid, objectid, date, bytes or symbol key,
  * `1` beside `"1"`, an empty map -- is one of these.
  *
  * **Keys are compared by value** (DXN.md §1.6): two keys are the same key

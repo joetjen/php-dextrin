@@ -20,9 +20,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -156,7 +158,10 @@ final class Decoder
             20 => false,
             21 => true,
             22 => null,
-            25 => throw new BinaryError('half-precision (16-bit) CBOR floats are not supported', $this->pos),
+            // Every width CBOR has; the encoder writes the shortest exact
+            // one (DXN.md §2.2). A single's specials and subnormals are
+            // PHP floats as unpacked.
+            25 => FloatWidth::fromHalf(self::unpackUint($this->take(2), 'n')),
             26 => self::unpackFloat($this->take(4), 'G'),
             27 => self::unpackFloat($this->take(8), 'E'),
             default => throw new BinaryError("unsupported CBOR item (major 7, arg {$info})", $this->pos),
@@ -354,6 +359,9 @@ final class Decoder
             Tags::T_RATIONAL => $this->buildRational($value),
             Tags::T_URI => $this->expectString($value, $tag, 'uri', static fn (string $v): DXNUri => new DXNUri($v)),
             Tags::T_UUID => $this->buildUuid($value),
+            Tags::T_OBJECTID => $this->buildObjectId($value),
+            Tags::T_IPV4 => $this->buildIp($value, $tag, 4),
+            Tags::T_IPV6 => $this->buildIp($value, $tag, 16),
             Tags::T_CHAR => $this->buildChar($value),
             Tags::T_SYMBOL => $this->expectString($value, $tag, 'symbol', static fn (string $v): DXNSymbol => new DXNSymbol($v)),
             Tags::T_KEYWORD => $this->expectString($value, $tag, 'keyword', static fn (string $v): DXNKeyword => new DXNKeyword($v)),
@@ -363,7 +371,11 @@ final class Decoder
             Tags::T_SORTED_SET => $this->buildFromList($value, $tag, 'sorted-set', static fn (array $items): DXNSortedSet => DXNSortedSet::fromArray($items)),
             Tags::T_DATE => $this->buildDate($value),
             Tags::T_TIME => $this->buildTime($this->requireSmallInt($value, $tag, 'time')),
-            Tags::T_DATETIME => $this->buildDatetime($this->pair($value, $tag, 1), $tag),
+            // In UTC the bare nanoseconds, otherwise with the offset (DXN.md §2.2).
+            Tags::T_DATETIME => $this->buildDatetime(
+                is_int($value) || $value instanceof DXNInteger ? [$this->scaled($value, $tag, 'datetime', 1), 0] : $this->pair($value, $tag, 1),
+                $tag,
+            ),
             Tags::T_LOCAL_DATETIME => new DXNLocalDateTime($this->requireSmallInt($value, $tag, 'local-datetime')),
             Tags::T_DURATION => $this->buildDuration($value, $tag, 1),
             // DXN 0.2's microsecond encodings, read as what they meant: a
@@ -464,6 +476,37 @@ final class Decoder
             throw new BinaryError('malformed uuid (tag ' . Tags::T_UUID . ') payload', $this->pos);
         }
         return new DXNUuid($value->data);
+    }
+
+    private function buildObjectId(mixed $value): DXNObjectId
+    {
+        if (!$value instanceof DXNBytes || strlen($value->data) !== 12) {
+            throw new BinaryError('malformed objectid (tag ' . Tags::T_OBJECTID . ') payload', $this->pos);
+        }
+        return new DXNObjectId($value->data);
+    }
+
+    /**
+     * RFC 9164: an address is its raw bytes; a prefix is its length and
+     * the bytes with trailing zero bytes left off, put back here.
+     */
+    private function buildIp(mixed $value, int $tag, int $size): DXNIp
+    {
+        if ($value instanceof DXNBytes && strlen($value->data) === $size) {
+            return new DXNIp($value->data);
+        }
+        if (!$value instanceof DXNList || count($value->items) !== 2) {
+            throw new BinaryError("malformed ip (tag {$tag}) payload", $this->pos);
+        }
+        [$length, $bytes] = $value->items;
+        if (!is_int($length) || !$bytes instanceof DXNBytes || strlen($bytes->data) > $size) {
+            throw new BinaryError("malformed ip (tag {$tag}) payload", $this->pos);
+        }
+        try {
+            return new DXNIp(str_pad($bytes->data, $size, "\0"), $length);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError('invalid ip prefix: its host bits are not zero', $this->pos);
+        }
     }
 
     private function buildChar(mixed $value): DXNChar
@@ -655,8 +698,12 @@ final class Decoder
         return new DXNDuration(...$values);
     }
 
+    /** The bare pattern for a regex without flags (DXN.md §2.2), or `[pattern, flags]`. */
     private function buildRegex(mixed $value): DXNRegex
     {
+        if (is_string($value)) {
+            return new DXNRegex($value, Tags::regexByteToFlags(0));
+        }
         if (!$value instanceof DXNList || count($value->items) !== 2) {
             throw new BinaryError('malformed regex (tag ' . Tags::T_REGEX . ') payload', $this->pos);
         }
