@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Format`** and the `Form` enum (DXN.md §6, as dextrin's
+  `Dextrin.Format`): `mediaType()`, `extension()`, `form()` -- the three
+  media types, and any `+dxn` suffix as text -- and `identifies($body,
+  $form)`, a cheap prefix test of whether a body is worth decoding as a
+  form: binary by the envelope's magic, text and schemas by a first
+  significant `%` after whitespace, comments and a header. Lists and
+  scalars stay unrecognised on purpose: they overlap with JSON (Jan,
+  2026-10-20).
 - `Schema::compileAll($docs, $baseRegistry)`: several `.dxns` documents
   compiled into one registry, in order; the first that does not compile
   throws, naming which -- as the reference's `compile_all/2`.
