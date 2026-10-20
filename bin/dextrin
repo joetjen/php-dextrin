@@ -49,6 +49,7 @@ const USAGE = <<<'USAGE'
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
       compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+      check SCHEMAS... [--extern NAMESPACE]...     Check a tree of .dxns schemas: syntax, compiling, layout and names
       docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
@@ -67,6 +68,7 @@ function main(array $argv): int
         'validate' => run(static fn () => cmdValidate($rest)),
         'compat' => run(static fn () => cmdCompat($rest)),
         'docs' => run(static fn () => cmdDocs($rest)),
+        'check' => run(static fn () => cmdCheck($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
@@ -88,6 +90,38 @@ function cmdDocs(array $argv): void
     $out = $options['out'] ?? 'doc/schemas';
     $written = \JOetjen\Dextrin\Schema\Docs::write($positional[0], $out, $options['title'] ?? null);
     fwrite(STDOUT, 'wrote ' . count($written) . " files to {$out}\n");
+}
+
+/**
+ * `dextrin check SCHEMAS... [--extern NAMESPACE]...`: a tree of `.dxns`
+ * schemas checked as `mix dextrin.check` checks it -- every problem
+ * printed as `file:line: message`, and a non-zero exit.
+ *
+ * @param list<string> $argv
+ */
+function cmdCheck(array $argv): void
+{
+    $roots = [];
+    $extern = [];
+    for ($i = 0; $i < count($argv); $i++) {
+        if ($argv[$i] === '--extern') {
+            $extern[] = $argv[++$i] ?? '';
+        } else {
+            $roots[] = $argv[$i];
+        }
+    }
+    if ($roots === []) {
+        throw new \RuntimeException('usage: dextrin check SCHEMAS... [--extern NAMESPACE]...');
+    }
+    $result = \JOetjen\Dextrin\Schema\Tree::load($roots, $extern);
+    if ($result['ok']) {
+        fwrite(STDOUT, "OK: {$result['summary']['files']} files, {$result['summary']['definitions']} definitions\n");
+        return;
+    }
+    foreach ($result['problems'] as $p) {
+        fwrite(STDERR, "{$p['file']}:{$p['line']}: {$p['message']}\n");
+    }
+    throw new \RuntimeException(count($result['problems']) . ' problem(s)');
 }
 
 /**

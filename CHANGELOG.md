@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
+  types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has
+  them: a shape is a named, unversioned plain-map type that fills its
+  missing fields' defaults; a case chooses a field's type by its sibling's
+  value; a named type may refer to itself through a field or a
+  collection; `{:generic [t] body}` and `{:of Name T}`.
+  **`Schema::check()`** answers whether a value matches a schema, shape
+  or named type without changing it, and **`Schema::conform()`** returns
+  it with defaults filled.
+- **`dextrin check` and `Schema\Tree`** (Jan, 2026-10-20): a tree of
+  `.dxns` files read as one -- every entry named from its path
+  (`Schema\Layout`), the files compiled in the order their references
+  need -- with every problem printed as `file:line`; a name resolving to
+  nothing is a problem unless its namespace is `--extern`.
 - **The conformance adapter answers `media-type`, `identify` and
   `identify-binary`** (DXN.md §6): the form a media type names, and
   whether a body is worth decoding as text, a schema or binary, so the
@@ -56,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A named type sees the named types beside it** (DXN.md §4.5): a
+  reference to a sibling in the same document resolves, in any order; a
+  named type that reaches itself unguarded is refused.
 - **The API docs' front page opens with the development warning**
   (Jan, 2026-10-20): `.phpdoc/template/index.html.twig` overrides
   phpDocumentor's front page, as in Cooper's PHP packages.
@@ -98,6 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A field naming another file's named type resolves** (DXN.md §4.6):
+  `FileResolver` compiled each file on its own, so a field naming another
+  file's shape or named type named a struct that never came.
 - **A document with a character of more than one byte garbled when it
   was formatted or edited.** The lexer counts offsets in code points and
   `Document` slices its source in bytes, so every offset after a `→` or

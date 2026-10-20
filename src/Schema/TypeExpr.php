@@ -14,7 +14,9 @@ use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -61,10 +63,13 @@ final class TypeExpr
     ];
 
     /**
-     * @param list<self>|null $elems tuple-of
+     * @param list<self>|null $elems tuple-of; a use's arguments (apply)
      * @param list<mixed>|null $literals enum
      * @param list<self>|null $variants one-of / any-of / all-of
      * @param array<string, mixed>|null $constraints refine
+     * @param list<Field>|null $fields shape
+     * @param list<array{0: mixed, 1: self}>|null $branches case
+     * @param list<string>|null $params generic
      */
     private function __construct(
         public readonly string $form,
@@ -77,7 +82,70 @@ final class TypeExpr
         public readonly ?array $variants = null,
         public readonly ?self $base = null,
         public readonly ?array $constraints = null,
+        public readonly ?array $fields = null,
+        public readonly ?array $branches = null,
+        public readonly ?self $otherwise = null,
+        public readonly ?array $params = null,
     ) {
+    }
+
+    /**
+     * `%shape{...}` (design/shapes-and-case.md): a plain map with these
+     * fields, its missing defaults filled.
+     *
+     * @param list<Field> $fields
+     */
+    public static function shape(?string $name, array $fields): self
+    {
+        return new self('shape', name: $name, fields: $fields);
+    }
+
+    /**
+     * `{:case field %{value => type, :else => type}}`: the type the
+     * sibling `field`'s value chooses.
+     *
+     * @param list<array{0: mixed, 1: self}> $branches
+     */
+    public static function case(string $field, array $branches, ?self $otherwise): self
+    {
+        return new self('case', name: $field, branches: $branches, otherwise: $otherwise);
+    }
+
+    /** A recursive named type's reference to itself, looked up when it is checked. */
+    public static function named(string $name): self
+    {
+        return new self('named', name: $name);
+    }
+
+    /** @param list<string> $params */
+    public static function generic(array $params, self $body): self
+    {
+        return new self('generic', base: $body, params: $params);
+    }
+
+    /** @param list<self> $args */
+    public static function apply(string $name, array $args): self
+    {
+        return new self('apply', name: $name, elems: $args);
+    }
+
+    public static function param(string $name): self
+    {
+        return new self('param', name: $name);
+    }
+
+    /**
+     * This type with each part replaced, for the compiler's resolution.
+     *
+     * @param array<string, mixed> $parts
+     */
+    public function with(array $parts): self
+    {
+        $all = get_object_vars($this);
+        foreach ($parts as $k => $v) {
+            $all[$k] = $v;
+        }
+        return new self(...$all);
     }
 
     public static function any(): self
@@ -185,7 +253,8 @@ final class TypeExpr
      * Whether `$value` matches this type -- shared by both decode
      * (`Validator::materialize()`) and encode-time validation
      * (`Validator::validateForEncode()`): the same recursive check,
-     * the same method, for both directions.
+     * the same method, for both directions. It is {@see self::conform()}
+     * answered as a boolean, so there is one check, not two.
      *
      * `{form: 'reference', name}` checks the *originating schema's*
      * name, not the value's own shape -- which is how it correctly
@@ -203,38 +272,340 @@ final class TypeExpr
      */
     public function matches(mixed $value, ?Registry $registry = null): bool
     {
-        if ($this->form === 'any') {
-            return true;
+        return $this->conform($value, new Context($registry)) !== NoMatch::Instance;
+    }
+
+    /**
+     * `$value` checked against this type in `$ctx`: the value with every
+     * shape's missing defaults filled in (design/shapes-and-case.md, Jan,
+     * 2026-10-20), or {@see NoMatch}. Nothing but a shape changes a value.
+     */
+    public function conform(mixed $value, Context $ctx): mixed
+    {
+        switch ($this->form) {
+            case 'any':
+                return $value;
+            case 'never':
+            case 'param':
+            case 'generic':
+                return NoMatch::Instance;
+            case 'reference':
+                return self::matchesReference($this->name ?? '', $value, $ctx->registry) ? $value : NoMatch::Instance;
+            case 'case':
+                // A field's type is chosen by its sibling's value, wherever
+                // in the field's type the case stands.
+                $chosen = $this->chosen($ctx->siblings);
+                return $chosen === null ? NoMatch::Instance : $chosen->conform($value, $ctx);
+            case 'named':
+                // A recursive named type's reference to itself (DXN.md
+                // §4.5); with no registry there is nothing to look in.
+                $named = $ctx->registry?->fetchTypeAlias($this->name ?? '');
+                return $named instanceof self ? $named->conform($value, $ctx) : NoMatch::Instance;
+            case 'apply':
+                // One use of a generic: its body, the arguments standing
+                // where its parameters stand.
+                $generic = $ctx->registry?->fetchTypeAlias($this->name ?? '');
+                $args = $this->elems ?? [];
+                if (!$generic instanceof self || $generic->form !== 'generic' || count($generic->params ?? []) !== count($args)) {
+                    return NoMatch::Instance;
+                }
+                /** @var self $body */
+                $body = $generic->base;
+                return $body->substitute(array_combine($generic->params ?? [], $args))->conform($value, $ctx);
         }
-        if ($this->form === 'never') {
-            return false;
-        }
-        if ($this->form === 'reference') {
-            return self::matchesReference($this->name ?? '', $value, $registry);
-        }
+
         if ($value instanceof Validated) {
-            return $this->matches($value->value, $registry);
+            $inner = $this->conform($value->value, $ctx);
+            return $inner === NoMatch::Instance ? NoMatch::Instance : new Validated($value->name, $inner);
         }
+
+        switch ($this->form) {
+            case 'primitive':
+                return self::primitiveMatches($this->name ?? '', $value) ? $value : NoMatch::Instance;
+            case 'shape':
+                return is_array($value) || $value instanceof DXNMap ? $this->conformShape($value, $ctx) : NoMatch::Instance;
+            case 'list-of':
+                if (!$value instanceof DXNList) {
+                    return NoMatch::Instance;
+                }
+                $items = self::all($this->elem, $value->items, $ctx);
+                return $items === NoMatch::Instance ? NoMatch::Instance : new DXNList($items);
+            case 'set-of':
+                if (!$value instanceof DXNSet) {
+                    return NoMatch::Instance;
+                }
+                return self::all($this->elem, $value->items, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+            case 'tuple-of':
+                return $this->conformTuple($value, $ctx);
+            case 'map-of':
+                return is_array($value) ? $this->conformMap($value, $ctx) : NoMatch::Instance;
+            case 'array-of':
+                if (!is_array($value) || !array_is_list($value)) {
+                    return NoMatch::Instance;
+                }
+                return self::all($this->elem, $value, $ctx);
+            case 'ordered-map-of':
+                if (!$value instanceof DXNOrderedMap) {
+                    return NoMatch::Instance;
+                }
+                return $this->conformPairs($value->pairs, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+            case 'sorted-set-of':
+                if (!$value instanceof DXNSortedSet) {
+                    return NoMatch::Instance;
+                }
+                return self::all($this->elem, $value->items, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+            case 'enum':
+                return $this->enumMatches($value) ? $value : NoMatch::Instance;
+            case 'one-of':
+                // Exactly one variant matches (JSON Schema's oneOf; Jan,
+                // 2026-10-20): every variant is tried, stopping at a second.
+                $found = NoMatch::Instance;
+                foreach ($this->variants ?? [] as $variant) {
+                    $c = $variant->conform($value, $ctx);
+                    if ($c === NoMatch::Instance) {
+                        continue;
+                    }
+                    if ($found !== NoMatch::Instance) {
+                        return NoMatch::Instance;
+                    }
+                    $found = $c;
+                }
+                return $found;
+            case 'any-of':
+                // One or more match (JSON Schema's anyOf): the first that does.
+                foreach ($this->variants ?? [] as $variant) {
+                    $c = $variant->conform($value, $ctx);
+                    if ($c !== NoMatch::Instance) {
+                        return $c;
+                    }
+                }
+                return NoMatch::Instance;
+            case 'not':
+                return ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance) === NoMatch::Instance ? $value : NoMatch::Instance;
+            case 'all-of':
+                // Every variant, each taking what the one before it answered.
+                $current = $value;
+                foreach ($this->variants ?? [] as $variant) {
+                    $current = $variant->conform($current, $ctx);
+                    if ($current === NoMatch::Instance) {
+                        return NoMatch::Instance;
+                    }
+                }
+                return $current;
+            case 'nilable':
+                return $value === null ? null : ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance);
+            case 'refine':
+                $c = $this->base?->conform($value, $ctx) ?? NoMatch::Instance;
+                return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? []) ? $c : NoMatch::Instance;
+            default:
+                return NoMatch::Instance;
+        }
+    }
+
+    /**
+     * Every item conformed, in order, or {@see NoMatch} at the first that
+     * is not.
+     *
+     * @param list<mixed> $items
+     * @return list<mixed>|NoMatch
+     */
+    private static function all(?self $elem, array $items, Context $ctx): array|NoMatch
+    {
+        $type = $elem ?? throw new \LogicException('unreachable: collection type expr missing elem');
+        $out = [];
+        foreach ($items as $item) {
+            $c = $type->conform($item, $ctx);
+            if ($c === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+            $out[] = $c;
+        }
+        return $out;
+    }
+
+    private function conformTuple(mixed $value, Context $ctx): mixed
+    {
+        if (!$value instanceof DXNTuple) {
+            return NoMatch::Instance;
+        }
+        $elems = $this->elems ?? [];
+        if (count($elems) !== count($value->items)) {
+            return NoMatch::Instance;
+        }
+        $items = [];
+        foreach ($elems as $i => $elemType) {
+            $c = $elemType->conform($value->items[$i], $ctx);
+            if ($c === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+            $items[] = $c;
+        }
+        return new DXNTuple($items);
+    }
+
+    /**
+     * A DXN map/ordered-map key can be any DXN value, but a bare PHP
+     * array's own key is always `int|string` (this port's own map-key
+     * coercion, see `MapBuilder`'s doc) -- `map-of`'s own `key:` type
+     * is therefore checked against that coerced PHP key directly,
+     * never the original pre-coercion DXN key.
+     *
+     * @param array<int|string, mixed> $value
+     */
+    private function conformMap(array $value, Context $ctx): mixed
+    {
+        $keyType = $this->key ?? throw new \LogicException('unreachable: map-of type expr missing key');
+        $valueType = $this->value ?? throw new \LogicException('unreachable: map-of type expr missing value');
+        $out = [];
+        foreach ($value as $k => $v) {
+            if ($keyType->conform($k, $ctx) === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+            $c = $valueType->conform($v, $ctx);
+            if ($c === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+            $out[$k] = $c;
+        }
+        return $out;
+    }
+
+    /** @param list<array{0: mixed, 1: mixed}> $pairs */
+    private function conformPairs(array $pairs, Context $ctx): mixed
+    {
+        $keyType = $this->key ?? throw new \LogicException('unreachable: ordered-map-of type expr missing key');
+        $valueType = $this->value ?? throw new \LogicException('unreachable: ordered-map-of type expr missing value');
+        foreach ($pairs as [$k, $v]) {
+            if ($keyType->conform($k, $ctx) === NoMatch::Instance || $valueType->conform($v, $ctx) === NoMatch::Instance) {
+                return NoMatch::Instance;
+            }
+        }
+        return $pairs;
+    }
+
+    // ---- {:case} ----------------------------------------------------------------
+
+    /**
+     * The type the branches give the sibling field's value; the `:else`
+     * (`null` without one) when none is equal, or the sibling is absent.
+     *
+     * @param array<string, mixed>|null $siblings
+     */
+    private function chosen(?array $siblings): ?self
+    {
+        $field = $this->name ?? '';
+        if ($siblings === null || !array_key_exists($field, $siblings)) {
+            return $this->otherwise;
+        }
+        $sibling = Validated::strip($siblings[$field]);
+        foreach ($this->branches ?? [] as [$literal, $type]) {
+            if (Equality::dxnEquals($literal, $sibling)) {
+                return $type;
+            }
+        }
+        return $this->otherwise;
+    }
+
+    // ---- %shape{} -----------------------------------------------------------------
+
+    /**
+     * A map against a shape's fields: each declared field matched by name,
+     * whatever spelling its key has (`name:`, `"name" =>`, `:"name" =>`)
+     * and refused given twice; a missing field takes its default, under a
+     * keyword key; an extra key is kept, and refused by a strict decode --
+     * as a struct's fields are (design/shapes-and-case.md).
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     */
+    private function conformShape(array|DXNMap $map, Context $ctx): mixed
+    {
+        $pairs = $map instanceof DXNMap
+            ? $map->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($map), array_values($map));
+        $named = [];
+        foreach ($pairs as $i => [$key, $value]) {
+            $name = self::keyName($key);
+            if ($name === null) {
+                continue;
+            }
+            if (array_key_exists($name, $named)) {
+                return NoMatch::Instance;
+            }
+            $named[$name] = [$i, $value];
+        }
+        $inner = new Context($ctx->registry, array_map(static fn (array $iv): mixed => $iv[1], $named));
+        /** @var array<int, mixed> $replaced pair index => conformed value */
+        $replaced = [];
+        /** @var list<array{0: mixed, 1: mixed}> $added */
+        $added = [];
+        foreach ($this->fields ?? [] as $field) {
+            if (array_key_exists($field->name, $named)) {
+                [$i, $given] = $named[$field->name];
+                $c = $field->type->conform($given, $inner);
+                if ($c === NoMatch::Instance) {
+                    return NoMatch::Instance;
+                }
+                $replaced[$i] = $c;
+            } elseif ($field->default !== Field::NO_DEFAULT) {
+                $added[] = [new DXNKeyword($field->name), $field->default];
+            } elseif ($field->required) {
+                return NoMatch::Instance;
+            }
+        }
+        $out = [];
+        foreach ($pairs as $i => $pair) {
+            $out[] = [$pair[0], array_key_exists($i, $replaced) ? $replaced[$i] : $pair[1]];
+        }
+        $pairs = [...$out, ...$added];
+        if ($ctx->registry !== null && $ctx->registry->isStrict()) {
+            $declared = array_map(static fn (Field $f): string => $f->name, $this->fields ?? []);
+            foreach ($pairs as [$key]) {
+                $name = self::keyName($key);
+                if ($name === null || !in_array($name, $declared, true)) {
+                    return NoMatch::Instance;
+                }
+            }
+        }
+        return $map instanceof DXNMap ? new DXNMap($pairs) : MapBuilder::build($pairs, static fn (string $m): \Throwable => new \LogicException($m));
+    }
+
+    /** The name a map key gives a field, or `null`. */
+    private static function keyName(mixed $key): ?string
+    {
+        return match (true) {
+            $key instanceof DXNKeyword => $key->name,
+            is_string($key) => $key,
+            default => null,
+        };
+    }
+
+    // ---- generics -----------------------------------------------------------------
+
+    /**
+     * This type with each parameter `$bound` names replaced by its argument.
+     *
+     * @param array<string, self> $bound
+     */
+    public function substitute(array $bound): self
+    {
+        $sub = static fn (?self $t): ?self => $t?->substitute($bound);
+        $subAll = static fn (?array $ts): ?array => $ts === null ? null : array_map(static fn (self $t): self => $t->substitute($bound), $ts);
         return match ($this->form) {
-            'primitive' => self::primitiveMatches($this->name ?? '', $value),
-            'list-of' => $value instanceof DXNList && self::allMatch($this->elem, $value->items, $registry),
-            'set-of' => $value instanceof DXNSet && self::allMatch($this->elem, $value->items, $registry),
-            'tuple-of' => $this->tupleMatches($value, $registry),
-            'map-of' => is_array($value) && $this->mapMatches($value, $registry),
-            'array-of' => is_array($value) && array_is_list($value) && self::allMatch($this->elem, $value, $registry),
-            'ordered-map-of' => $value instanceof DXNOrderedMap && $this->pairsMatch($value->pairs, $registry),
-            'sorted-set-of' => $value instanceof DXNSortedSet && self::allMatch($this->elem, $value->items, $registry),
-            'enum' => $this->enumMatches($value),
-            // Exactly one variant matches (JSON Schema's oneOf; Jan,
-            // 2026-10-20); any-of is one or more.
-            'one-of' => $this->exactlyOneVariantMatches($value, $registry),
-            'any-of' => $this->anyVariantMatches($value, $registry),
-            'not' => !(($this->elem?->matches($value, $registry)) ?? false),
-            'all-of' => $this->everyVariantMatches($value, $registry),
-            'nilable' => $value === null || (($this->elem?->matches($value, $registry)) ?? false),
-            'refine' => (($this->base?->matches($value, $registry)) ?? false)
-                && self::satisfiesConstraints($value, $this->constraints ?? []),
-            default => false,
+            'param' => $bound[$this->name ?? ''] ?? $this,
+            'apply', 'tuple-of' => $this->with(['elems' => $subAll($this->elems)]),
+            'shape' => $this->with(['fields' => array_map(
+                static fn (Field $f): Field => new Field($f->name, $f->required, $f->type->substitute($bound), $f->default, $f->description),
+                $this->fields ?? [],
+            )]),
+            'case' => $this->with([
+                'branches' => array_map(static fn (array $b): array => [$b[0], $b[1]->substitute($bound)], $this->branches ?? []),
+                'otherwise' => $sub($this->otherwise),
+            ]),
+            'refine' => $this->with(['base' => $sub($this->base)]),
+            'one-of', 'any-of', 'all-of' => $this->with(['variants' => $subAll($this->variants)]),
+            'list-of', 'set-of', 'array-of', 'sorted-set-of', 'not', 'nilable' => $this->with(['elem' => $sub($this->elem)]),
+            'map-of', 'ordered-map-of' => $this->with(['key' => $sub($this->key), 'value' => $sub($this->value)]),
+            default => $this,
         };
     }
 
@@ -304,56 +675,6 @@ final class TypeExpr
 
     // ---- compound forms ------------------------------------------------------
 
-    /** @param list<mixed> $items */
-    private static function allMatch(?self $elem, array $items, ?Registry $registry): bool
-    {
-        $type = $elem ?? throw new \LogicException('unreachable: list-of/set-of type expr missing elem');
-        foreach ($items as $item) {
-            if (!$type->matches($item, $registry)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private function tupleMatches(mixed $value, ?Registry $registry): bool
-    {
-        if (!$value instanceof DXNTuple) {
-            return false;
-        }
-        $elems = $this->elems ?? throw new \LogicException('unreachable: tuple-of type expr missing elems');
-        if (count($elems) !== count($value->items)) {
-            return false;
-        }
-        foreach ($elems as $i => $elemType) {
-            if (!$elemType->matches($value->items[$i], $registry)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * A DXN map/ordered-map key can be any DXN value, but a bare PHP
-     * array's own key is always `int|string` (this port's own map-key
-     * coercion, see `MapBuilder`'s doc) -- `map-of`'s own `key:` type
-     * is therefore checked against that coerced PHP key directly,
-     * never the original pre-coercion DXN key.
-     *
-     * @param array<int|string, mixed> $value
-     */
-    private function mapMatches(array $value, ?Registry $registry): bool
-    {
-        $keyType = $this->key ?? throw new \LogicException('unreachable: map-of type expr missing key');
-        $valueType = $this->value ?? throw new \LogicException('unreachable: map-of type expr missing value');
-        foreach ($value as $k => $v) {
-            if (!$keyType->matches($k, $registry) || !$valueType->matches($v, $registry)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private function enumMatches(mixed $value): bool
     {
         foreach ($this->literals ?? [] as $literal) {
@@ -362,56 +683,6 @@ final class TypeExpr
             }
         }
         return false;
-    }
-
-    /** Whether exactly one variant matches `$value`, stopping at a second. */
-    private function exactlyOneVariantMatches(mixed $value, ?Registry $registry): bool
-    {
-        $found = 0;
-        foreach ($this->variants ?? [] as $variant) {
-            if ($variant->matches($value, $registry) && ++$found > 1) {
-                return false;
-            }
-        }
-        return $found === 1;
-    }
-
-    /**
-     * Whether every pair of an ordered map matches this type's key and
-     * value types.
-     *
-     * @param list<array{0: mixed, 1: mixed}> $pairs
-     */
-    private function pairsMatch(array $pairs, ?Registry $registry): bool
-    {
-        $keyType = $this->key ?? throw new \LogicException('unreachable: ordered-map-of type expr missing key');
-        $valueType = $this->value ?? throw new \LogicException('unreachable: ordered-map-of type expr missing value');
-        foreach ($pairs as [$k, $v]) {
-            if (!$keyType->matches($k, $registry) || !$valueType->matches($v, $registry)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private function anyVariantMatches(mixed $value, ?Registry $registry): bool
-    {
-        foreach ($this->variants ?? [] as $variant) {
-            if ($variant->matches($value, $registry)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private function everyVariantMatches(mixed $value, ?Registry $registry): bool
-    {
-        foreach ($this->variants ?? [] as $variant) {
-            if (!$variant->matches($value, $registry)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     // ---- refine constraints ---------------------------------------------------

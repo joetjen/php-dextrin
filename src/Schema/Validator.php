@@ -114,7 +114,7 @@ final class Validator
     private static function resolveField(Field $field, array $given, Registry $registry): mixed
     {
         if (array_key_exists($field->name, $given)) {
-            return self::checkType($field->name, $given[$field->name], $field->type, $registry);
+            return self::checkType($field->name, $given[$field->name], $field->type, new Context($registry, $given));
         }
         if ($field->default !== Field::NO_DEFAULT) {
             return $field->default;
@@ -125,15 +125,21 @@ final class Validator
         return Absent::instance();
     }
 
-    private static function checkType(string $name, mixed $value, TypeExpr $type, Registry $registry): mixed
+    /**
+     * Conformed, not only matched: a shape in the field's type comes out
+     * with its defaults filled, and a `{:case}` reads its sibling from the
+     * struct's other fields (`$ctx`).
+     */
+    private static function checkType(string $name, mixed $value, TypeExpr $type, Context $ctx): mixed
     {
-        if ($type->matches($value, $registry)) {
+        $conformed = $type->conform($value, $ctx);
+        if ($conformed !== NoMatch::Instance) {
             // Stripped here, not deferred to the top: `$value` is
             // about to be handed to *this* struct's own materializer
             // (decode) or stored as a checked field value (encode) --
             // neither should ever see an internal `Validated` wrapper
             // once it's done its one job.
-            return Validated::strip($value);
+            return Validated::strip($conformed);
         }
 
 

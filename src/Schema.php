@@ -44,11 +44,16 @@ final class Schema
     /**
      * Compiles a decoded `.dxns` document into `$baseRegistry` -- a
      * struct schema for each `%schema(N){}` entry, and a reusable named
-     * type for every other entry.
+     * type for every other entry. `$names`, when given, maps each entry's
+     * key to the full name a tree gives it (DXN.md §4.6) -- how {@see
+     * Schema\Tree} compiles a file -- a bare symbol naming a sibling
+     * resolving to it.
+     *
+     * @param array<string, string> $names
      */
-    public static function compile(mixed $schemaDoc, Registry $baseRegistry): Registry
+    public static function compile(mixed $schemaDoc, Registry $baseRegistry, array $names = []): Registry
     {
-        return Compiler::compile($schemaDoc, $baseRegistry);
+        return Compiler::compile($schemaDoc, $baseRegistry, $names);
     }
 
     /**
@@ -97,6 +102,37 @@ final class Schema
             throw new SchemaValidationError("no compiled schema registered for \"{$schemaName}\"");
         }
         return true;
+    }
+
+    /**
+     * Whether `$value` -- data a program already holds -- matches the
+     * definition `$name` in `$registry`: a struct schema, a `%shape` or a
+     * named type (design/shapes-and-case.md). Only a check: `$value` is
+     * never changed. Returns `true`, or throws the error saying why.
+     */
+    public static function check(mixed $value, Registry $registry, string $name): true
+    {
+        self::conform($value, $registry, $name);
+        return true;
+    }
+
+    /**
+     * `$value` checked as {@see self::check()} checks it, returned with
+     * every shape's missing defaults filled in, as a decode fills them;
+     * throws the error saying why it does not match.
+     */
+    public static function conform(mixed $value, Registry $registry, string $name): mixed
+    {
+        $type = $registry->fetchTypeAlias($name);
+        if ($type === null) {
+            self::validate($value, $registry, $name);
+            return $value;
+        }
+        $conformed = $type->conform($value, new Schema\Context($registry));
+        if ($conformed === Schema\NoMatch::Instance) {
+            throw new SchemaValidationError("value does not match \"{$name}\"", 'schema/type-mismatch');
+        }
+        return $conformed;
     }
 
     /**
