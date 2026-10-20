@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Schema;
 
 use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
@@ -16,6 +17,7 @@ use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
@@ -25,7 +27,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -59,7 +60,7 @@ final class TypeExpr
     private const PRIMITIVES = [
         'nil', 'boolean', 'integer', 'float', 'decimal', 'rational', 'string', 'char', 'symbol', 'keyword',
         'list', 'tuple', 'map', 'ordered-map', 'set', 'sorted-set', 'array',
-        'date', 'time', 'timestamp', 'datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex',
+        'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'uri', 'bytes', 'bits', 'regex',
     ];
 
     /**
@@ -660,8 +661,11 @@ final class TypeExpr
             'array' => is_array($value) && array_is_list($value),
             'date' => $value instanceof DXNDate,
             'time' => $value instanceof DXNTime,
-            'timestamp' => $value instanceof DXNTimestamp,
+            // A datetime is one type whatever its offset, UTC included
+            // (Jan, 2026-10-20); `:timestamp` is a refinement of it
+            // ({@see Compiler}).
             'datetime' => $value instanceof DXNDateTime || $value instanceof \DateTimeInterface,
+            'local-datetime' => $value instanceof DXNLocalDateTime,
             'duration' => $value instanceof DXNDuration,
             'uuid' => $value instanceof DXNUuid,
             'uri' => $value instanceof DXNUri,
@@ -698,6 +702,12 @@ final class TypeExpr
         return true;
     }
 
+    /**
+     * One refine key against `$value` (DXN.md §4.2). NaN lies outside
+     * every range, as every IEEE 754 comparison with it is false, which
+     * PHP's own float comparisons already answer; the infinities compare
+     * as the numbers they are (Jan, 2026-10-20).
+     */
     private static function satisfiesConstraint(string $key, mixed $arg, mixed $value): bool
     {
         return match ($key) {
@@ -711,8 +721,22 @@ final class TypeExpr
             'pattern' => is_string($value) && $arg instanceof DXNRegex && preg_match($arg->toPcrePattern(), $value) === 1,
             'min-count' => self::countOf($value) >= self::toIntArg($arg),
             'max-count' => self::countOf($value) <= self::toIntArg($arg),
+            // `finite: true` refuses NaN and both infinities.
+            'finite' => $arg !== true || !is_float($value) || is_finite($value),
+            'offsets' => self::hasOffsetIn($value, $arg),
             default => false,
         };
+    }
+
+    /** Whether the datetime's offset, `Z` or `±HH:MM`, is one of `$offsets`. */
+    private static function hasOffsetIn(mixed $value, mixed $offsets): bool
+    {
+        $datetime = $value instanceof \DateTimeInterface ? DXNDateTime::fromNative($value) : $value;
+        if (!$datetime instanceof DXNDateTime) {
+            return false;
+        }
+        $names = $offsets instanceof DXNList ? $offsets->items : $offsets;
+        return is_array($names) && in_array(Temporal::offsetName($datetime->offsetMinutes), $names, true);
     }
 
     private static function countOf(mixed $value): int

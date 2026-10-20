@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Tests\Schema;
 
+use JOetjen\Dextrin\Dextrin;
+use JOetjen\Dextrin\Registry;
+use JOetjen\Dextrin\Schema;
 use JOetjen\Dextrin\Schema\TypeExpr;
 use PHPUnit\Framework\Attributes\DataProvider;
 use JOetjen\Dextrin\Value\DXNBytes;
@@ -14,6 +17,7 @@ use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
@@ -23,7 +27,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -55,7 +58,7 @@ final class TypeExprTest extends TestCase
             'array' => ['array', [1, 2]],
             'date' => ['date', new DXNDate(2024, 1, 1)],
             'time' => ['time', new DXNTime(1, 2, 3, 0)],
-            'timestamp' => ['timestamp', new DXNTimestamp(0)],
+            'local-datetime' => ['local-datetime', new DXNLocalDateTime(0)],
             'datetime' => ['datetime', new DXNDateTime(0, 0)],
             'duration' => ['duration', new DXNDuration(days: 1)],
             'uuid' => ['uuid', new DXNUuid(str_repeat("\x00", 16))],
@@ -209,6 +212,60 @@ final class TypeExprTest extends TestCase
         // any other value is not one, however much it looks like it.
         self::assertFalse(TypeExpr::reference('Point')->matches(42));
         self::assertFalse(TypeExpr::reference('Point')->matches(['x' => 1]));
+    }
+
+    /** A registry where `T` has one field `v` of type `$type`. */
+    private static function registryFor(string $type): Registry
+    {
+        return Schema::compile(Dextrin::decode("%{T: %schema{v: {$type}}}"), new Registry());
+    }
+
+    /** Whether `%T{v: $value}` decodes. */
+    private static function takes(Registry $registry, string $value): bool
+    {
+        try {
+            Dextrin::decode("%T{v: {$value}}", $registry);
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    // One datetime type whatever its offset; :timestamp is a datetime in
+    // UTC (Jan, 2026-10-20).
+    public function testTimestampTakesAUtcDatetimeOnlyAndDatetimeTakesAnyOffset(): void
+    {
+        $r = self::registryFor(':timestamp');
+        self::assertTrue(self::takes($r, '@datetime "2024-01-01T00:00:00Z"'));
+        self::assertFalse(self::takes($r, '@datetime "2024-01-01T00:00:00+02:00"'));
+
+        $r = self::registryFor(':datetime');
+        self::assertTrue(self::takes($r, '@datetime "2024-01-01T00:00:00Z"'));
+        self::assertTrue(self::takes($r, '@datetime "2024-01-01T00:00:00+02:00"'));
+    }
+
+    public function testOffsetsNamesTheOffsetsADatetimeMayHave(): void
+    {
+        $r = self::registryFor('{:refine :datetime %{offsets: ["Z", "+02:00"]}}');
+        self::assertTrue(self::takes($r, '@datetime "2024-01-01T00:00:00+02:00"'));
+        self::assertFalse(self::takes($r, '@datetime "2024-01-01T00:00:00-05:00"'));
+    }
+
+    public function testFiniteRefusesNanAndTheInfinitiesAndARangeRefusesNan(): void
+    {
+        $r = self::registryFor('{:refine :float %{finite: true}}');
+        self::assertTrue(self::takes($r, '1.5'));
+        foreach (['NaN', 'Infinity', '-Infinity'] as $bad) {
+            self::assertFalse(self::takes($r, $bad), $bad);
+        }
+
+        $r = self::registryFor('{:refine :float %{min: 0}}');
+        self::assertTrue(self::takes($r, 'Infinity'));
+        self::assertFalse(self::takes($r, 'NaN'));
+        self::assertFalse(self::takes($r, '-Infinity'));
+
+        $r = self::registryFor('{:refine :float %{max: 0}}');
+        self::assertFalse(self::takes($r, 'NaN'));
     }
 
     public function testIsPrimitiveName(): void

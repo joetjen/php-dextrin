@@ -405,7 +405,7 @@ final class Validator
             return new DXNCustomTag($value->name, self::wrapAndCheck($value->value, $registry));
         }
         // Every other DXN* leaf value (DXNChar, DXNSymbol, DXNKeyword,
-        // DXNDecimal, DXNRational, DXNDate, DXNTime, DXNTimestamp,
+        // DXNDecimal, DXNRational, DXNDate, DXNTime, DXNLocalDateTime,
         // DXNDateTime, DXNUuid, DXNUri, DXNBytes, DXNRegex, ...) is
         // already a complete, opaque DXN value with nothing
         // schema-checkable inside it -- passes through untouched.

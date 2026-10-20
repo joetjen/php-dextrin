@@ -37,7 +37,7 @@ final class MapKeyTest extends TestCase
 
     public function testKeysANativeArrayCannotHoldMakeADxnMap(): void
     {
-        $map = Dextrin::decode('%{?c => 1, ~D[2026-10-17] => 2, @uuid "6f9619ff-8b86-d011-b42d-00c04fc964ff" => 3}');
+        $map = Dextrin::decode('%{?c => 1, @date "2026-10-17" => 2, @uuid "6f9619ff-8b86-d011-b42d-00c04fc964ff" => 3}');
         self::assertInstanceOf(DXNMap::class, $map);
         self::assertCount(3, $map);
         self::assertSame(1, $map->get(new DXNChar(0x63)));

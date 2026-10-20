@@ -17,6 +17,7 @@ use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -25,7 +26,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -96,15 +96,15 @@ final class Printer
             $value instanceof DXNOrderedMap => self::tagForm('ordered', '%{' . self::printOrderedEntries($value->pairs, $registry) . '}'),
             $value instanceof \JOetjen\Dextrin\Value\DXNMap => '%{' . self::printOrderedEntries($value->pairs(), $registry) . '}',
             $value instanceof DXNStruct => self::printStruct($value, $registry),
-            $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
-            $value instanceof DXNTime => '~T[' . Temporal::formatTime($value) . ']',
-            $value instanceof DXNTimestamp => '~U[' . Temporal::formatInstant($value) . ']',
-            $value instanceof DXNDateTime => self::tagForm('datetime', self::quoteString(Temporal::formatOffsetDateTime($value))),
-            $value instanceof \DateTimeInterface => self::print(DXNDateTime::fromNative($value), $registry),
-            $value instanceof DXNDuration => self::tagForm('duration', self::quoteString(Temporal::formatDuration($value))),
+            // Dates and times are ISO 8601 strings under their tag
+            // (DXN.md §1.2, Jan, 2026-10-20), written by Temporal; a
+            // native date is the datetime it always means.
+            $value instanceof DXNDate, $value instanceof DXNTime, $value instanceof DXNDateTime,
+            $value instanceof \DateTimeInterface, $value instanceof DXNLocalDateTime,
+            $value instanceof DXNDuration => self::temporalForm($value),
             $value instanceof DXNUuid => self::tagForm('uuid', self::quoteString($value->toString())),
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
-            $value instanceof DXNRegex => '~r/' . $value->pattern . '/' . self::printRegexFlags($value->flags),
+            $value instanceof DXNRegex => self::regexForm(self::printRegexFlags($value->flags), self::quoteString($value->pattern)),
             $value instanceof DXNCustomTag => self::tagForm($value->name, self::print($value->value, $registry)),
             // `@array[`, the bracket against the tag, is the preferred
             // spelling (Jan, 2026-10-20); `@array [` still reads.
@@ -166,8 +166,30 @@ final class Printer
         return "@{$name} {$printedValue}";
     }
 
-    /** @param array<string, bool> $flags */
-    private static function printRegexFlags(array $flags): string
+    private static function temporalForm(mixed $value): string
+    {
+        $tagged = Temporal::tagged($value);
+        if ($tagged === null) {
+            throw new \LogicException('unreachable: not a date or time: ' . get_debug_type($value));
+        }
+        return self::tagForm($tagged[0], self::quoteString($tagged[1]));
+    }
+
+    /**
+     * `@regex "pattern"`, or `@regex(flags) "pattern"` when it has any
+     * (DXN.md §1.2) -- what {@see \JOetjen\Dextrin\Canonical} writes too.
+     */
+    public static function regexForm(string $flags, string $quotedPattern): string
+    {
+        return $flags === '' ? "@regex {$quotedPattern}" : "@regex({$flags}) {$quotedPattern}";
+    }
+
+    /**
+     * The flags set, in DXN.md §2.3's bit order.
+     *
+     * @param array<string, bool> $flags
+     */
+    public static function printRegexFlags(array $flags): string
     {
         $out = '';
         foreach (self::REGEX_FLAG_ORDER as $f) {

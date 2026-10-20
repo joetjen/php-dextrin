@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Value;
 
-/** DXN `date` (`~D[YYYY-MM-DD]`) -- a bare calendar date, ISO 8601. */
+/** DXN `date` (`@date "YYYY-MM-DD"`) -- a bare calendar date, ISO 8601. */
 final class DXNDate implements DXNValueInterface
 {
     private const DXN_TYPE = 'date';

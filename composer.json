@@ -38,7 +38,7 @@
   "scripts": {
     "test": "phpunit",
     "test:coverage": "phpunit --coverage-text",
-    "analyse": "phpstan analyse src --level=8",
+    "analyse": "phpstan analyse src --level=8 --memory-limit=512M",
     "precommit": ["@analyse", "@test"],
     "docs": "docker run --rm -v $(pwd):/data phpdoc/phpdoc:3"
   },

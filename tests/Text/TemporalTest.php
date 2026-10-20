@@ -8,6 +8,10 @@ use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * The ISO 8601 strings under `@date`, `@time`, `@datetime`,
+ * `@local-datetime` and `@duration` (DXN.md §1.2, §1.5).
+ */
 final class TemporalTest extends TestCase
 {
     public function testDateRoundTrips(): void
@@ -15,51 +19,74 @@ final class TemporalTest extends TestCase
         self::assertSame('2024-06-01', Temporal::formatDate(Temporal::parseDate('2024-06-01')));
     }
 
-    public function testTimeRoundTripsWithAndWithoutFraction(): void
-    {
-        self::assertSame('13:45:30', Temporal::formatTime(Temporal::parseTime('13:45:30')));
-        self::assertSame('13:45:30.123456', Temporal::formatTime(Temporal::parseTime('13:45:30.123456')));
-    }
-
-    public function testTimeFractionIsPaddedToMicroseconds(): void
-    {
-        $t = Temporal::parseTime('13:45:30.5');
-        self::assertSame(500000, $t->microsecond);
-    }
-
-    public function testInstantRoundTripsIncludingPreEpoch(): void
-    {
-        self::assertSame('1990-01-01 00:00:00Z', Temporal::formatInstant(Temporal::parseInstant('1990-01-01 00:00:00Z')));
-
-        $pre1970 = Temporal::parseInstant('1960-01-01 00:00:00.500000Z');
-        self::assertSame('1960-01-01 00:00:00.500000Z', Temporal::formatInstant($pre1970));
-    }
-
-    public function testInstantRequiresTrailingZ(): void
+    public function testADateIsFourTwoAndTwoDigits(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        Temporal::parseInstant('2024-06-01 00:00:00');
+        Temporal::parseDate('2024-6-1');
     }
 
-    public function testOffsetDateTimeRoundTripsPositiveNegativeAndUtc(): void
+    public function testTimeRoundTripsWithAndWithoutFractionItsTrailingZerosDropped(): void
     {
-        self::assertSame('2024-06-01T13:45:30+02:00', Temporal::formatOffsetDateTime(Temporal::parseOffsetDateTime('2024-06-01T13:45:30+02:00')));
-        self::assertSame('2024-06-01T13:45:30-05:30', Temporal::formatOffsetDateTime(Temporal::parseOffsetDateTime('2024-06-01T13:45:30-05:30')));
-        self::assertSame('2024-06-01T13:45:30Z', Temporal::formatOffsetDateTime(Temporal::parseOffsetDateTime('2024-06-01T13:45:30Z')));
+        self::assertSame('13:45:30', Temporal::formatTime(Temporal::parseTime('13:45:30')));
+        self::assertSame('13:45:30.123456789', Temporal::formatTime(Temporal::parseTime('13:45:30.123456789')));
+        self::assertSame('13:45:30.5', Temporal::formatTime(Temporal::parseTime('13:45:30.500000')));
+        self::assertSame('13:45:30', Temporal::formatTime(Temporal::parseTime('13:45:30.000')));
     }
 
-    public function testOffsetDateTimeSameInstantDifferentOffsetHasDifferentEpoch(): void
+    public function testTimeFractionIsPaddedToNanoseconds(): void
     {
-        $utc = Temporal::parseOffsetDateTime('2024-06-01T12:00:00Z');
-        $plusTwo = Temporal::parseOffsetDateTime('2024-06-01T14:00:00+02:00');
-        self::assertSame((string) $utc->epochMicroseconds, (string) $plusTwo->epochMicroseconds);
+        self::assertSame(500_000_000, Temporal::parseTime('13:45:30.5')->nanosecond);
+    }
+
+    public function testTimeTakesNoMoreThanNineFractionDigits(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Temporal::parseTime('13:45:30.1234567891');
+    }
+
+    public function testDateTimeRoundTripsPositiveNegativeAndUtcIncludingPreEpoch(): void
+    {
+        foreach ([
+            '2024-06-01T13:45:30+02:00',
+            '2024-06-01T13:45:30-05:30',
+            '2024-06-01T13:45:30Z',
+            '1960-01-01T00:00:00.5Z',
+        ] as $s) {
+            self::assertSame($s, Temporal::formatDateTime(Temporal::parseDateTime($s)));
+        }
+    }
+
+    public function testTheSameInstantAtAnotherOffsetHasTheSameEpoch(): void
+    {
+        $utc = Temporal::parseDateTime('2024-06-01T12:00:00Z');
+        $plusTwo = Temporal::parseDateTime('2024-06-01T14:00:00+02:00');
+        self::assertSame($utc->epochNanoseconds, $plusTwo->epochNanoseconds);
+        self::assertSame(120, $plusTwo->offsetMinutes);
+    }
+
+    public function testAnUnknownOffsetIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Temporal::parseDateTime('2024-06-01T12:00:00-00:00');
+    }
+
+    public function testALocalDateTimeRoundTripsAndHasNoOffset(): void
+    {
+        self::assertSame('1969-12-31T23:59:59.999999999', Temporal::formatLocalDateTime(Temporal::parseLocalDateTime('1969-12-31T23:59:59.999999999')));
+        self::assertSame(-1, Temporal::parseLocalDateTime('1969-12-31T23:59:59.999999999')->localNanoseconds);
     }
 
     public function testDurationRoundTripsAllFieldKinds(): void
     {
-        foreach (['P1Y2M3DT4H5M6.5S', 'P1W', 'P1Y', 'PT1H'] as $s) {
+        foreach (['P1Y2M3DT4H5M6.5S', 'P1W', 'P1Y', 'PT1H', 'PT0.000000001S', 'P-1D', 'PT-1.5S'] as $s) {
             self::assertSame($s, Temporal::formatDuration(Temporal::parseDuration($s)));
         }
+    }
+
+    public function testDurationSecondsAreNanoseconds(): void
+    {
+        self::assertSame(1_500_000_000, Temporal::parseDuration('PT1.5S')->nanoseconds);
+        self::assertSame('PT1S', Temporal::formatDuration(Temporal::parseDuration('PT1.0S')));
     }
 
     public function testDurationWeeksStaysIndependentOfDays(): void
@@ -84,5 +111,11 @@ final class TemporalTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         Temporal::parseDuration('PT');
+    }
+
+    public function testDurationRejectsALeadingSign(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        Temporal::parseDuration('-P1D');
     }
 }

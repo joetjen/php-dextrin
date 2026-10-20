@@ -33,16 +33,16 @@ set          @{ ... }
 sorted-set   @sorted-set @{ ... }
 struct       %Name{ ... } | %Name[ ... ]              needs a schema to fully interpret
 array        @array[ ... ]                           fixed-size, indexed
-date         ~D[YYYY-MM-DD]
-time         ~T[HH:MM:SS(.ffffff)?]
-timestamp    ~U[YYYY-MM-DD HH:MM:SSZ]                 UTC only
-datetime     @datetime "..."                          non-UTC offset required
+date         @date "YYYY-MM-DD"
+time         @time "HH:MM:SS(.fffffffff)?"           nanoseconds
+datetime     @datetime "YYYY-MM-DDTHH:MM:SS(Z|±HH:MM)"  an instant with its offset
+local-dt     @local-datetime "YYYY-MM-DDTHH:MM:SS"    no offset
 duration     @duration "P..."                         ISO 8601 duration
 uuid         @uuid "..."                              RFC 4122
 uri          @uri "..."                               RFC 3986
 bytes        @bytes "..."                             base64 in text
 bits         @bits {"..." n}                          base64 and a bit count; whole bytes are bytes
-regex        ~r/pattern/flags                          flags: i m s u x f r
+regex        @regex "pattern" | @regex(im) "pattern"  flags: i m s u x f r
 custom-tag   @tag value                                open extension point
 ```
 
@@ -91,6 +91,10 @@ Name                            bare symbol -- a struct name or a named type
 {:nilable T}                     sugar for {:any-of :nil T}
 {:refine T %{constraints}}       base type + constraints, see below
 %schema{}    struct/record shape
+%shape{}     plain map with these fields, defaults filled (unversioned)
+{:case f %{v => T, :else => U}}  the type field f's value chooses
+{:generic [t] body}             a named type with parameters
+{:of Name T}                    one use of a generic
 ```
 
 ## `refine` constraints
@@ -123,13 +127,13 @@ PositiveInt: {:refine :integer %{min: 1}}
 
 Any `.dxns` entry that isn't a `%schema{}` is a named type — a
 reusable name for a combination of the fixed type_expr forms above,
-referenced exactly like a struct name. Can't reference a sibling named
-type declared in the *same* document (no ordering guarantee to resolve
-against); can freely reference one from an earlier-compiled document.
+referenced exactly like a struct name, from a sibling in the same
+document in any order, or from an earlier-compiled one; it may refer to
+itself through a field or a collection (DXN.md §4.5).
 
-## Reserved sigils
+## Reserved leaders
 
-None of these may begin a bare identifier: `#` `@` `%` `~` `?` `:`.
+None of these may begin a bare identifier: `#` `@` `%` `?` `:`.
 
 ## Binary (`.dxnb`) envelope
 

@@ -5,43 +5,61 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Value;
 
 /**
- * DXN `datetime` (`@datetime "..."`) -- an offset-aware instant,
- * non-UTC. Mirrors `.dxnb`'s wire shape directly: an instant plus an
- * informational offset. Same exact (not lossy) microsecond-precision
- * conversion as {@see DXNTimestamp}.
+ * DXN `datetime` (`@datetime "2026-10-20T14:30:00Z"`) -- an instant with
+ * its offset, `Z` for UTC (DXN.md §1.3). DXN 0.2's `timestamp`, a UTC
+ * instant, is one of these at offset zero (Jan, 2026-10-20). Mirrors
+ * `.dxnb`'s wire shape directly: the instant as nanoseconds since the
+ * epoch, and the offset it was written with, in minutes.
+ *
+ * `$epochNanoseconds` is a PHP integer, 64 bits: it reaches from 1677
+ * to 2262, and an instant outside that is refused ({@see Nanos}).
+ * `DateTimeImmutable` stops at the microsecond, so
+ * {@see self::toDateTimeImmutable()} drops what is finer, and
+ * {@see self::fromDateTimeImmutable()} is exact.
  */
 final class DXNDateTime implements DXNValueInterface
 {
     private const DXN_TYPE = 'datetime';
 
-    public readonly int|DXNInteger $epochMicroseconds;
+    public readonly int $epochNanoseconds;
     public readonly int $offsetMinutes;
 
-    public function __construct(int|DXNInteger $epochMicroseconds, int $offsetMinutes)
+    /** @throws \InvalidArgumentException for an offset of a day or more. */
+    public function __construct(int $epochNanoseconds, int $offsetMinutes)
     {
-        $this->epochMicroseconds = $epochMicroseconds;
+        if (abs($offsetMinutes) >= 1440) {
+            throw new \InvalidArgumentException("offset out of range: {$offsetMinutes} minutes");
+        }
+        $this->epochNanoseconds = $epochNanoseconds;
         $this->offsetMinutes = $offsetMinutes;
     }
 
+    /**
+     * The instant at its offset, to the microsecond.
+     *
+     * @throws \RuntimeException when PHP cannot build it.
+     */
     public function toDateTimeImmutable(): \DateTimeImmutable
     {
-        $utc = (new DXNTimestamp($this->epochMicroseconds))->toDateTimeImmutable();
-        $sign = $this->offsetMinutes < 0 ? '-' : '+';
-        $absMinutes = abs($this->offsetMinutes);
-        $offset = sprintf('%s%02d:%02d', $sign, intdiv($absMinutes, 60), $absMinutes % 60);
-        return $utc->setTimezone(new \DateTimeZone($offset));
+        [$seconds, $micros] = Nanos::secondsAndMicros($this->epochNanoseconds);
+        $utc = \DateTimeImmutable::createFromFormat('U.u', sprintf('%d.%06d', $seconds, $micros), new \DateTimeZone('UTC'));
+        if ($utc === false) {
+            throw new \RuntimeException("failed to build DateTimeImmutable for epoch nanoseconds {$this->epochNanoseconds}");
+        }
+        return $utc->setTimezone(new \DateTimeZone(Nanos::zoneName($this->offsetMinutes)));
     }
 
     /**
-     * `$offsetMinutes` must be supplied explicitly -- `DateTimeImmutable`
+     * `$offsetMinutes` may be supplied explicitly -- `DateTimeImmutable`
      * can't infer "the offset the caller means" any more than a plain
      * instant can; it only knows the offset its own `DateTimeZone`
      * carries, which this defaults to when not given.
+     *
+     * @throws \InvalidArgumentException outside the range 64 bits hold.
      */
     public static function fromDateTimeImmutable(\DateTimeImmutable $date, ?int $offsetMinutes = null): self
     {
-        $timestamp = DXNTimestamp::fromDateTimeImmutable($date);
-        return new self($timestamp->epochMicroseconds, $offsetMinutes ?? intdiv($date->getOffset(), 60));
+        return new self(Nanos::ofNative($date), $offsetMinutes ?? intdiv($date->getOffset(), 60));
     }
 
     /**
@@ -49,33 +67,28 @@ final class DXNDateTime implements DXNValueInterface
      * its instant, with the offset its own zone carries at that instant.
      * A host value means the same DXN type with or without a schema, and
      * a native date always has a zone, which `datetime` keeps.
+     *
+     * @throws \InvalidArgumentException outside the range 64 bits hold.
      */
     public static function fromNative(\DateTimeInterface $date): self
     {
         return self::fromDateTimeImmutable(\DateTimeImmutable::createFromInterface($date));
     }
 
-    /** @return numeric-string */
-    private static function asString(int|DXNInteger $value): string
-    {
-        return $value instanceof DXNInteger ? $value->toString() : (string) $value;
-    }
-
+    /** Ordered by instant, whatever the offsets. */
     public function compareTo(mixed $other): int
     {
         if ($other instanceof self) {
-            if ($this->epochMicroseconds instanceof DXNInteger || $other->epochMicroseconds instanceof DXNInteger) {
-                return bccomp(self::asString($this->epochMicroseconds), self::asString($other->epochMicroseconds), 0);
-            }
-            return $this->epochMicroseconds <=> $other->epochMicroseconds;
+            return $this->epochNanoseconds <=> $other->epochNanoseconds;
         }
         return Equality::dxnCompare($this, $other);
     }
 
+    /** The same instant at the same offset: one written at another offset is another value. */
     public function equals(mixed $other): bool
     {
         return $other instanceof self
-            && self::asString($this->epochMicroseconds) === self::asString($other->epochMicroseconds)
+            && $this->epochNanoseconds === $other->epochNanoseconds
             && $this->offsetMinutes === $other->offsetMinutes;
     }
 

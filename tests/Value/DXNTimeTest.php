@@ -11,16 +11,29 @@ final class DXNTimeTest extends TestCase
 {
     public function testConstructsAValidTimeOfDay(): void
     {
-        $t = new DXNTime(13, 45, 30, 123456);
+        $t = new DXNTime(13, 45, 30, 123_456_789);
         self::assertSame(13, $t->hour);
         self::assertSame(45, $t->minute);
         self::assertSame(30, $t->second);
-        self::assertSame(123456, $t->microsecond);
+        self::assertSame(123_456_789, $t->nanosecond);
     }
 
-    public function testDefaultsMicrosecondToZero(): void
+    public function testDefaultsNanosecondToZero(): void
     {
-        self::assertSame(0, (new DXNTime(0, 0, 0))->microsecond);
+        self::assertSame(0, (new DXNTime(0, 0, 0))->nanosecond);
+    }
+
+    public function testIsNanosecondsSinceMidnightAndBack(): void
+    {
+        $t = new DXNTime(13, 45, 30, 5);
+        self::assertSame(49_530_000_000_005, $t->nanosecondsSinceMidnight());
+        self::assertEquals($t, DXNTime::fromNanosecondsSinceMidnight(49_530_000_000_005));
+    }
+
+    public function testRejectsANanosecondPastTheSecond(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new DXNTime(0, 0, 0, 1_000_000_000);
     }
 
     public function testRejectsOutOfRangeFields(): void

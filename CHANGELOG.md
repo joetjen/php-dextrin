@@ -70,6 +70,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One way to write a value: every sigil is gone** (Jan, 2026-10-20;
+  DXN.md §1.2, as dextrin 45d78bc). Breaking. Dates and times are ISO
+  8601 strings under a tag -- `@date "2026-10-20"`, `@time "14:30:00.5"`,
+  `@datetime "2026-10-20T14:30:00Z"`, and the new `@local-datetime
+  "2026-10-20T14:30:00"` -- and a regex is `@regex "pattern"`, its flags
+  in a header, `@regex(im) "..."`, or inline, `@regex "(?im)..."`.
+  `~D[...]`, `~T[...]`, `~U[...]` and `~r/.../` are refused (`syntax`), as
+  are a header on any other tag, a flag given twice or an unknown one,
+  and a pattern PCRE cannot compile. A regex's canonical flags follow
+  §2.3's bit order, `imsuxfr`.
+- **`timestamp` and `datetime` are one type**, `datetime`: an instant
+  with its offset, `Z` for UTC. Breaking. `DXNTimestamp` is gone; a UTC
+  instant is a `DXNDateTime` at offset 0, and a native
+  `\DateTimeInterface` encodes as a datetime with its offset.
+  `:timestamp` in a schema is sugar for `{:refine :datetime %{offsets:
+  ["Z"]}}`, so a schema naming it keeps its meaning. New primitive
+  `:local-datetime`, with a value class `DXNLocalDateTime`.
+- **Times, datetimes, local date-times and durations carry nanoseconds**
+  (DXN.md §2.2). Breaking: `DXNTime`'s fourth field is `nanosecond` (was
+  `microsecond`), `DXNDateTime` holds `epochNanoseconds` (was
+  `epochMicroseconds`, and is a plain `int` now), and `DXNDuration`'s
+  seventh field is `nanoseconds` (was `microseconds`). PHP's integers
+  are 64 bits, so an instant is held from 1677 to 2262 and one outside
+  that is refused. In `.dxnb` the nanosecond forms have new tags (218
+  time, 219 datetime, 220 duration, 217 local date-time); 0.2's
+  microsecond tags (1, 210, 211, 212) are still read, as what they
+  meant, and never written, so a tag never changes its meaning.
+- **Refine keys `finite:` and `offsets:`** (DXN.md §4.2), and **NaN lies
+  outside every range**: `min`, `max` and both exclusive bounds refuse it.
+- **The README's size table is measured again**: the pretty layout and
+  the datetime spelling both changed it.
 - **A named type sees the named types beside it** (DXN.md §4.5): a
   reference to a sibling in the same document resolves, in any order; a
   named type that reaches itself unguarded is refused.

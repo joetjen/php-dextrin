@@ -35,14 +35,25 @@ final class ValueErrorsTest extends TestCase
         self::assertSame(['category' => 'syntax', 'offset' => 3], self::refusal('[1 @uuid "nope"]'));
     }
 
-    public function testAnImpossibleDateIsASyntaxErrorAtItsSigil(): void
+    public function testAnImpossibleDateIsASyntaxErrorAtItsTag(): void
     {
-        self::assertSame(['category' => 'syntax', 'offset' => 1], self::refusal('[~D[2020-13-45]]'));
+        self::assertSame(['category' => 'syntax', 'offset' => 1], self::refusal('[@date "2020-13-45"]'));
     }
 
-    public function testAnImpossibleTimeIsASyntaxErrorAtItsSigil(): void
+    public function testAnImpossibleTimeIsASyntaxErrorAtItsTag(): void
     {
-        self::assertSame(['category' => 'syntax', 'offset' => 5], self::refusal('%{a: ~T[25:00:00]}'));
+        self::assertSame(['category' => 'syntax', 'offset' => 5], self::refusal('%{a: @time "25:00:00"}'));
+    }
+
+    // As the reference places it: line 2, column 3.
+    public function testOnALaterLineToo(): void
+    {
+        self::assertSame(['category' => 'syntax', 'offset' => 4], self::refusal("[\n  @date \"2020-13-45\"]"));
+    }
+
+    public function testARegexThatIsNotOneIsASyntaxErrorAtItsTag(): void
+    {
+        self::assertSame(['category' => 'syntax', 'offset' => 0], self::refusal('@regex "("'));
     }
 
     public function testADatetimeThatIsNotOneIsASyntaxErrorAtItsTag(): void

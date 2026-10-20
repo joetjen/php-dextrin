@@ -13,10 +13,12 @@ namespace JOetjen\Dextrin\Text;
  * everywhere" per the spec -- this lexer skips it (and `#` comments)
  * between every token rather than emitting whitespace tokens at all.
  *
- * A few sigils bind tighter than plain "insignificant whitespace
+ * DXN 0.2's sigils, `~D[...]`, `~T[...]`, `~U[...]` and `~r/.../`, are
+ * gone (Jan, 2026-10-20): every such value is a tag with a string,
+ * `@date "..."`, so `~` begins no token and is refused where it stands.
+ *
+ * A few tokens bind tighter than plain "insignificant whitespace
  * everywhere" would suggest:
- *   - `~D[`/`~T[`/`~U[`/`~r/` are each lexed as one compound token --
- *     no whitespace may appear between `~` and the letter that follows.
  *   - `identifier ":"` (the map-entry colon-shorthand key) is lexed as
  *     one `MAP_KEY` token when the `:` immediately follows the
  *     identifier with no whitespace between them; otherwise the `:`
@@ -37,7 +39,6 @@ final class Lexer
     private const ID_CONTINUE = '/^[\p{ID_Continue}\-?!]$/u';
     private const HEX_DIGIT = '/^[0-9a-fA-F]$/';
     private const DIGIT = '/^[0-9]$/';
-    private const REGEX_FLAG = '/^[imsuxfr]$/';
 
     /** @var list<string> */
     private readonly array $cp;
@@ -105,7 +106,6 @@ final class Lexer
             $c === ')' => $this->single('RPAREN'),
             $c === '"' => $this->readString(),
             $c === '?' => $this->readChar(),
-            $c === '~' => $this->readSigil(),
             $c === '@' => $this->single('AT'),
             $c === '%' => $this->single('PERCENT'),
             $c === ':' => $this->readColon(),
@@ -351,51 +351,5 @@ final class Lexer
             $this->i++; // one codepoint
         }
         return new Token('CHAR', $this->slice($start + 1, $this->i), $start, $this->i);
-    }
-
-    /** Reads a delimited sigil body up to (not including) `$close`, honoring `\$close` as an escaped literal delimiter. */
-    private function readUntil(string $close): string
-    {
-        $start = $this->i;
-        while ($this->i < $this->len && $this->cp[$this->i] !== $close) {
-            if ($this->cp[$this->i] === '\\' && ($this->cp[$this->i + 1] ?? null) === $close) {
-                $this->i += 2;
-            } else {
-                $this->i++;
-            }
-        }
-        if (($this->cp[$this->i] ?? null) !== $close) {
-            throw new LexError("expected '{$close}'", $start);
-        }
-        $body = $this->slice($start, $this->i);
-        $this->i++; // closing delimiter
-        return $body;
-    }
-
-    private function readSigil(): Token
-    {
-        $start = $this->i;
-        if ($this->startsWith($start, '~D[')) {
-            $this->i += 3;
-            return new Token('DATE_SIGIL', $this->readUntil(']'), $start, $this->i);
-        }
-        if ($this->startsWith($start, '~T[')) {
-            $this->i += 3;
-            return new Token('TIME_SIGIL', $this->readUntil(']'), $start, $this->i);
-        }
-        if ($this->startsWith($start, '~U[')) {
-            $this->i += 3;
-            return new Token('INSTANT_SIGIL', $this->readUntil(']'), $start, $this->i);
-        }
-        if ($this->startsWith($start, '~r/')) {
-            $this->i += 3;
-            $pattern = $this->readUntil('/');
-            $flagsStart = $this->i;
-            while ($this->i < $this->len && preg_match(self::REGEX_FLAG, $this->cp[$this->i]) === 1) {
-                $this->i++;
-            }
-            return new Token('REGEX_SIGIL', ['pattern' => $pattern, 'flags' => $this->slice($flagsStart, $this->i)], $start, $this->i);
-        }
-        throw new LexError("unrecognized sigil at offset {$start}", $start);
     }
 }

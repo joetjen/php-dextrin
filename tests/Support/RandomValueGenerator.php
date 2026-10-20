@@ -7,9 +7,11 @@ namespace JOetjen\Dextrin\Tests\Support;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNDate;
+use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNSet;
@@ -60,13 +62,28 @@ final class RandomValueGenerator
             12 => new DXNUri('https://example.com/' . self::randomIdentifier($rng)),
             13 => new DXNBytes($rng->getInt(0, 3) === 0 ? '' : $rng->getBytes($rng->getInt(1, 8))),
             14 => new DXNDate($rng->getInt(1, 2900), $rng->getInt(1, 12), $rng->getInt(1, 28)),
-            15 => new DXNTime($rng->getInt(0, 23), $rng->getInt(0, 59), $rng->getInt(0, 59), $rng->getInt(0, 999999)),
+            15 => self::randomClock($rng),
             16 => new DXNList(self::items($rng, $depth)),
             17 => new DXNTuple(self::items($rng, $depth)),
             18 => self::items($rng, $depth), // bare array -> DXN `array`
             19 => new DXNSet(self::items($rng, $depth)),
             20 => self::structOrMap($rng, $depth),
             default => null,
+        };
+    }
+
+    /**
+     * A time, datetime or local date-time, to the nanosecond (DXN.md
+     * §1.3): epoch nanoseconds kept well inside the 64-bit range, so the
+     * wall clock a datetime's offset moves it to fits too.
+     */
+    private static function randomClock(\Random\Randomizer $rng): DXNTime|DXNDateTime|DXNLocalDateTime
+    {
+        $nanos = $rng->getInt(-4_000_000_000_000_000_000, 4_000_000_000_000_000_000);
+        return match ($rng->getInt(0, 2)) {
+            0 => new DXNTime($rng->getInt(0, 23), $rng->getInt(0, 59), $rng->getInt(0, 59), $rng->getInt(0, 999_999_999)),
+            1 => new DXNDateTime($nanos, $rng->getInt(-1439, 1439)),
+            default => new DXNLocalDateTime($nanos),
         };
     }
 

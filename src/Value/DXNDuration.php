@@ -6,7 +6,9 @@ namespace JOetjen\Dextrin\Value;
 
 /**
  * DXN `duration` (`@duration "P1Y2M"`) -- 7 independent, individually
- * optional fields, not reducible to one scalar. No conversion helper:
+ * optional fields, not reducible to one scalar. Seconds and their
+ * fraction are one field, `nanoseconds` (Jan, 2026-10-20); a field's
+ * sign is its own, `P-1DT2H`. No conversion helper:
  * PHP's `DateInterval` exists, but normalizes `P1W` into `days = 7`
  * internally, losing the weeks/days distinction DXN keeps
  * independent -- not a clean conversion target.
@@ -22,7 +24,7 @@ final class DXNDuration implements DXNValueInterface
         public readonly ?int $days = null,
         public readonly ?int $hours = null,
         public readonly ?int $minutes = null,
-        public readonly ?int $microseconds = null,
+        public readonly ?int $nanoseconds = null,
     ) {
     }
 
@@ -40,7 +42,7 @@ final class DXNDuration implements DXNValueInterface
             && $this->days === $other->days
             && $this->hours === $other->hours
             && $this->minutes === $other->minutes
-            && $this->microseconds === $other->microseconds;
+            && $this->nanoseconds === $other->nanoseconds;
     }
 
     public function dxnType(): string

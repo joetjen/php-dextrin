@@ -106,15 +106,15 @@ set          DXNSet{items}                             `@{...}` -- deduped, orde
 sorted-set   DXNSortedSet{items}                        `@sorted-set @{...}` -- always sorted, deduped
 array        array (bare, sequential)                  `@array[1 2 3]` -- the collections decision's other bare-native pairing
 struct       DXNStruct{name, kind, pairs|values}        `%Name{...}` / `%Name[...]`, opaque w/o schema
-date         DXNDate{year, month, day}                  `~D[YYYY-MM-DD]`
-time         DXNTime{hour, minute, second, microsecond} `~T[HH:MM:SS]`
-timestamp    DXNTimestamp{epochMicroseconds}            `~U[YYYY-MM-DD HH:MM:SSZ]`
-datetime     DXNDateTime{epochMicroseconds, offsetMinutes} `@datetime "..."`
-duration     DXNDuration{years, months, ...}            `@duration "P1Y2M"` -- 7 independent fields
+date         DXNDate{year, month, day}                  `@date "YYYY-MM-DD"`
+time         DXNTime{hour, minute, second, nanosecond}  `@time "HH:MM:SS.fffffffff"` -- nanoseconds
+datetime     DXNDateTime{epochNanoseconds, offsetMinutes} `@datetime "...Z"` / `"...+02:00"` -- an instant with its offset
+local-dt     DXNLocalDateTime{localNanoseconds}         `@local-datetime "YYYY-MM-DDTHH:MM:SS"` -- no offset
+duration     DXNDuration{years, months, ..., nanoseconds} `@duration "P1Y2M"` -- 7 independent fields
 uuid         DXNUuid{bytes}                             `@uuid "..."` -- 16 raw bytes, not the text form
 uri          DXNUri{value}                              `@uri "..."` -- raw string, not parsed
 bytes        DXNBytes{data}                             `@bytes "..."` (base64 in text)
-regex        DXNRegex{pattern, flags}                    `~r/.../flags`
+regex        DXNRegex{pattern, flags}                    `@regex "..."` / `@regex(im) "..."`
 custom-tag   DXNCustomTag{name, value}                   `@tag value`, no decoder registered
 ```
 
