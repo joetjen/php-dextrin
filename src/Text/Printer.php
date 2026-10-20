@@ -106,10 +106,12 @@ final class Printer
             $value instanceof DXNUri => self::tagForm('uri', self::quoteString($value->value)),
             $value instanceof DXNRegex => '~r/' . $value->pattern . '/' . self::printRegexFlags($value->flags),
             $value instanceof DXNCustomTag => self::tagForm($value->name, self::print($value->value, $registry)),
-            is_array($value) && array_is_list($value) => self::tagForm('array', '[' . implode(' ', array_map(
+            // `@array[`, the bracket against the tag, is the preferred
+            // spelling (Jan, 2026-10-20); `@array [` still reads.
+            is_array($value) && array_is_list($value) => '@array[' . implode(' ', array_map(
                 static fn (mixed $v): string => self::print($v, $registry),
                 $value,
-            )) . ']'),
+            )) . ']',
             is_array($value) => '%{' . self::printMapEntries($value, $registry) . '}',
             // A Closure is categorically code, not data -- letting it
             // fall through to the plain-object convenience would
