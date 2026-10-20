@@ -27,7 +27,7 @@ final class DXNInteger implements DXNValueInterface
 
     public function __construct(string $value)
     {
-        if (!preg_match('/^-?[0-9]+$/', $value)) {
+        if (!preg_match('/^-?[0-9]+$/D', $value)) {
             throw new \InvalidArgumentException("not a valid integer string: {$value}");
         }
         $this->value = self::normalizeDigits($value);

@@ -75,4 +75,17 @@ final class DXNDecimalTest extends TestCase
     {
         self::assertSame('decimal', (new DXNDecimal(1, '1', 0))->dxnType());
     }
+
+    /** A final newline is no part of a decimal: `$` is the string's end. */
+    public function testItRefusesTextFollowedByANewline(): void
+    {
+        foreach ([static fn () => DXNDecimal::fromString("1.5\n"), static fn () => new DXNDecimal(1, "15\n", -1)] as $make) {
+            try {
+                $make();
+                self::fail('a final newline should be refused');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
 }

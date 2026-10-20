@@ -26,7 +26,7 @@ final class DXNDecimal implements DXNValueInterface
         if ($sign !== 1 && $sign !== -1) {
             throw new \InvalidArgumentException('sign must be 1 or -1');
         }
-        if (!preg_match('/^[0-9]+$/', $unscaledValue)) {
+        if (!preg_match('/^[0-9]+$/D', $unscaledValue)) {
             throw new \InvalidArgumentException("unscaledValue must be an unsigned digit string: {$unscaledValue}");
         }
         $stripped = ltrim($unscaledValue, '0');
@@ -54,7 +54,7 @@ final class DXNDecimal implements DXNValueInterface
      */
     public static function fromString(string $text): self
     {
-        if (!preg_match('/^(-?)([0-9]+)(?:\.([0-9]+))?$/', $text, $m)) {
+        if (!preg_match('/^(-?)([0-9]+)(?:\.([0-9]+))?$/D', $text, $m)) {
             throw new \InvalidArgumentException("invalid decimal literal \"{$text}\"");
         }
         $sign = $m[1] === '-' ? -1 : 1;

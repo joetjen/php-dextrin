@@ -91,7 +91,7 @@ final class FileResolver
             }
         }
         return array_map(
-            static fn (array $one): Compiled => new Compiled(name: $name, fields: $one[1]->fields, version: $one[1]->version),
+            static fn (array $one): Compiled => $one[1]->withName($name),
             $found,
         );
     }

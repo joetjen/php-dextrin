@@ -21,10 +21,10 @@ final class DXNRational implements DXNValueInterface
 
     public function __construct(string $numerator, string $denominator)
     {
-        if (!preg_match('/^-?[0-9]+$/', $numerator)) {
+        if (!preg_match('/^-?[0-9]+$/D', $numerator)) {
             throw new \InvalidArgumentException("numerator must be a signed digit string: {$numerator}");
         }
-        if (!preg_match('/^[0-9]+$/', $denominator)) {
+        if (!preg_match('/^[0-9]+$/D', $denominator)) {
             throw new \InvalidArgumentException("denominator must be a positive digit string: {$denominator}");
         }
         $normalizedDenominator = self::normalize($denominator);

@@ -73,4 +73,11 @@ final class DXNIntegerTest extends TestCase
     {
         self::assertSame('integer', (new DXNInteger('1'))->dxnType());
     }
+
+    /** A final newline is no part of an integer's digits: `$` is the string's end. */
+    public function testItRefusesDigitsFollowedByANewline(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new DXNInteger("5\n");
+    }
 }

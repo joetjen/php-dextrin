@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sugar** (Jan, 2026-10-20; DXN.md §4.1; the superset's group 9; as
+  dextrin d1b050a): `:int32`, `:int64`, `:uint32`, `:uint64` and
+  `:float32`, `:number`, `{:const v}`, and `{:if I T E}` (JSON Schema's
+  if/then/else).
+- **Annotations, `{:doc T %{...}}`** (Jan, 2026-10-20; DXN.md §4.1b;
+  the superset's group 8; as dextrin 0b4225d and 053432a): a `title`,
+  `description`, `examples`, `read-only`, `write-only`, `deprecated` and
+  free `meta` on any type, around a whole schema, named type or generic
+  too, and `values:` for an enum's single values. They change nothing a
+  type takes; `Schema::annotations()` reads them (`null` for a name the
+  registry does not know) and `Schema\Compiled::$annotations` holds a
+  schema's. `bin/dextrin docs` shows them: a title, the description,
+  examples, meta and an enum's values beside the definition,
+  deprecated, read-only and write-only as chips; the example tree
+  carries a few.
+- **`{:tagged name T}`** (Jan, 2026-10-20; DXN.md §4.1; the superset's
+  group 7; as dextrin bdb20b3): a custom tag of that name whose value is
+  a `T` -- or an application's value its registered tag encoder
+  (`Registry::putTagEncoder()`) writes as one. A built-in tag's name is
+  refused, `bits` included, which DXN.md §1.3 builds in.
 - **Encoded content** (Jan, 2026-10-20; DXN.md §4.2; as dextrin
   6918cf8): `encoding:` (RFC 4648's base64, base64url, base32, base16),
   `media-type:` and `content: T` on strings -- the string, decoded, is a
@@ -222,6 +242,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A final newline is no part of a format, a time or a duration** (as
+  dextrin a56339b): the format grammars, `media-type:` and `offsets:`
+  are matched under PCRE's `D` modifier, so `$` is the string's end, and
+  `@time`, `@datetime`, `@local-datetime` and `@duration` refuse one, as
+  `@date` already did. `DXNInteger`, `DXNDecimal` and `DXNRational`
+  refuse digits followed by one as well; they kept the newline in the
+  value.
+- **A hostname's 253 are codepoints** (as dextrin a56339b), not
+  graphemes; an unknown type's compile error writes it in DXN
+  (`unrecognized type expression: :nope`), not as a PHP class name.
+  NaN and the infinities were numbers in a schema already; the
+  reference's trusted-decode fix has nothing to port, as this port has
+  no trusted decode.
 - **A `.dxnb` document read inside another keeps the outer one's
   state** (as dextrin 6918cf8): each is read by a decoder of its own, as
   it already was here; `decodeSequence()` gives every document in a

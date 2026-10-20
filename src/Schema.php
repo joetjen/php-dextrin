@@ -28,6 +28,8 @@ use JOetjen\Dextrin\Value\DXNStruct;
  *     *transform* the value they check (see
  *     {@see \JOetjen\Dextrin\Schema\Validator}'s own doc on
  *     schema-driven coercion).
+ *   - {@see self::annotations()} -- what a `{:doc}` around a schema or
+ *     named type says about it (DXN.md §4.1b).
  *
  * Enforcement during actual decoding is fail-fast and automatic: every
  * registered struct name is checked unconditionally as part of
@@ -114,6 +116,32 @@ final class Schema
     {
         self::conform($value, $registry, $name);
         return true;
+    }
+
+    /**
+     * What the `{:doc ... %{...}}` around the schema or named type `$name`
+     * says about it (DXN.md §4.1b): its annotations by name, `[]` when it
+     * has none, `null` when `$registry` knows no such name. A schema
+     * answers for its latest version. An enum's `values` are a map, as a
+     * decode builds one, from each value to its own annotations by name.
+     *
+     * ```php
+     * $registry = Schema::compile(Dextrin::decode('%{Port: {:doc :integer %{description: "A TCP port"}}}'), new Registry());
+     * Schema::annotations($registry, 'Port'); // ['description' => 'A TCP port']
+     * ```
+     *
+     * @param Registry $registry the compiled schemas and named types
+     * @param string $name the schema's or named type's name
+     * @return array<string, mixed>|null
+     */
+    public static function annotations(Registry $registry, string $name): ?array
+    {
+        $type = $registry->fetchTypeAlias($name);
+        if ($type !== null) {
+            $doc = $type->form === 'generic' ? $type->base : $type;
+            return $doc !== null && $doc->form === 'doc' ? ($doc->notes ?? []) : [];
+        }
+        return $registry->fetchStructSchema($name)?->compiled->annotations;
     }
 
     /**

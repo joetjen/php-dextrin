@@ -551,7 +551,7 @@ schema of their own, which would be circular.
 ### 4.1 `type_expr` forms
 
 ```toon
-type_expr[25]{form,dxn_shape,meaning}:
+type_expr[31]{form,dxn_shape,meaning}:
   any,":any","matches any value at all"
   never,":never","matches no value at all (JSON Schema's false)"
   primitive,":integer / :string / ...","one keyword per §1.3 type name; :bits matches bits and bytes alike, :bytes only whole bytes"
@@ -565,6 +565,11 @@ type_expr[25]{form,dxn_shape,meaning}:
   array-of,"{:array-of elem}","array whose every element matches elem"
   ordered-map-of,"{:ordered-map-of key-type val-type}","ordered map: every key matches key-type, every value matches val-type"
   sorted-set-of,"{:sorted-set-of elem}","sorted set whose every element matches elem"
+  tagged,"{:tagged acme.money T}","a custom tag of that name whose value matches T; an application's value as its registered tag encoder writes it"
+  sized,":int32 :int64 :uint32 :uint64","sugar: {:refine :integer %{min: ..., max: ...}} over that range; :float32 is {:refine :float %{float32: true}}"
+  number,":number","sugar: {:any-of :integer :float :decimal :rational}"
+  const,"{:const v}","sugar: {:enum v}, the one value v"
+  if,"{:if I T E}","a value that matches I must match T, any other E (JSON Schema's if/then/else); E is :any when left out"
   enum,"{:enum lit lit ...}","value must equal one of the given literals (any type)"
   one-of,"{:one-of a b}","exactly one variant matches (JSON Schema's oneOf): none, or two or more, is a refusal"
   any-of,"{:any-of a b}","union — one or more variants match (JSON Schema's anyOf)"
@@ -575,6 +580,7 @@ type_expr[25]{form,dxn_shape,meaning}:
   struct,"%schema{...}","struct/record shape, §4.4"
   shape,"%shape{...}","a plain map with these fields, defaults filled, §4.4a"
   case,"{:case field %{value => type, :else => type}}","the type the sibling field's value chooses, §4.4a"
+  doc,"{:doc T %{description: ...}}","T, annotated: a title, a description, examples and the like, §4.1b; takes what T takes"
   generic,"{:generic [t ...] body}","a named type with parameters, §4.5"
   of,"{:of Name type ...}","one use of a generic, its arguments where its parameters stand, §4.5"
 ```
@@ -582,6 +588,14 @@ type_expr[25]{form,dxn_shape,meaning}:
 A bare `type_expr` (no wrapping tuple/struct) is always a `primitive`
 or a `reference` — the tuple form is only needed once a constructor
 takes arguments.
+
+`{:tagged name T}` takes the name as a symbol, a keyword or a string
+(Jan, 2026-10-20). A built-in tag's name (§1.3) is a compile error
+there: `@uuid` is the type `:uuid`, no custom tag. An application's
+value -- what a registered tag decoder made of the tag -- matches when
+the registry's tag encoder for its module writes it under that name,
+with a value that matches `T`; register both directions, as for a
+struct (§4.7).
 
 ### 4.1a A list's items (`{:list-items}`)
 
@@ -617,6 +631,46 @@ anywhere else they are a compile error (`schema/compile`).
 `list-items` closes the list (an item no `p` takes is a refusal), which
 is why DXNS has no `unevaluatedItems`: a list that may go on ends in
 `{:repeat :any 0 nil}`.
+
+### 4.1b Annotations (`{:doc}`)
+
+`{:doc T %{...}}` says things about `T` and changes nothing it takes
+(Jan, 2026-10-20; JSON Schema's annotations, protobuf's options, Ion
+Schema's open content). It stands wherever a type does, and around a
+whole entry: a named type, a generic, a `%shape` or a `%schema`.
+
+```dxn
+%{
+  Order: {:doc %schema(2){
+    id:      :integer
+    email:   {:doc :string %{description: "Where receipts go", meta: %{"acme.pii" => true}}}
+    legacy?: {:doc :string %{deprecated: "use email"}}
+  } %{title: "An order", deprecated: false}}
+
+  Color: {:doc {:enum :red :green :old-blue} %{
+    values: %{:old-blue => %{deprecated: true, description: "Use :blue"}}
+  }}
+}
+```
+
+```toon
+annotations[8]{key,takes,meaning}:
+  title,string,"a short name for the type"
+  description,string,"what the type is for"
+  examples,list,"values the type takes, for a reader"
+  read-only,boolean,"the value is written by its owner only"
+  write-only,boolean,"the value is never read back"
+  deprecated,"boolean or string","true, or the reason, when the type is on its way out"
+  meta,map,"anything else, kept as written, meaning nothing to a check"
+  values,map,"on an enum: each of its values to that value's own annotations (no values of their own)"
+```
+
+Any other key is a compile error (`schema/compile`), as is a value of
+the wrong kind; `meta` is where what DXNS does not name goes.
+`Dextrin.Schema.annotations/2` reads a named type's or a schema's (its
+latest version's); a field's stay on its type. A `doc` checks the value
+`T` checks, so it is no guard (§4.5): `A: {:doc A %{}}` is a compile
+error.
 
 ### 4.2 `refine` constraints
 
@@ -726,7 +780,11 @@ compile error (`schema/compile`). Every implementation checks a format
 the same way: a format DXN has a tag for is read by that tag's reader,
 so `format: :date` takes exactly the strings `@date "..."` takes; every
 other format is the grammar below, a regular expression that PCRE,
-JavaScript (with the `u` flag) and PHP read alike.
+JavaScript (with the `u` flag) and PHP read alike. **`$` is the
+string's end**: PCRE and PHP compile the grammars with the `D` flag
+(`PCRE2_DOLLAR_ENDONLY`), which JavaScript's `$` is already, so a final
+newline is no part of a hostname. The tags' readers end there too:
+`@time "12:00:00\n"` is `syntax`.
 
 ```toon
 formats[22]{name,checked_as}:
@@ -738,8 +796,8 @@ formats[22]{name,checked_as}:
   uuid,"@uuid's reader: 8-4-4-4-12 hex digits, either case"
   ipv4,"@ip's reader: an IPv4 address, no prefix"
   ipv6,"@ip's reader: an IPv6 address, no prefix, no zone"
-  hostname,"labels LABEL joined by dots, 253 characters at most"
-  idn-hostname,"labels U-LABEL joined by dots, 253 characters at most"
+  hostname,"labels LABEL joined by dots, 253 codepoints at most"
+  idn-hostname,"labels U-LABEL joined by dots, 253 codepoints at most"
   email,"LOCAL @ DOMAIN, split at the last @: LOCAL at most 64 bytes, DOMAIN a hostname, [IPv4] or [IPv6:address]"
   idn-email,"as email, with IDN-LOCAL and an idn-hostname"
   uri,"RFC 3986's URI, from the parts below"
@@ -906,9 +964,9 @@ does not give) never matters.
 (Jan, 2026-10-20), when every such cycle passes a **guard**: a field of
 a `%shape` or `%schema`, or the elements of a collection (`list-of`,
 `list-items`, `set-of`, `map-of`, `tuple-of`, `tuple-of-all`,
-`array-of`, `ordered-map-of`, `sorted-set-of`, and a refine's
-`contains`). `nilable`, `any-of`, `one-of`, `all-of`, `not`,
-`refine` and `case` check the same value again, so they are no guard:
+`array-of`, `ordered-map-of`, `sorted-set-of`, `tagged`, and a refine's
+`contains`, `content`, `encodes` and `encodes-seq`). `nilable`, `any-of`, `one-of`, `all-of`, `not`,
+`refine`, `doc`, `if` and `case` check the same value again, so they are no guard:
 `A: {:nilable A}` describes no value and is a compile error
 (`schema/compile`). A guarded check always ends, since a DXN value is
 finite (§2.5) and every guard steps into a smaller part of it:

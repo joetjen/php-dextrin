@@ -14,6 +14,7 @@ use JOetjen\Dextrin\Text\Temporal;
 use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
+use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNDate;
 use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
@@ -43,7 +44,7 @@ use JOetjen\Dextrin\Value\Nanos;
 /**
  * Internal, compiled representation of a `.dxns` type expression -- the
  * vocabulary of DXN.md §4.1 (`any`, `never`, `primitive`, `reference`,
- * `list-of`, `list-items`, `set-of`, `tuple-of`, `tuple-of-all`, `map-of`, `array-of`,
+ * `list-of`, `list-items`, `set-of`, `tuple-of`, `tuple-of-all`, `map-of`, `array-of`, `tagged`, `doc`, `if`,
  * `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`, `any-of`,
  * `all-of`, `not`, `nilable`, `refine`) {@see Compiler} turns a parsed `.dxns` value
  * into, and what {@see self::matches()} checks a decoded/to-be-encoded
@@ -88,6 +89,7 @@ final class TypeExpr
      * @param list<array{0: mixed, 1: self}>|null $branches case
      * @param list<string>|null $params generic
      * @param list<Particle>|null $particles list-items
+     * @param array<string, mixed>|null $notes doc: its annotations by name
      */
     private function __construct(
         public readonly string $form,
@@ -105,6 +107,7 @@ final class TypeExpr
         public readonly ?self $otherwise = null,
         public readonly ?array $params = null,
         public readonly ?array $particles = null,
+        public readonly ?array $notes = null,
     ) {
     }
 
@@ -206,6 +209,36 @@ final class TypeExpr
     public static function tupleOfAll(self $elem): self
     {
         return new self('tuple-of-all', elem: $elem);
+    }
+
+    /**
+     * `{:tagged name type}`: a custom tag named `$name` whose value is an
+     * `$elem` (DXN.md §4.1).
+     */
+    public static function tagged(string $name, self $elem): self
+    {
+        return new self('tagged', name: $name, elem: $elem);
+    }
+
+    /**
+     * `{:doc type %{...}}`: `$elem`, annotated (DXN.md §4.1b). The
+     * annotations change nothing it takes.
+     *
+     * @param array<string, mixed> $notes
+     */
+    public static function doc(self $elem, array $notes): self
+    {
+        return new self('doc', elem: $elem, notes: $notes);
+    }
+
+    /**
+     * `{:if test then else}`, JSON Schema's if/then/else: a value that is
+     * a `$test` is checked as a `$then`, any other as an `$otherwise`.
+     * The test is held as `base`, the then as `elem`.
+     */
+    public static function if(self $test, self $then, self $otherwise): self
+    {
+        return new self('if', elem: $then, base: $test, otherwise: $otherwise);
     }
 
     public static function setOf(self $elem): self
@@ -347,6 +380,15 @@ final class TypeExpr
                 /** @var self $body */
                 $body = $generic->base;
                 return $body->substitute(array_combine($generic->params ?? [], $args))->conform($value, $ctx);
+            case 'doc':
+                // Annotations change nothing a type takes.
+                return ($this->elem ?? self::any())->conform($value, $ctx);
+            case 'if':
+                // A value that is a test is checked as a then, any other as
+                // an else -- what the test would fill in is not kept.
+                $test = $this->base ?? self::any();
+                $chosen = $test->conform($value, $ctx) === NoMatch::Instance ? $this->otherwise : $this->elem;
+                return ($chosen ?? self::any())->conform($value, $ctx);
         }
 
         if ($value instanceof Validated) {
@@ -402,6 +444,8 @@ final class TypeExpr
                     return NoMatch::Instance;
                 }
                 return self::all($this->elem, $value->items, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+            case 'tagged':
+                return $this->conformTagged($value, $ctx);
             case 'enum':
                 return $this->enumMatches($value) ? $value : NoMatch::Instance;
             case 'one-of':
@@ -614,6 +658,36 @@ final class TypeExpr
         return $pairs;
     }
 
+    // ---- {:tagged} --------------------------------------------------------------
+
+    /**
+     * A custom tag of this name, its value conformed to the type; or an
+     * application's value that the registry's tag encoder for its class
+     * writes as one, whose written value is a match (it is answered
+     * itself). An encoder that throws writes nothing that matches.
+     */
+    private function conformTagged(mixed $value, Context $ctx): mixed
+    {
+        $type = $this->elem ?? self::any();
+        if ($value instanceof DXNCustomTag) {
+            if ($value->name !== $this->name) {
+                return NoMatch::Instance;
+            }
+            $inner = $type->conform($value->value, $ctx);
+            return $inner === NoMatch::Instance ? NoMatch::Instance : new DXNCustomTag($value->name, $inner);
+        }
+        $encoder = is_object($value) ? $ctx->registry?->fetchTagEncoder($value::class) : null;
+        if ($encoder === null || $encoder[0] !== $this->name) {
+            return NoMatch::Instance;
+        }
+        try {
+            $written = $encoder[1]($value);
+        } catch (\Throwable) {
+            return NoMatch::Instance;
+        }
+        return $type->conform($written, $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+    }
+
     // ---- {:case} ----------------------------------------------------------------
 
     /**
@@ -741,7 +815,8 @@ final class TypeExpr
                 $this->particles ?? [],
             )]),
             'one-of', 'any-of', 'all-of' => $this->with(['variants' => $subAll($this->variants)]),
-            'list-of', 'set-of', 'array-of', 'sorted-set-of', 'tuple-of-all', 'not', 'nilable' => $this->with(['elem' => $sub($this->elem)]),
+            'list-of', 'set-of', 'array-of', 'sorted-set-of', 'tuple-of-all', 'not', 'nilable', 'tagged', 'doc' => $this->with(['elem' => $sub($this->elem)]),
+            'if' => $this->with(['base' => $sub($this->base), 'elem' => $sub($this->elem), 'otherwise' => $sub($this->otherwise)]),
             'map-of', 'ordered-map-of' => $this->with(['key' => $sub($this->key), 'value' => $sub($this->value)]),
             default => $this,
         };

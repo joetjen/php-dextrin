@@ -55,6 +55,18 @@ final class Parser
         'datetime' => true, 'local-datetime' => true, 'duration' => true, 'regex' => true,
     ];
 
+    /**
+     * The tags DXN.md §1.3 builds in: no custom tag has one of their names
+     * ({@see \JOetjen\Dextrin\Schema\Compiler}'s `{:tagged name T}`).
+     *
+     * @internal
+     * @return list<string>
+     */
+    public static function builtInTags(): array
+    {
+        return array_keys(self::BUILT_IN_TAGS);
+    }
+
     /** A regex's flag letters, as a header may give them (DXN.md §1.2). */
     private const REGEX_FLAGS = ['i', 'm', 's', 'u', 'x', 'f', 'r'];
 

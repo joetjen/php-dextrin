@@ -432,6 +432,9 @@ final class Tree
             'apply', 'tuple-of' => $all($type->elems),
             'one-of', 'any-of', 'all-of' => $all($type->variants),
             'map-of', 'ordered-map-of' => [...self::typeReferences($type->key), ...self::typeReferences($type->value)],
+            'if' => $all([$type->base, $type->elem, $type->otherwise]),
+            // `tagged` and `doc` hold their one type as `elem`, as the
+            // collections do.
             default => self::typeReferences($type->elem),
         };
     }
