@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The conformance adapter answers `media-type`, `identify` and
+  `identify-binary`** (DXN.md §6): the form a media type names, and
+  whether a body is worth decoding as text, a schema or binary, so the
+  suite checks the format test across implementations.
 - **`bin/dextrin docs` and `Schema\Docs`** (as dextrin 808d580, Jan
   2026-10-20): HTML documentation for a directory of `.dxns` schemas,
   written byte for byte as the reference writes it -- a sidebar tree of

@@ -49,6 +49,29 @@ final class ConformanceTest extends TestCase
         self::assertSame('encode/unsupported', self::categoryOf(static fn () => Dextrin::encode(static fn () => 1)));
     }
 
+    public function testAMediaTypeAnswersTheFormItNamesOrNone(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'form' => 'text'], ['id' => 'b', 'form' => 'none']],
+            self::answered([
+                ['id' => 'a', 'operation' => 'media-type', 'media-type' => 'application/vnd.acme.x+dxn'],
+                ['id' => 'b', 'operation' => 'media-type', 'media-type' => 'application/json'],
+            ]),
+        );
+    }
+
+    public function testABodyAnswersWhetherItIsWorthDecodingAsItsForm(): void
+    {
+        self::assertSame(
+            [['id' => 'a', 'identified' => 'true'], ['id' => 'b', 'identified' => 'false'], ['id' => 'c', 'identified' => 'true']],
+            self::answered([
+                ['id' => 'a', 'operation' => 'identify', 'form' => 'schema', 'text' => "# s\n%{}"],
+                ['id' => 'b', 'operation' => 'identify', 'form' => 'text', 'text' => '[1]'],
+                ['id' => 'c', 'operation' => 'identify-binary', 'binary' => 'RFgB'],
+            ]),
+        );
+    }
+
     public function testADecodeAnswersTheCanonicalForm(): void
     {
         self::assertSame(
