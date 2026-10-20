@@ -15,7 +15,9 @@ use JOetjen\Dextrin\Value\DXNRegex;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
+use JOetjen\Dextrin\Text\Parser;
 use JOetjen\Dextrin\Value\DXNTuple;
+use JOetjen\Dextrin\Value\Equality;
 
 /**
  * Compiles a parsed `.dxns` document (an ordinary decoded DXN value --
@@ -104,13 +106,14 @@ final class Compiler
     private static function compileDocument(array $schemaDoc, Registry $baseRegistry, array $names): Registry
     {
 
-        /** @var list<array{0: string, 1: DXNStruct}> $schemaEntries */
+        /** @var list<array{0: string, 1: mixed}> $schemaEntries */
         $schemaEntries = [];
         /** @var list<array{0: string, 1: mixed}> $aliasEntries */
         $aliasEntries = [];
         foreach ($schemaDoc as $key => $value) {
             $name = $names[(string) $key] ?? (string) $key;
-            if ($value instanceof DXNStruct && $value->name === 'schema') {
+            $bare = self::undoc($value);
+            if ($bare instanceof DXNStruct && $bare->name === 'schema') {
                 $schemaEntries[] = [$name, $value];
             } else {
                 $aliasEntries[] = [$name, $value];
@@ -176,6 +179,16 @@ final class Compiler
      */
     private static function compileNamed(string $name, mixed $raw, array $scope): TypeExpr
     {
+        // A named type's annotations wrap it whole: a generic keeps them on
+        // its body, a shape takes the name as it would bare.
+        if (self::isForm($raw, 'doc') && $raw instanceof DXNTuple && count($raw->items) === 3) {
+            $compiled = self::compileNamed($name, $raw->items[1], $scope);
+            if ($compiled->form === 'generic') {
+                $body = $compiled->base ?? TypeExpr::any();
+                return TypeExpr::generic($compiled->params ?? [], TypeExpr::doc($body, self::annotations($raw->items[2], $body)));
+            }
+            return TypeExpr::doc($compiled, self::annotations($raw->items[2], $compiled));
+        }
         if ($raw instanceof DXNTuple && ($raw->items[0] ?? null) instanceof DXNKeyword && $raw->items[0]->name === 'generic') {
             $params = $raw->items[1] ?? null;
             $list = $params instanceof DXNList ? $params->items : (is_array($params) ? $params : null);
@@ -258,6 +271,8 @@ final class Compiler
                 )]);
             case 'tuple-of':
                 return $type->with(['elems' => $many($type->elems)]);
+            case 'if':
+                return $type->with(['base' => $one($type->base), 'elem' => $one($type->elem), 'otherwise' => $one($type->otherwise)]);
             case 'one-of':
             case 'any-of':
             case 'all-of':
@@ -269,6 +284,8 @@ final class Compiler
             case 'tuple-of-all':
             case 'not':
             case 'nilable':
+            case 'tagged':
+            case 'doc':
                 return $type->with(['elem' => $one($type->elem)]);
             case 'map-of':
             case 'ordered-map-of':
@@ -334,13 +351,15 @@ final class Compiler
         $all = static fn (array $ts): array => array_merge([], ...array_map(static fn (TypeExpr $t): array => self::unguardedNames($t), $ts));
         // Everything not named here is a guard, or a leaf: a field, a
         // collection's elements (list-items and tuple-of-all among them),
-        // and a refine's `contains`, each of which reads a smaller part.
+        // a tagged's value, and a refine's `contains`, each of which reads
+        // a smaller part. A doc and an if check the same value.
         return match ($type->form) {
             'named' => [$type->name ?? ''],
             'apply' => [$type->name ?? '', ...$all($type->elems ?? [])],
             'generic' => self::unguardedNames($type->base ?? TypeExpr::any()),
             'one-of', 'any-of', 'all-of' => $all($type->variants ?? []),
-            'not', 'nilable' => self::unguardedNames($type->elem ?? TypeExpr::any()),
+            'not', 'nilable', 'doc' => self::unguardedNames($type->elem ?? TypeExpr::any()),
+            'if' => $all([$type->base ?? TypeExpr::any(), $type->elem ?? TypeExpr::any(), $type->otherwise ?? TypeExpr::any()]),
             'refine' => self::unguardedNames($type->base ?? TypeExpr::any()),
             'case' => $all([...($type->otherwise ? [$type->otherwise] : []), ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
             default => [],
@@ -416,9 +435,14 @@ final class Compiler
      *
      * @param array<string, TypeExpr> $aliases
      */
-    private static function compileEntry(DXNStruct $entry, array $aliases): Compiled
+    private static function compileEntry(mixed $entry, array $aliases): Compiled
     {
-        if (!$entry->isKeyed()) {
+        // A schema's annotations, `{:doc %schema{...} %{...}}`, kept on its
+        // Compiled.
+        if ($entry instanceof DXNTuple && self::isForm($entry, 'doc') && count($entry->items) === 3) {
+            return self::compileEntry($entry->items[1], $aliases)->withAnnotations(self::annotations($entry->items[2], null));
+        }
+        if (!$entry instanceof DXNStruct || !$entry->isKeyed()) {
             throw new SchemaCompileError('a schema lists its fields by name: %schema(N){field: type, ...}');
         }
         self::notFormat10($entry->pairs());
@@ -530,12 +554,28 @@ final class Compiler
             if (TypeExpr::isPrimitiveName($value->name)) {
                 return TypeExpr::primitive($value->name);
             }
+            // Sugar (DXN.md §4.1, Jan, 2026-10-20): protobuf's and MongoDB's
+            // sized numbers as their ranges, `:float32` as single
+            // precision, `:number` as every kind of number.
+            if (array_key_exists($value->name, self::SIZED)) {
+                [$least, $most] = self::SIZED[$value->name];
+                return TypeExpr::refine(TypeExpr::primitive('integer'), [
+                    'min' => $least,
+                    'max' => is_string($most) ? new DXNInteger($most) : $most,
+                ]);
+            }
+            if ($value->name === 'float32') {
+                return TypeExpr::refine(TypeExpr::primitive('float'), ['float32' => true]);
+            }
+            if ($value->name === 'number') {
+                return TypeExpr::anyOf(array_map(TypeExpr::primitive(...), ['integer', 'float', 'decimal', 'rational']));
+            }
             // DXN 0.2's timestamp type, now a datetime in UTC (DXN.md
             // §4.2, Jan, 2026-10-20): a schema naming it keeps its meaning.
             if ($value->name === 'timestamp') {
                 return TypeExpr::refine(TypeExpr::primitive('datetime'), ['offsets' => ['Z']]);
             }
-            throw new SchemaCompileError("unrecognized primitive type name \"{$value->name}\"");
+            throw new SchemaCompileError('unrecognized type expression: ' . self::inspect($value));
         }
 
         if ($value instanceof DXNSymbol) {
@@ -682,9 +722,51 @@ final class Compiler
             if ($tag === 'repeat' || $tag === 'group') {
                 throw new SchemaCompileError("a {$tag} stands only among {:list-items ...}'s items");
             }
+            // `{:tagged name type}`: a custom tag of that name, its value a
+            // type (DXN.md §4.1).
+            if ($tag === 'tagged') {
+                $name = count($rest) === 2 ? self::literalName($rest[0]) : null;
+                if (count($rest) !== 2) {
+                    throw new SchemaCompileError('a tagged is {:tagged name type}');
+                }
+                if ($name === null) {
+                    throw new SchemaCompileError('a tagged is {:tagged name type}, the name a symbol, keyword or string');
+                }
+                if (in_array($name, Parser::builtInTags(), true)) {
+                    throw new SchemaCompileError("{$name} is a built-in tag (DXN.md §1.3), no custom one: its type is :{$name}");
+                }
+                return TypeExpr::tagged($name, self::compileTypeExpr($rest[1], $aliases));
+            }
+            // `{:const v}`: the one value `v`, `{:enum v}`.
+            if ($tag === 'const') {
+                if (count($rest) !== 1) {
+                    throw new SchemaCompileError('a const is {:const value}');
+                }
+                return TypeExpr::enum([$rest[0]]);
+            }
+            // `{:if I T E}`: JSON Schema's if, then and else; `E` is `:any`
+            // when not given.
+            if ($tag === 'if') {
+                if (count($rest) !== 2 && count($rest) !== 3) {
+                    throw new SchemaCompileError('an if is {:if test then else}, else :any when left out');
+                }
+                return TypeExpr::if(
+                    self::compileTypeExpr($rest[0], $aliases),
+                    self::compileTypeExpr($rest[1], $aliases),
+                    self::compileTypeExpr($rest[2] ?? new DXNKeyword('any'), $aliases),
+                );
+            }
+            // `{:doc type %{...}}`: the type, annotated (DXN.md §4.1b).
+            if ($tag === 'doc') {
+                if (count($rest) !== 2) {
+                    throw new SchemaCompileError('a doc is {:doc type %{description: ..., ...}}');
+                }
+                $type = self::compileTypeExpr($rest[0], $aliases);
+                return TypeExpr::doc($type, self::annotations($rest[1], $type));
+            }
         }
 
-        throw new SchemaCompileError('unrecognized type expression: ' . self::describe($value));
+        throw new SchemaCompileError('unrecognized type expression: ' . self::inspect($value));
     }
 
     /**
@@ -721,6 +803,14 @@ final class Compiler
         }
         return Particle::one(self::compileTypeExpr($value, $aliases));
     }
+
+    /** The sized integers' ranges; a bound past PHP's int is its digits. */
+    private const SIZED = [
+        'int32' => [-2_147_483_648, 2_147_483_647],
+        'int64' => [PHP_INT_MIN, PHP_INT_MAX],
+        'uint32' => [0, 4_294_967_295],
+        'uint64' => [0, '18446744073709551615'],
+    ];
 
     private const REFINE_KEYS = [
         'min', 'max', 'exclusive-min', 'exclusive-max', 'multiple-of', 'min-length', 'max-length',
@@ -821,7 +911,7 @@ final class Compiler
                 : 'a list of bit numbers, non-negative integers',
             $key === 'within' => TypeExpr::span($arg) ? null : 'a duration without years or months',
             // RFC 6838's type/subtype, without parameters.
-            $key === 'media-type' => is_string($arg) && preg_match('/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/', $arg) === 1
+            $key === 'media-type' => is_string($arg) && preg_match('/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}$/D', $arg) === 1
                 ? null
                 : 'a media type, "type/subtype"',
             default => null,
@@ -861,7 +951,7 @@ final class Compiler
     /** `Z`, or `±HH:MM`. */
     private static function isOffset(mixed $text): bool
     {
-        return $text === 'Z' || (is_string($text) && preg_match('/^[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]$/', $text) === 1);
+        return $text === 'Z' || (is_string($text) && preg_match('/^[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]$/D', $text) === 1);
     }
 
     /**
@@ -955,6 +1045,131 @@ final class Compiler
             is_string($value) => $value,
             default => null,
         };
+    }
+
+    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+
+    private const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
+
+    /** Whether `$value` is a tuple headed by the keyword `$form`. */
+    private static function isForm(mixed $value, string $form): bool
+    {
+        return $value instanceof DXNTuple && ($value->items[0] ?? null) instanceof DXNKeyword && $value->items[0]->name === $form;
+    }
+
+    /** An entry's value without the `{:doc ...}` around it. */
+    private static function undoc(mixed $value): mixed
+    {
+        return $value instanceof DXNTuple && self::isForm($value, 'doc') && count($value->items) === 3 ? $value->items[1] : $value;
+    }
+
+    /**
+     * Whether `$value` is a map: a {@see DXNMap}, or a native array not
+     * shaped like a list (a native list is an `@array`); the empty one is
+     * both, and taken.
+     *
+     * @phpstan-assert-if-true array<int|string, mixed>|DXNMap $value
+     */
+    private static function isMap(mixed $value): bool
+    {
+        return $value instanceof DXNMap || (is_array($value) && ($value === [] || !array_is_list($value)));
+    }
+
+    /**
+     * A map's pairs, each key as DXN has it.
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     * @return list<array{0: mixed, 1: mixed}>
+     */
+    private static function pairsOf(array|DXNMap $map): array
+    {
+        return $map instanceof DXNMap
+            ? $map->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($map), array_values($map));
+    }
+
+    /**
+     * A doc's annotations by name, each of its kind (DXN.md §4.1b), and
+     * each enum value's under `values` keyed by name as well. `$type` is
+     * what they annotate -- `null` for a whole schema or one enum value --
+     * so `values` can be checked against an enum's literals.
+     *
+     * @return array<string, mixed>
+     */
+    private static function annotations(mixed $raw, ?TypeExpr $type): array
+    {
+        if (!self::isMap($raw)) {
+            throw new SchemaCompileError("a doc's annotations are a map, %{description: ...}, not " . self::inspect($raw));
+        }
+        $named = self::constraintNames($raw);
+        $keys = array_keys($named);
+        sort($keys, SORT_STRING);
+        foreach ($keys as $key) {
+            $what = self::annotation((string) $key, $named[$key], $type);
+            if ($what !== null) {
+                throw new SchemaCompileError("a doc's {$key} is {$what}, not " . self::inspect($named[$key]));
+            }
+        }
+        if (array_key_exists('values', $named) && self::isMap($named['values'])) {
+            $named['values'] = MapBuilder::build(
+                array_map(static fn (array $pair): array => [$pair[0], self::annotations($pair[1], null)], self::pairsOf($named['values'])),
+                static fn (string $m): \Throwable => new SchemaCompileError($m),
+            );
+        }
+        return $named;
+    }
+
+    /**
+     * What the annotation `$key` takes when `$value` is not one, `null`
+     * when it is; a key that is none, or an enum value's annotations that
+     * are wrong, throw.
+     */
+    private static function annotation(string $key, mixed $value, ?TypeExpr $type): ?string
+    {
+        return match ($key) {
+            'title', 'description' => is_string($value) ? null : 'a string',
+            'examples' => $value instanceof DXNList ? null : 'a list',
+            'read-only', 'write-only' => is_bool($value) ? null : 'true or false',
+            'deprecated' => is_bool($value) || is_string($value) ? null : 'true, false or a reason',
+            'meta' => self::isMap($value) ? null : 'a map',
+            'values' => $type !== null && $type->form === 'enum' && self::isMap($value)
+                ? self::valueAnnotations($value, $type->literals ?? [])
+                : "a map of an enum's values to their annotations, on an enum",
+            default => throw new SchemaCompileError("{$key} is no annotation; a doc holds " . implode(', ', self::ANNOTATION_KEYS)),
+        };
+    }
+
+    /**
+     * An enum's `values:`: each key one of its literals, each value a map
+     * of that value's own annotations, which hold no `values` of their own.
+     * Always `null`; a wrong one throws.
+     *
+     * @param array<int|string, mixed>|DXNMap $values
+     * @param list<mixed> $literals
+     */
+    private static function valueAnnotations(array|DXNMap $values, array $literals): null
+    {
+        $pairs = self::pairsOf($values);
+        usort($pairs, static fn (array $a, array $b): int => Equality::dxnCompare($a[0], $b[0]));
+        foreach ($pairs as [$literal, $notes]) {
+            $known = false;
+            foreach ($literals as $l) {
+                $known = $known || Equality::dxnEquals($l, $literal);
+            }
+            if (!$known) {
+                throw new SchemaCompileError("a doc's values annotate the enum's own values; " . self::inspect($literal) . ' is none of them');
+            }
+            if (!self::isMap($notes)) {
+                throw new SchemaCompileError("a doc's values hold a map of annotations for each value");
+            }
+            foreach (self::pairsOf($notes) as [$k]) {
+                if ($k instanceof DXNKeyword && $k->name === 'values') {
+                    throw new SchemaCompileError("a value's annotations hold no values of their own");
+                }
+            }
+            self::annotations($notes, null);
+        }
+        return null;
     }
 
     // ---- helpers ----------------------------------------------------------------

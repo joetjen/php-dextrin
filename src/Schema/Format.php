@@ -114,10 +114,8 @@ final class Format
             'uuid' => self::reads(static fn () => DXNUuid::fromString($text)),
             'ipv4' => self::isAddress($text, 4),
             'ipv6' => self::isAddress($text, 6),
-            // RFC 1123's labels, the whole at most 253 characters --
-            // counted as the reference's String.length/1 counts them, in
-            // graphemes.
-            'hostname', 'idn-hostname' => self::graphemes($text) <= 253 && self::matches(self::GRAMMARS[$name], $text),
+            // RFC 1123's labels, the whole at most 253 codepoints.
+            'hostname', 'idn-hostname' => mb_strlen($text, 'UTF-8') <= 253 && self::matches(self::GRAMMARS[$name], $text),
             'email' => self::isEmail($text, self::LOCAL, 'hostname'),
             'idn-email' => self::isEmail($text, self::IDN_LOCAL, 'idn-hostname'),
             'uri' => self::isUri($text, self::URI_EXTRA, true),
@@ -146,16 +144,14 @@ final class Format
         return preg_match(self::pattern($source), $text) === 1;
     }
 
-    /** `$source` as a PCRE pattern with the `u` modifier, delimited by a byte no grammar holds. */
+    /**
+     * `$source` as a PCRE pattern with the `u` and `D` modifiers, delimited
+     * by a byte no grammar holds: `$` is the string's end, so a final
+     * newline is no part of a format (as the reference's `dollar_endonly`).
+     */
     private static function pattern(string $source): string
     {
-        return "\x01{$source}\x01u";
-    }
-
-    /** `$text`'s extended grapheme clusters, as Elixir's `String.length/1` counts them. */
-    private static function graphemes(string $text): int
-    {
-        return (int) preg_match_all('/\X/u', $text);
+        return "\x01{$source}\x01uD";
     }
 
     private static function isAddress(string $text, int $version): bool

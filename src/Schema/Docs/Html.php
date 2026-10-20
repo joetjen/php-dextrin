@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema\Docs;
 
+use JOetjen\Dextrin\Canonical;
 use JOetjen\Dextrin\Schema\Docs;
+use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Text\SyntaxNode;
 
 /**
@@ -468,14 +471,132 @@ final class Html
         return "<article class=\"def kind-{$d->kind}\" id=\"{$anchor}\">\n"
             . "  <header class=\"def-head\">\n"
             . "    <h2><a class=\"self\" href=\"#{$anchor}\"><code>" . Markdown::escape($d->short) . "</code></a></h2>\n"
-            . '    <div class="chips">' . self::kindChip($d) . $this->internalChip($d) . self::versionChips($d) . "</div>\n"
-            . '    <p class="full-name"><code>' . Markdown::escape($d->name) . "</code></p>\n"
+            . '    <div class="chips">' . self::kindChip($d) . $this->internalChip($d) . self::versionChips($d) . self::annotationChips($latest->annotations) . "</div>\n"
+            . '    ' . self::title($latest->annotations) . '<p class="full-name"><code>' . Markdown::escape($d->name) . "</code></p>\n"
             . "  </header>\n"
-            . '  ' . $this->prose($d->doc, $d) . "\n"
+            . '  ' . $this->about($d, $latest->annotations) . "\n"
             . '  ' . $this->versionBody($d, $latest) . "\n"
             . "  {$olderHtml}\n"
             . '  ' . ($used === '' ? '' : "<p class=\"used-by\"><span class=\"label\">Used by</span> {$used}</p>") . "\n"
             . "</article>\n";
+    }
+
+    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+
+    /**
+     * What a definition's page says about it before its body: the doc's
+     * description, the comments, examples and meta -- each only when there
+     * is one, so a definition without annotations reads as it always did.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private function about(Definition $d, array $notes): string
+    {
+        $description = $notes['description'] ?? null;
+        $parts = [
+            $this->prose(is_string($description) ? $description : '', $d),
+            $this->prose($d->doc, $d),
+            $this->values($notes, $d),
+            self::examples($notes),
+            self::meta($notes),
+        ];
+        return implode("\n  ", array_values(array_filter($parts, static fn (string $p): bool => $p !== '')));
+    }
+
+    /**
+     * Deprecated (with its reason), read-only and write-only, as chips.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private static function annotationChips(array $notes): string
+    {
+        $deprecated = $notes['deprecated'] ?? null;
+        $out = match (true) {
+            $deprecated === true => '<span class="chip chip-deprecated">deprecated</span>',
+            is_string($deprecated) => '<span class="chip chip-deprecated" title="' . Markdown::escape($deprecated) . '">deprecated: ' . Markdown::escape($deprecated) . '</span>',
+            default => '',
+        };
+        foreach (['read-only' => 'chip-read-only', 'write-only' => 'chip-write-only'] as $key => $class) {
+            if (($notes[$key] ?? null) === true) {
+                $out .= "<span class=\"chip {$class}\">{$key}</span>";
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * An enum's values, each with what its own annotations say.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private function values(array $notes, Definition $d): string
+    {
+        $values = $notes['values'] ?? null;
+        if (!is_array($values) || $values === []) {
+            return '';
+        }
+        $written = [];
+        foreach ($values as $pair) {
+            if (is_array($pair) && array_key_exists(0, $pair) && is_array($pair[1] ?? null)) {
+                $written[] = [self::written($pair[0]), $pair[1]];
+            }
+        }
+        usort($written, static fn (array $a, array $b): int => strcmp($a[0], $b[0]));
+        $rows = '';
+        foreach ($written as [$literal, $own]) {
+            /** @var array<string, mixed> $own */
+            $text = $own['description'] ?? null;
+            $description = is_string($text) ? Markdown::toHtml($text, $this->linker($d->scope)) : '';
+            $rows .= '<dt><code>' . Markdown::escape($literal) . '</code>' . self::annotationChips($own) . "</dt><dd>{$description}</dd>";
+        }
+        return "<dl class=\"values\"><p class=\"label\">Values</p>{$rows}</dl>";
+    }
+
+    /** @param array<string, mixed> $notes */
+    private static function title(array $notes): string
+    {
+        $title = $notes['title'] ?? null;
+        return is_string($title) ? '<p class="title">' . Markdown::escape($title) . '</p>' : '';
+    }
+
+    /** @param array<string, mixed> $notes */
+    private static function examples(array $notes): string
+    {
+        $examples = $notes['examples'] ?? null;
+        if (!$examples instanceof DXNList || $examples->items === []) {
+            return '';
+        }
+        $items = '';
+        foreach ($examples->items as $example) {
+            $items .= '<li><code>' . Markdown::escape(self::written($example)) . '</code></li>';
+        }
+        return "<div class=\"examples\"><p class=\"label\">Examples</p><ul>{$items}</ul></div>";
+    }
+
+    /** @param array<string, mixed> $notes */
+    private static function meta(array $notes): string
+    {
+        $meta = $notes['meta'] ?? null;
+        if (!(is_array($meta) || $meta instanceof DXNMap) || Docs::pairsOf($meta) === []) {
+            return '';
+        }
+        $rows = array_map(static fn (array $pair): array => [self::written($pair[0]), self::written($pair[1])], Docs::pairsOf($meta));
+        usort($rows, static fn (array $a, array $b): int => strcmp($a[0], $b[0]) ?: strcmp($a[1], $b[1]));
+        $out = '';
+        foreach ($rows as [$key, $value]) {
+            $out .= '<dt><code>' . Markdown::escape($key) . '</code></dt><dd><code>' . Markdown::escape($value) . '</code></dd>';
+        }
+        return "<dl class=\"meta\"><p class=\"label\">Meta</p>{$out}</dl>";
+    }
+
+    /** A decoded value as DXN writes it; its PHP type when it has no DXN form. */
+    private static function written(mixed $value): string
+    {
+        try {
+            return Canonical::print($value);
+        } catch (\Throwable) {
+            return get_debug_type($value);
+        }
     }
 
     private static function display(Definition $d): string
@@ -541,12 +662,14 @@ final class Html
         $positionHead = $d->kind === 'schema' ? '<th scope="col" class="pos" title="Position in the binary form">#</th>' : '';
         $rows = '';
         foreach ($version->fields as $f) {
-            $notes = '';
-            foreach ([$f->description, $f->doc] as $text) {
+            $own = $f->annotations['description'] ?? null;
+            $notes = self::annotationChips($f->annotations);
+            foreach ([is_string($own) ? $own : null, $f->description, $f->doc] as $text) {
                 if ($text !== null && $text !== '') {
                     $notes .= Markdown::toHtml($text, $this->linker($d->scope));
                 }
             }
+            $notes .= $this->values($f->annotations, $d) . self::examples($f->annotations) . self::meta($f->annotations);
             $default = $f->default !== null
                 ? '<div class="default"><span class="label">default</span> <code>' . $this->typeHtml($f->default, $d) . '</code></div>'
                 : '';

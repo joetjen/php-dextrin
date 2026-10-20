@@ -76,4 +76,68 @@ final class DocsTest extends TestCase
         $this->expectExceptionMessageMatches('/bad\.dxns/');
         Docs::site($root);
     }
+
+    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b; as dextrin 053432a) ----------
+
+    private const ANNOTATED = <<<'DXN'
+        %{
+          Order: {:doc %schema(2){
+            id: :integer
+            email: {:doc :string %{description: "Where *receipts* go", read-only: true}}
+            legacy?: {:doc :string %{deprecated: "use email"}}
+          } %{title: "An order", description: "One checkout.", examples: [%Order(2){id: 1, email: "a@b"}]}}
+
+          Port: {:doc {:refine :integer %{min: 1}} %{deprecated: true, meta: %{"acme.owner" => "net"}}}
+        }
+        DXN;
+
+    /**
+     * The page among `$pages` that defines `$id`.
+     *
+     * @param array<string, string> $pages
+     */
+    private static function pageWith(array $pages, string $id): string
+    {
+        foreach ($pages as $page) {
+            if (str_contains($page, "id=\"{$id}\"")) {
+                return $page;
+            }
+        }
+        self::fail("no page defines {$id}");
+    }
+
+    public function testAnAnnotatedSchemaIsStillASchemaItsFieldsStillFields(): void
+    {
+        $html = self::pageWith(self::site(['shop.dxns' => self::ANNOTATED]), 'Order');
+        self::assertStringContainsString('struct schema', $html);
+        self::assertStringContainsString('<code>email</code>', $html);
+        self::assertStringNotContainsString('{:doc', $html);
+    }
+
+    public function testATitleADescriptionExamplesAndMetaAreShownWithTheDefinition(): void
+    {
+        $html = self::pageWith(self::site(['shop.dxns' => self::ANNOTATED]), 'Order');
+        foreach (['An order', 'One checkout.', 'Examples', 'a@b', 'acme.owner'] as $text) {
+            self::assertStringContainsString($text, $html);
+        }
+    }
+
+    public function testDeprecatedReadOnlyAndWriteOnlyAreChipsAFieldsDescriptionIsItsNote(): void
+    {
+        $html = self::pageWith(self::site(['shop.dxns' => self::ANNOTATED]), 'Order');
+        self::assertStringContainsString('class="chip chip-deprecated"', $html);
+        self::assertStringContainsString('use email', $html);
+        self::assertStringContainsString('class="chip chip-read-only"', $html);
+        self::assertStringContainsString('<em>receipts</em>', $html);
+    }
+
+    public function testAnEnumsValuesAreListedWithTheirOwnNotes(): void
+    {
+        $html = self::pageWith(self::site([
+            'c.dxns' => '%{Color: {:doc {:enum :red :old} %{values: %{:old => %{deprecated: true, description: "Use red"}}}}}',
+        ]), 'Color');
+        self::assertStringContainsString('<dl class="values">', $html);
+        self::assertStringContainsString('Use red', $html);
+        self::assertStringContainsString('<code>:old</code><span class="chip chip-deprecated">', $html);
+    }
 }

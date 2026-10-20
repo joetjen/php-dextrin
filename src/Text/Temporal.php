@@ -27,15 +27,15 @@ use JOetjen\Dextrin\Value\Nanos;
  */
 final class Temporal
 {
-    // `D`: no trailing newline, as the reference reads a date; the
-    // others take one, as the reference's readers do.
+    // `D`: `$` is the text's end, so no reader takes a final newline (the
+    // reference's `\z`, Jan, 2026-10-20).
     private const DATE_RE = '/^(\d{4})-(\d{2})-(\d{2})$/D';
-    private const TIME_RE = '/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/';
-    private const DATETIME_RE = '/^(\d{4}-\d{2}-\d{2})T([^Z+-]+)(Z|[+-]\d{2}:\d{2})$/';
-    private const LOCAL_RE = '/^(\d{4}-\d{2}-\d{2})T(.+)$/';
+    private const TIME_RE = '/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/D';
+    private const DATETIME_RE = '/^(\d{4}-\d{2}-\d{2})T([^Z+-]+)(Z|[+-]\d{2}:\d{2})$/D';
+    private const LOCAL_RE = '/^(\d{4}-\d{2}-\d{2})T(.+)$/D';
     // A field's sign is its own, `P-1DT2H`; seconds take up to nine
     // fraction digits.
-    private const DURATION_RE = '/^P(?:(-?\d+)Y)?(?:(-?\d+)M)?(?:(-?\d+)W)?(?:(-?\d+)D)?(?:T(?:(-?\d+)H)?(?:(-?\d+)M)?(?:(-?)(\d+)(?:\.(\d{1,9}))?S)?)?$/';
+    private const DURATION_RE = '/^P(?:(-?\d+)Y)?(?:(-?\d+)M)?(?:(-?\d+)W)?(?:(-?\d+)D)?(?:T(?:(-?\d+)H)?(?:(-?\d+)M)?(?:(-?)(\d+)(?:\.(\d{1,9}))?S)?)?$/D';
 
     private function __construct()
     {

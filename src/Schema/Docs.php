@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\Canonical;
+use JOetjen\Dextrin\Dextrin;
 use JOetjen\Dextrin\Document;
+use JOetjen\Dextrin\MapBuilder;
+use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Schema\Docs\At;
 use JOetjen\Dextrin\Schema\Docs\Comments;
 use JOetjen\Dextrin\Schema\Docs\Definition;
@@ -311,7 +316,8 @@ final class Docs
         foreach ($file['entries'] as $entry) {
             $name = $names[$entry['key']];
             $internalTo = $holder !== null && $entry['key'] !== $own ? $owner : null;
-            [$kind, $version, $fields] = self::classify($entry['value'], $file['fileVersion']);
+            [$value, $notes] = self::undoc($entry['value']);
+            [$kind, $version, $fields] = self::classify($value, $file['fileVersion']);
             $out[] = new Definition(
                 $name,
                 $entry['key'],
@@ -326,11 +332,100 @@ final class Docs
                     $file['file'],
                     $holder !== null && $entry['key'] === $own ? $file['leading'] : null,
                     $fields,
-                    $entry['value'],
+                    $value,
+                    $notes,
                 )],
             );
         }
         return $out;
+    }
+
+    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+
+    /**
+     * A value node without the `{:doc T %{...}}` around it, and what the doc
+     * says: its annotations by name, each value decoded -- `[]` for a value
+     * without one. An enum's `values` are a list of each value and its own
+     * annotations by name.
+     *
+     * @return array{0: ?At, 1: array<string, mixed>}
+     */
+    public static function undoc(?At $value): array
+    {
+        $body = $value === null ? null : self::bodyOf($value->node);
+        if ($value === null || $body === null || $body->kind !== 'tuple') {
+            return [$value, []];
+        }
+        $parts = array_values(array_filter($body->children, static fn (SyntaxNode $c): bool => $c->kind === 'value'));
+        if (count($parts) !== 3 || self::text($value, $parts[0]) !== ':doc') {
+            return [$value, []];
+        }
+        try {
+            $map = Dextrin::decode(self::source($value, $parts[2]));
+        } catch (\Throwable) {
+            return [$value, []];
+        }
+        return is_array($map) || $map instanceof DXNMap ? [$value->at($parts[1]), self::namedNotes($map)] : [$value, []];
+    }
+
+    /**
+     * Annotations keyed by name, and so are each enum value's under
+     * `values`.
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     * @return array<string, mixed>
+     */
+    private static function namedNotes(array|DXNMap $map): array
+    {
+        $named = [];
+        foreach (self::pairsOf($map) as [$key, $value]) {
+            $name = self::annotationName($key);
+            if ($name === 'values' && (is_array($value) || $value instanceof DXNMap)) {
+                $named['values'] = array_map(
+                    static fn (array $pair): array => [$pair[0], is_array($pair[1]) || $pair[1] instanceof DXNMap ? self::namedNotes($pair[1]) : []],
+                    self::pairsOf($value),
+                );
+            } else {
+                $named[$name] = $value;
+            }
+        }
+        return $named;
+    }
+
+    /**
+     * A map's pairs, each key as DXN has it.
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     * @return list<array{0: mixed, 1: mixed}>
+     */
+    public static function pairsOf(array|DXNMap $map): array
+    {
+        return $map instanceof DXNMap
+            ? $map->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($map), array_values($map));
+    }
+
+    /** An annotation's key as a name: a keyword's, a string, or anything else as DXN writes it. */
+    private static function annotationName(mixed $key): string
+    {
+        if ($key instanceof DXNKeyword) {
+            return $key->name;
+        }
+        if (is_string($key)) {
+            return $key;
+        }
+        try {
+            return Canonical::print($key);
+        } catch (\Throwable) {
+            return get_debug_type($key);
+        }
+    }
+
+    /** A node's source as written, trivia included, so it decodes as it reads. */
+    private static function source(At $at, SyntaxNode $node): string
+    {
+        $from = $at->tokens[$node->first]->start;
+        return substr($at->source, $from, $at->tokens[$node->last]->end - $from);
     }
 
     /** The name of a struct node: the identifier after its `%`. */
@@ -406,8 +501,10 @@ final class Docs
         return $out;
     }
 
-    private static function field(At $at, string $name, bool $optional, ?SyntaxNode $value, string $doc, int $position): Field
+    private static function field(At $at, string $name, bool $optional, ?SyntaxNode $written, string $doc, int $position): Field
     {
+        [$typed, $notes] = self::undoc($written === null ? null : $at->at($written));
+        $value = $typed?->node;
         $struct = $value === null ? null : self::bodyOf($value);
         $keyed = null;
         if ($struct !== null && self::structName($at, $struct) === 'field') {
@@ -418,7 +515,7 @@ final class Docs
             }
         }
         if ($keyed === null) {
-            return new Field($name, $optional, $value === null ? null : $at->at($value), null, null, $doc, $position);
+            return new Field($name, $optional, $value === null ? null : $at->at($value), null, null, $doc, $position, $notes);
         }
         $parts = [];
         foreach ($keyed->children as $entry) {
@@ -428,14 +525,16 @@ final class Docs
         }
         $node = static fn (string $k): ?At => isset($parts[$k]) ? $at->at($parts[$k]) : null;
         $description = $parts['description'] ?? null;
+        [$type, $typeNotes] = self::undoc($node('type'));
         return new Field(
             $name,
             $optional,
-            $node('type'),
+            $type,
             $node('default'),
             $description === null ? null : self::stringValue($at, $description),
             $doc,
             $position,
+            $typeNotes + $notes,
         );
     }
 
