@@ -7,6 +7,7 @@ namespace JOetjen\Dextrin\Tests\Schema;
 use JOetjen\Dextrin\Dextrin;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema;
+use JOetjen\Dextrin\Schema\Docs;
 use JOetjen\Dextrin\Schema\SchemaCompileError;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
 use PHPUnit\Framework\TestCase;
@@ -19,6 +20,12 @@ use PHPUnit\Framework\TestCase;
  * decode reading six keywords as the values whose atoms they share, has
  * nothing to port: this port has no trusted decode, a keyword is always
  * a `DXNKeyword` ({@see \JOetjen\Dextrin\Registry}'s doc).
+ *
+ * The node port's and this port's own cross-checks found more in the
+ * reference (dextrin 7c45598, 3b0ccc6): `bits` is a built-in tag, an
+ * enum's literal is the value itself, the docs survive a value annotation
+ * that is no map, a generic checked by its own name is refused. This port
+ * did all four already; the reference's tests are ported so it stays so.
  */
 final class ReferenceFixesTest extends TestCase
 {
@@ -118,6 +125,54 @@ final class ReferenceFixesTest extends TestCase
         } catch (SchemaCompileError $err) {
             self::assertStringContainsString(':nope', $err->getMessage());
             self::assertStringNotContainsString('DXNKeyword', $err->getMessage());
+        }
+    }
+
+    // The node port's cross-check (dextrin 7c45598).
+
+    public function testBitsIsABuiltInTagNoCustomOne(): void
+    {
+        try {
+            self::compiled('{:tagged bits :any}');
+            self::fail('bits should be refused as a custom tag');
+        } catch (SchemaCompileError $err) {
+            self::assertStringContainsString('built-in', $err->getMessage());
+        }
+    }
+
+    public function testAnEnumsLiteralIsTheValueItselfOneIsNotOnePointZero(): void
+    {
+        self::assertFalse(self::takes('{:enum 1}', 1.0));
+        self::assertFalse(self::takes('{:const 1.0}', 1));
+        self::assertTrue(self::takes('{:enum 1 2}', 2));
+        self::assertFalse(self::takes('{:enum %{a: 1}}', Dextrin::decode('%{a: 1.0}')));
+    }
+
+    public function testTheDocsShowAValueWhoseAnnotationsAreNoMapAndDoNotCrash(): void
+    {
+        $root = sys_get_temp_dir() . '/dextrin-fix-' . uniqid('', true);
+        mkdir($root, 0777, true);
+        file_put_contents("{$root}/c.dxns", '%{C: {:doc {:enum :a} %{values: %{:a => 5}}}}');
+        self::assertNotEmpty(iterator_to_array(Docs::site($root, 'T'), false));
+    }
+
+    // This port's own cross-check (dextrin 3b0ccc6).
+
+    public function testAGenericCheckedByItsOwnNameRefusesTheValueAndRaisesNothingElse(): void
+    {
+        $registry = Schema::compile(Dextrin::decode(<<<'DXN'
+            %{
+              Page: {:generic [t] %shape{items: {:list-of t}}}
+              Doc: {:doc {:generic [t] {:list-of t}} %{description: "x"}}
+            }
+            DXN), new Registry());
+        foreach (['Page', 'Doc'] as $name) {
+            try {
+                Schema::check(Dextrin::decode('%{items: []}'), $registry, $name);
+                self::fail("{$name} should refuse the value");
+            } catch (SchemaValidationError $err) {
+                self::assertSame('schema/type-mismatch', $err->category(), $name);
+            }
         }
     }
 }

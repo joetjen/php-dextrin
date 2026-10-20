@@ -143,6 +143,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The README compares DXNS with the other schema languages** (as
+  dextrin 1006a08): a table against JSON Schema, MongoDB's
+  `$jsonSchema`, CDDL, Protobuf and Ion Schema; why a DXNS type is never
+  closed, with `strict: true` on `Dextrin::decode()` the reader's switch;
+  and how a schema changes across services, with
+  `Registry::putStructMaterializer()` and `bin/dextrin compat`.
+- **The datetime range is a documented limit of PHP** (Jan, 2026-10-20):
+  a datetime and a local date-time hold nanoseconds since 1970 in PHP's
+  64-bit integers, so they range only from 1677 to 2262, and one outside
+  that is refused. It stays so -- a limit of PHP itself, not of DXN, which
+  a future PHP may lift -- and the README says so beside the port's
+  other differences.
+
 - **Every refine argument is checked when the schema compiles** (as
   dextrin 6918cf8): a count that is no non-negative integer, a flag that
   is no boolean, `multiple-of: 0`, `bits: 5`, a `pattern` that is no
@@ -241,6 +254,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no known type.
 
 ### Fixed
+
+- **The docs' stylesheet indents the `--warn` line of its second
+  dark-theme block as its neighbours** (as dextrin 7c45598), so
+  `bin/dextrin docs` writes the reference's `example/doc` byte for byte
+  again.
+- **The reference's cross-check fixes are covered** (as dextrin 7c45598
+  and 3b0ccc6): `bits` is a built-in tag for `{:tagged}`, `{:enum 1}`
+  refuses `1.0`, the docs survive an enum value whose annotations are no
+  map, and a generic checked by its own name is refused
+  (`schema/type-mismatch`). This port did all four already; the
+  reference's tests are ported, so it stays so.
 
 - **A final newline is no part of a format, a time or a duration** (as
   dextrin a56339b): the format grammars, `media-type:` and `offsets:`
