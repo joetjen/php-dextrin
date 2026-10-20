@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The API docs' front page opens with the development warning**
+  (Jan, 2026-10-20): `.phpdoc/template/index.html.twig` overrides
+  phpDocumentor's front page, as in Cooper's PHP packages.
 - **The package description opens with the development warning**
   (Jan, 2026-10-20), "Under heavy development: not for production use
   before 1.0.0.", so the registry's search results show it too.
