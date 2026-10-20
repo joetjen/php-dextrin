@@ -424,7 +424,12 @@ final class Tree
             'reference' => [$type->name ?? ''],
             'shape' => $all(array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? [])),
             'case' => $all([$type->otherwise, ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
-            'generic', 'refine' => self::typeReferences($type->base),
+            'generic' => self::typeReferences($type->base),
+            'refine' => [
+                ...self::typeReferences($type->base),
+                ...self::typeReferences(($type->constraints['contains'] ?? null) instanceof TypeExpr ? $type->constraints['contains'] : null),
+            ],
+            'list-items' => $all(array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? []))),
             'apply', 'tuple-of' => $all($type->elems),
             'one-of', 'any-of', 'all-of' => $all($type->variants),
             'map-of', 'ordered-map-of' => [...self::typeReferences($type->key), ...self::typeReferences($type->value)],
