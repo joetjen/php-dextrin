@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\Canonical;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Registry;
@@ -721,14 +722,17 @@ final class Compiler
 
     private const REFINE_KEYS = [
         'min', 'max', 'exclusive-min', 'exclusive-max', 'multiple-of', 'min-length', 'max-length',
-        'pattern', 'min-count', 'max-count', 'finite', 'offsets', 'version', 'prefix', 'contains',
-        'min-contains', 'max-contains', 'unique', 'unique-by',
+        'min-bytes', 'max-bytes', 'pattern', 'min-count', 'max-count', 'finite', 'float32', 'offsets',
+        'version', 'prefix', 'contains', 'min-contains', 'max-contains', 'unique', 'unique-by',
+        'min-precision', 'max-precision', 'min-exponent', 'max-exponent', 'bits', 'before-now',
+        'after-now', 'within', 'resolution',
     ];
 
     /**
      * A refine's constraints by name, every key one DXN.md §4.2 knows: a
      * misspelt key would otherwise refuse every value, silently.
-     * `contains` holds a type, compiled here; `unique-by` a field's name.
+     * `contains` holds a type, compiled here; `unique-by` and
+     * `resolution` a name.
      *
      * @param array<int|string, mixed>|DXNMap $constraints
      * @param array<string, TypeExpr> $aliases
@@ -736,14 +740,7 @@ final class Compiler
      */
     private static function refineConstraints(array|DXNMap $constraints, array $aliases): array
     {
-        $pairs = $constraints instanceof DXNMap
-            ? $constraints->pairs()
-            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($constraints), array_values($constraints));
-        $named = [];
-        foreach ($pairs as [$key, $value]) {
-            $name = self::literalName($key) ?? throw new SchemaCompileError('a refine constraint is named by a keyword (DXN.md §4.2)');
-            $named[$name] = $value;
-        }
+        $named = self::constraintNames($constraints);
         $keys = array_keys($named);
         sort($keys, SORT_STRING);
         foreach ($keys as $key) {
@@ -757,11 +754,70 @@ final class Compiler
         if (array_key_exists('contains', $named)) {
             $named['contains'] = self::compileTypeExpr($named['contains'], $aliases);
         }
-        if (array_key_exists('unique-by', $named)) {
-            $named['unique-by'] = self::literalName($named['unique-by'])
-                ?? throw new SchemaCompileError('unique-by names a field: a keyword, symbol or string');
+        $named = self::namedArg($named, 'unique-by', null);
+        return self::namedArg($named, 'resolution', TypeExpr::resolutions());
+    }
+
+    /**
+     * The constraints keyed by their names; a key that is no name is an
+     * error, not a crash.
+     *
+     * @param array<int|string, mixed>|DXNMap $constraints
+     * @return array<string, mixed>
+     */
+    private static function constraintNames(array|DXNMap $constraints): array
+    {
+        $pairs = $constraints instanceof DXNMap
+            ? $constraints->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($constraints), array_values($constraints));
+        $named = [];
+        foreach ($pairs as [$key, $value]) {
+            $name = self::literalName($key)
+                ?? throw new SchemaCompileError("a refine constraint's key is a name, not " . self::inspect($key));
+            $named[$name] = $value;
         }
         return $named;
+    }
+
+    /**
+     * `$key`'s argument as a name, one of `$allowed` when they are given.
+     *
+     * @param array<string, mixed> $named
+     * @param list<string>|null $allowed
+     * @return array<string, mixed>
+     */
+    private static function namedArg(array $named, string $key, ?array $allowed): array
+    {
+        if (!array_key_exists($key, $named)) {
+            return $named;
+        }
+        $arg = $named[$key];
+        $name = self::literalName($arg);
+        if ($name === null || ($allowed !== null && !in_array($name, $allowed, true))) {
+            throw new SchemaCompileError("{$key} takes " . self::expected($allowed) . ', not ' . self::inspect($arg));
+        }
+        $named[$key] = $name;
+        return $named;
+    }
+
+    /** @param list<string>|null $allowed */
+    private static function expected(?array $allowed): string
+    {
+        if ($allowed === null) {
+            return 'a name';
+        }
+        sort($allowed, SORT_STRING);
+        return 'one of ' . implode(' ', array_map(static fn (string $name): string => ":{$name}", $allowed));
+    }
+
+    /** `$value` as DXN text, for a message; its PHP type when it has none. */
+    private static function inspect(mixed $value): string
+    {
+        try {
+            return Canonical::print($value);
+        } catch (\Throwable) {
+            return self::describe($value);
+        }
     }
 
     /** The name a keyword, symbol or string gives, or `null`. */

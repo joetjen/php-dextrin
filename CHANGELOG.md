@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Refine keys on scalars** (Jan, 2026-10-20; DXN.md §4.2; the
+  superset's group 5; as dextrin 2f20707): `min-length`/`max-length` on
+  keywords, symbols, bytes (in bytes) and bits (in bits, under `:bits`);
+  `min-bytes`/`max-bytes` (UTF-8); `pattern` on keywords, symbols and
+  bytes; `min-precision`/`max-precision` and `min-exponent`/
+  `max-exponent` on decimals; `float32: true`; `bits: [0 1 4]` (RFC
+  8610's `.bits`, big integers too); `min`/`max`/`exclusive-*` on dates,
+  times, datetimes, local date-times and durations; `before-now`,
+  `after-now`, `within: @duration "PT1H"`; `resolution: :millisecond`.
 - **A list's items in order, and lists' refine keys** (Jan, 2026-10-20;
   DXN.md §4.1a, §4.2; the superset's group 4; as dextrin f2639a9).
   `{:list-items :string {:repeat :integer 0 nil}}` is a list item by
@@ -94,6 +103,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A refine constraint refuses a value it does not apply to** (as
+  dextrin 2f20707): a length on an integer, a range on a string, `bits`
+  on a negative integer. Before, several such checks threw;
+  `finite: false` and `unique: false` took any value at all. A
+  constraint key that is no name is a compile error, its message now
+  naming the key.
 - **An unknown refine key is a compile error** (`schema/compile`), as
   are `min-contains:` and `max-contains:` without `contains:`. A misspelt
   key (`min-lenght:`) refused every value before, silently.
