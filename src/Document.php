@@ -99,11 +99,12 @@ final class Document
     /**
      * This document laid out the way the pretty printer lays out a value,
      * with every comment kept beside the entry it belongs to. Layout only:
-     * every token is written as it was.
+     * every token is written as it was. `$indent` is the spaces per level,
+     * `$width` the columns a nested collection's one line must fit in.
      */
-    public function format(int $indent = 2): string
+    public function format(int $indent = 2, int $width = 80): string
     {
-        return Formatter::format($this, $indent);
+        return Formatter::format($this, $indent, $width);
     }
 
     // ---- edits ------------------------------------------------------------

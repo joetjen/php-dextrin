@@ -170,6 +170,43 @@ final class DocumentTest extends TestCase
         }
     }
 
+    // Jan, 2026-10-20: a nested collection that fits goes on one line, as
+    // the pretty printer writes it -- unless it holds a comment or a blank
+    // line, which keep it over lines.
+
+    public function testFormatWritesANestedCollectionThatFitsOnOneLine(): void
+    {
+        self::assertSame(
+            "%{\n  deps: [\"a\" \"b\"]\n  at: %{x: 1 y: 2}\n}",
+            Document::parse('%{deps: ["a" "b"], at: %{x: 1, y: 2}}')->format(),
+        );
+    }
+
+    public function testFormatBreaksTheTopLevelHoweverShortItIs(): void
+    {
+        self::assertSame("[\n  1\n]", Document::parse('[1]')->format());
+    }
+
+    public function testFormatKeepsOneHoldingACommentOverLines(): void
+    {
+        self::assertSame("%{\n  deps: [\n    \"a\"  # why\n  ]\n}", Document::parse("%{deps: [\"a\" # why\n]}")->format());
+    }
+
+    public function testFormatKeepsOneWithABlankLineOverLines(): void
+    {
+        self::assertSame(
+            "%{\n  deps: [\n    \"a\"\n\n    \"b\"\n  ]\n}",
+            Document::parse("%{deps: [\"a\"\n\n\"b\"]}")->format(),
+        );
+    }
+
+    public function testFormatCountsTheIndentAndTheKeyInTheWidth(): void
+    {
+        $doc = Document::parse('%{key: [1 2 3]}');
+        self::assertSame("%{\n  key: [1 2 3]\n}", $doc->format(width: 14));
+        self::assertSame("%{\n  key: [\n    1\n    2\n    3\n  ]\n}", $doc->format(width: 13));
+    }
+
     public function testFormatLaysADocumentOutAndKeepsItsComments(): void
     {
         $text = "# top\n\n%{name: \"acme\", # the name\n deps: [\"a\" # temporary\n# still about a\n \"b\"\n\n# pinned\n \"c\"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n";
