@@ -18,6 +18,27 @@ use PHPUnit\Framework\TestCase;
  */
 final class CanonicalTest extends TestCase
 {
+    /** The ini settings as the test found them, put back after it. */
+    private string|false $serializePrecision;
+
+    private string|false $precision;
+
+    protected function setUp(): void
+    {
+        $this->serializePrecision = ini_get('serialize_precision');
+        $this->precision = ini_get('precision');
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->serializePrecision !== false) {
+            ini_set('serialize_precision', $this->serializePrecision);
+        }
+        if ($this->precision !== false) {
+            ini_set('precision', $this->precision);
+        }
+    }
+
     private static function canonicalOf(string $text): string
     {
         return Canonical::print(Dextrin::decode($text));
@@ -152,5 +173,31 @@ final class CanonicalTest extends TestCase
         $this->assertSame('0.1', Canonical::float(0.1));
         $this->assertSame('5.0e-324', Canonical::float(5e-324));
         $this->assertSame('1.7976931348623157e308', Canonical::float(1.7976931348623157e308));
+    }
+
+    /**
+     * Writing a float sets `serialize_precision` for a moment, to have
+     * PHP's shortest digits, and puts it back as it found it.
+     */
+    public function testWritingAFloatLeavesSerializePrecisionAsItWas(): void
+    {
+        foreach (['17', '-1', '5'] as $setting) {
+            ini_set('serialize_precision', $setting);
+            Canonical::float(0.1);
+            Canonical::float(2 ** -24);
+            self::assertSame($setting, ini_get('serialize_precision'), "after writing with {$setting}");
+        }
+    }
+
+    /** No ini setting changes the digits a float is written with. */
+    public function testAFloatsDigitsDoNotDependOnIniSettings(): void
+    {
+        foreach ([['5', '3'], ['17', '17'], ['-1', '14']] as [$serialize, $precision]) {
+            ini_set('serialize_precision', $serialize);
+            ini_set('precision', $precision);
+            self::assertSame('5.960464477539063e-8', Canonical::float(2 ** -24), "serialize_precision {$serialize}");
+            self::assertSame('0.1', Canonical::float(0.1));
+            self::assertSame('1.7976931348623157e308', Canonical::float(1.7976931348623157e308));
+        }
     }
 }

@@ -208,10 +208,11 @@ final class Canonical
     /**
      * A float by DXN.md §1.5: the shortest digits that read back exactly,
      * ECMAScript's thresholds, `.0` on a whole number, no `+` in an
-     * exponent, and the sign of negative zero kept. The digits are found
-     * by asking for more until they read back exactly, so no ini setting
-     * (`precision`, `serialize_precision`) can change them. Public so
-     * {@see Text\Printer} writes a float the same way.
+     * exponent, and the sign of negative zero kept. The digits are PHP's
+     * own shortest conversion, under a `serialize_precision` of -1 set for
+     * the moment and put back as it was ({@see self::shortest()}), so no
+     * ini setting changes them. Public so {@see Text\Printer} writes a
+     * float the same way.
      */
     public static function float(float $n): string
     {
