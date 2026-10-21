@@ -428,6 +428,12 @@ final class TypeExpr
                 $items = self::all($this->elem, $value->items, $ctx);
                 return $items === NoMatch::Instance ? NoMatch::Instance : new DXNTuple($items);
             case 'map-of':
+                // A map whose keys PHP cannot hold as array keys (symbols,
+                // UUIDs, dates, ...) is a DXNMap: its pairs are checked as
+                // an ordered map's are.
+                if ($value instanceof DXNMap) {
+                    return $this->conformPairs($value->pairs(), $ctx) === NoMatch::Instance ? NoMatch::Instance : $value;
+                }
                 return is_array($value) ? $this->conformMap($value, $ctx) : NoMatch::Instance;
             case 'array-of':
                 if (!is_array($value) || !array_is_list($value)) {
