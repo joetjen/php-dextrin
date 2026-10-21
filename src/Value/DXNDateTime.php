@@ -63,7 +63,7 @@ final class DXNDateTime implements DXNValueInterface
     }
 
     /**
-     * A native date, as the `datetime` it always means (DXN.md §4.7):
+     * A native date, as the `datetime` it always means (DXNS.md §7):
      * its instant, with the offset its own zone carries at that instant.
      * A host value means the same DXN type with or without a schema, and
      * a native date always has a zone, which `datetime` keeps.

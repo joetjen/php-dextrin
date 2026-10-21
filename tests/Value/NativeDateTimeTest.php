@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A native `\DateTimeInterface` always means a `datetime`: it keeps its
- * offset, with or without a schema (DXN.md §4.7; Jan, 2026-10-19). A
+ * offset, with or without a schema (DXNS.md §7; Jan, 2026-10-19). A
  * host value always means the same DXN type.
  */
 final class NativeDateTimeTest extends TestCase

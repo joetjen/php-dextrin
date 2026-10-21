@@ -295,7 +295,7 @@ final class Printer
     /**
      * How `$struct` opens when it is written: `%Name(3)` with the latest
      * loaded version of its schema, or with its own when there is no
-     * schema (DXN.md §4.8). The formatter writes the same head.
+     * schema (DXNS.md §8). The formatter writes the same head.
      */
     public static function writtenHead(DXNStruct $struct, ?Registry $registry): string
     {

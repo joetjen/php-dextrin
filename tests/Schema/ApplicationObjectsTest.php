@@ -29,7 +29,7 @@ final class ApplicationObjectsTestLoose
 }
 
 /**
- * An application object is encoded the way a struct is (DXN.md §4.3,
+ * An application object is encoded the way a struct is (DXNS.md §3,
  * §4.7): a field it does not have -- an uninitialised or undeclared
  * property -- is absent, never nil, and a property its schema does not
  * declare is an extra field, as an Elixir struct's undeclared keys are

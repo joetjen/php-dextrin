@@ -95,7 +95,7 @@ final class Decoder
     /**
      * `$bytes` read as `.dxnb` documents back to back, each with its own
      * envelope -- a CBOR sequence of documents, as a schema's
-     * `encodes-seq:` reads one (DXN.md §4.2); no bytes at all are no
+     * `encodes-seq:` reads one (DXNS.md §2); no bytes at all are no
      * documents.
      *
      * @return list<mixed>

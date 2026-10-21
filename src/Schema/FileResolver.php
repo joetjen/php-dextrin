@@ -11,7 +11,7 @@ use JOetjen\Dextrin\Text\Parser;
 
 /**
  * A resolver ({@see Registry::putResolver()}) finding a struct's schema
- * in `.dxns` files on disk, by the convention DXN.md §4.6 states for
+ * in `.dxns` files on disk, by the convention DXNS.md §6 states for
  * every implementation -- so one set of schema files serves them all.
  * Mirrors `Dextrin.Schema.FileResolver`. Swappable like any resolver:
  * anyone with another convention writes their own.
@@ -86,7 +86,7 @@ final class FileResolver
             if (count($files) > 1) {
                 sort($files);
                 throw new SchemaCompileError(
-                    "{$name} version {$version} is in two files, " . implode(' and ', $files) . '; it is found once (DXN.md §4.6)'
+                    "{$name} version {$version} is in two files, " . implode(' and ', $files) . '; it is found once (DXNS.md §6)'
                 );
             }
         }
@@ -169,7 +169,7 @@ final class FileResolver
      * another version than its name says, is refused.
      *
      * The file is compiled as a tree compiles it ({@see Tree}): its entries
-     * under their full names (DXN.md §4.6), over the named types the rest
+     * under their full names (DXNS.md §6), over the named types the rest
      * of its search path `$dir` defines -- so a field naming another
      * file's shape or named type resolves.
      *
@@ -203,7 +203,7 @@ final class FileResolver
         if ($expected !== null && array_keys($versions) !== [$expected]) {
             throw new SchemaCompileError(
                 "{$file} holds {$entry} as version " . implode(', ', array_keys($versions))
-                . ", but its name says version {$expected} (DXN.md §4.6)"
+                . ", but its name says version {$expected} (DXNS.md §6)"
             );
         }
         $found = [];

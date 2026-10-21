@@ -70,7 +70,7 @@ final class Dextrin
      * top-level bare array or unregistered struct.
      *
      * Nothing is converted to make a value match its declared type
-     * (DXN.md §4.7): a host value always means the same DXN type,
+     * (DXNS.md §7): a host value always means the same DXN type,
      * schema or not, so a `float` for a `:rational` field is refused
      * rather than turned into a `DXNRational`. Use the `DXN*` classes to
      * say which type a value is.
@@ -157,7 +157,7 @@ final class Dextrin
 
     /**
      * `$registry` marked strict when `$strict` is given -- a strict decode
-     * refuses extra fields on schema-backed structs (DXN.md §4.7).
+     * refuses extra fields on schema-backed structs (DXNS.md §7).
      */
     private static function strictly(?Registry $registry, ?bool $strict): ?Registry
     {

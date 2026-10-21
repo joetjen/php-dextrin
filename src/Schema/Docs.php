@@ -28,7 +28,7 @@ use JOetjen\Dextrin\Text\Token;
  * an `index.html` per namespace, every reference a link, every version
  * shown. It reads the documents' source, not their compiled schemas.
  *
- * **Names** come from where a file lies under the root, by DXN.md §4.6:
+ * **Names** come from where a file lies under the root, by DXNS.md §6:
  * `acme/shop/Customer-v2.dxns`, `acme/shop/Order/v1.dxns` and
  * `acme.shop.Product.dxns` each hold one definition, the entry named like
  * the file; every other entry in such a file is internal to it.
@@ -306,7 +306,7 @@ final class Docs
     private static function definitionsOf(array $file): array
     {
         // The names every reader of a tree gives them ({@see Layout},
-        // DXN.md §4.6).
+        // DXNS.md §6).
         $layout = Layout::of($file['file'], array_map(static fn (array $e): string => $e['key'], $file['entries']));
         $names = $layout->names;
         $own = $layout->holder;
@@ -340,7 +340,7 @@ final class Docs
         return $out;
     }
 
-    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+    // ---- annotations, {:doc T %{...}} (DXNS.md §1b) ---------------------------
 
     /**
      * A value node without the `{:doc T %{...}}` around it, and what the doc

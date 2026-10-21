@@ -19,7 +19,7 @@ use JOetjen\Dextrin\Value\DXNTuple;
 /**
  * A tree of `.dxns` files read as one (Jan, 2026-10-20), the port of
  * `Dextrin.Schema.Tree`: every entry named from where its file lies
- * (DXN.md §4.6, {@see Layout}), the files compiled in the order their
+ * (DXNS.md §6, {@see Layout}), the files compiled in the order their
  * references need -- so a reference to another file's named type
  * resolves whatever order the files sort in -- and every problem reported
  * with its file and line:
@@ -201,7 +201,7 @@ final class Tree
             $held = $value->version ?? 1;
             return $held === $version
                 ? null
-                : self::problem($file['file'], self::entryLine($file, $holder), "holds {$holder} as version {$held}, but its name says version {$version} (DXN.md §4.6)");
+                : self::problem($file['file'], self::entryLine($file, $holder), "holds {$holder} as version {$held}, but its name says version {$version} (DXNS.md §6)");
         }
         return self::problem($file['file'], self::entryLine($file, $holder), "a versioned file holds a %schema(N), not {$holder}'s kind");
     }
@@ -251,7 +251,7 @@ final class Tree
                 }
                 sort($files);
                 $what = $version === 'type' ? $name : "{$name} version {$version}";
-                $found[] = self::problem($files[0], 1, "{$what} is in two files, " . implode(' and ', $files) . '; it is found once (DXN.md §4.6)');
+                $found[] = self::problem($files[0], 1, "{$what} is in two files, " . implode(' and ', $files) . '; it is found once (DXNS.md §6)');
             }
         }
         return $found;

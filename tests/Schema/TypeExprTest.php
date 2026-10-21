@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Tests\Schema;
 
+use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\Dextrin;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema;
@@ -111,11 +112,19 @@ final class TypeExprTest extends TestCase
         self::assertFalse($type->matches(new DXNTuple([200, new DXNKeyword('ok')])), 'wrong order');
     }
 
+    /**
+     * A plain PHP array key is a keyword, as the printer and the encoder
+     * write it; a string key is the one MapBuilder marks.
+     */
     public function testMapOfChecksKeysAndValues(): void
     {
-        $type = TypeExpr::mapOf(TypeExpr::primitive('string'), TypeExpr::primitive('integer'));
-        self::assertTrue($type->matches(['a' => 1, 'b' => 2]));
-        self::assertFalse($type->matches(['a' => 'not-an-int']));
+        $strings = TypeExpr::mapOf(TypeExpr::primitive('string'), TypeExpr::primitive('integer'));
+        self::assertTrue($strings->matches([MapBuilder::markStringKey('a') => 1, MapBuilder::markStringKey('b') => 2]));
+        self::assertFalse($strings->matches([MapBuilder::markStringKey('a') => 'not-an-int']));
+        self::assertFalse($strings->matches(['a' => 1]), 'a plain key is a keyword');
+
+        $keywords = TypeExpr::mapOf(TypeExpr::primitive('keyword'), TypeExpr::primitive('integer'));
+        self::assertTrue($keywords->matches(['a' => 1, 'b' => 2]));
     }
 
     public function testEnumMatchesAnyListedLiteral(): void
@@ -208,7 +217,7 @@ final class TypeExprTest extends TestCase
 
     public function testAReferenceRefusesAValueThatIsNotAStruct(): void
     {
-        // A struct is matched only by a struct (DXN.md §4.7): an array or
+        // A struct is matched only by a struct (DXNS.md §7): an array or
         // any other value is not one, however much it looks like it.
         self::assertFalse(TypeExpr::reference('Point')->matches(42));
         self::assertFalse(TypeExpr::reference('Point')->matches(['x' => 1]));

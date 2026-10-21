@@ -218,7 +218,7 @@ final class ParserTest extends TestCase
     public function testAStructEntryWhoseKeyIsNotANameIsAnExtraField(): void
     {
         // An arrow-form struct entry keyed by a non-name is an extra field
-        // (DXN.md §4.7), not a field and not an error.
+        // (DXNS.md §7), not a field and not an error.
         $value = Parser::parse('%Point{1 => 2}');
         self::assertInstanceOf(\JOetjen\Dextrin\Value\DXNStruct::class, $value);
         self::assertSame([], $value->pairs());

@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
  * Each `.dxns` document describes one version of a schema, written
  * `%schema(N){field: type, ...}` -- the body lists the fields in order,
  * and that order is the positional order. Schemas are kept by name and
- * version (DXN.md §4.8).
+ * version (DXNS.md §8).
  */
 final class VersionedSchemaTest extends TestCase
 {

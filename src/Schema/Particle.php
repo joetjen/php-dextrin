@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Schema;
 
 /**
- * One of a `{:list-items}`'s items (DXN.md §4.1a): a type for exactly one
+ * One of a `{:list-items}`'s items (DXNS.md §1a): a type for exactly one
  * item, or a repeat of a group of them, `$max` `null` when there is no
  * upper bound.
  */
