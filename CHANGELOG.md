@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bench/schema-validation`**: the Elixir reference's schema-validation
+  benchmark, on the very same data sets, which the reference's
+  `bench/generate_universes.exs` writes: decoding stage by stage and the
+  schema check against `bench/schemas/universe.dxns`, for ten minutes
+  (Jan, 2026-10-21). Run it as `(cd ../dextrin && mix run bench/generate_universes.exs 2>/dev/null) | php bench/schema-validation.php [seconds]`.
+
 ### Documentation
 
 - **DXN.md's reference tables are Markdown tables**, no longer TOON
