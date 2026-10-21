@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DXN.md's reference tables are Markdown tables**, no longer TOON
   (Jan, 2026-10-21); the `canonical` table said 32 rows and had 33.
 
+### Fixed
+
+- **A `{:map-of}` checks each key as the DXN value it is**: it checked the
+  PHP array key that holds it, so a refined string key with a pattern
+  refused every key (a string key is held with a leading space), a
+  `:keyword` key type refused keyword keys and a `:string` one took them.
+  Found by the schema-validation benchmark.
+
 ## [0.3.0] - 2026-10-21
 
 The same release as dextrin 0.3.0: one way to write a value,

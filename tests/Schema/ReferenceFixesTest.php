@@ -175,4 +175,19 @@ final class ReferenceFixesTest extends TestCase
             }
         }
     }
+
+    /**
+     * A map's keys are checked as the values they are, not as the PHP array
+     * keys that hold them: a string key is stored with a leading space, to
+     * tell `"a" =>` from `a:` (found by bench/schema-validation.php).
+     */
+    public function testAMapOfKeyIsCheckedAsItsDxnValue(): void
+    {
+        $this->assertTrue(self::takes('{:map-of {:refine :string %{pattern: @regex "^n[0-9]{1,4}$"}} :any}', Dextrin::decode('%{"n1" => 1}')));
+        $this->assertFalse(self::takes('{:map-of {:refine :string %{pattern: @regex "^n[0-9]{1,4}$"}} :any}', Dextrin::decode('%{"N1" => 1}')));
+        $this->assertTrue(self::takes('{:map-of :keyword :any}', Dextrin::decode('%{b: 1}')));
+        $this->assertFalse(self::takes('{:map-of :string :any}', Dextrin::decode('%{b: 1}')));
+        $this->assertTrue(self::takes('{:map-of :string :any}', Dextrin::decode('%{"b" => 1}')));
+        $this->assertTrue(self::takes('{:map-of :integer :any}', Dextrin::decode('%{1 => 1}')));
+    }
 }
