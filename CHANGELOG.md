@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Tests hold writing a float to its promises**: `serialize_precision`
+  is put back as it was found, and no `serialize_precision` or
+  `precision` setting changes the digits. `Canonical::float`'s doc says
+  how the digits are found now.
+
 ## [0.3.1] - 2026-10-21
 
 DXNS guides of their own, the reference's schema-validation benchmark,
