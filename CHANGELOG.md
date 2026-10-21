@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `{:map-of}` checks a map PHP holds as a `DXNMap`**: a map whose
+  keys PHP cannot hold as array keys -- symbols, UUIDs, dates -- was
+  refused whatever its keys and values. Found by the schema-validation
+  benchmark.
+
 - **A `{:map-of}` checks each key as the DXN value it is**: it checked the
   PHP array key that holds it, so a refined string key with a pattern
   refused every key (a string key is held with a leading space), a

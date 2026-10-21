@@ -190,4 +190,17 @@ final class ReferenceFixesTest extends TestCase
         $this->assertTrue(self::takes('{:map-of :string :any}', Dextrin::decode('%{"b" => 1}')));
         $this->assertTrue(self::takes('{:map-of :integer :any}', Dextrin::decode('%{1 => 1}')));
     }
+
+    /**
+     * A map whose keys PHP cannot hold as array keys -- symbols, UUIDs,
+     * dates -- decodes to a DXNMap, and a {:map-of} checks it too (found by
+     * bench/schema-validation.php).
+     */
+    public function testAMapOfChecksAMapPhpHoldsAsADxnMap(): void
+    {
+        $this->assertTrue(self::takes('{:map-of :symbol :integer}', Dextrin::decode('%{total => 1, rate => 2}')));
+        $this->assertFalse(self::takes('{:map-of :symbol :integer}', Dextrin::decode('%{total => "x"}')));
+        $this->assertFalse(self::takes('{:map-of :string :integer}', Dextrin::decode('%{total => 1}')));
+        $this->assertTrue(self::takes('{:map-of :date :integer}', Dextrin::decode('%{@date "2026-10-21" => 1}')));
+    }
 }
