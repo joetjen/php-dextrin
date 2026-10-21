@@ -260,6 +260,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A float on a binary boundary is written in its shortest digits**:
+  2^-24 came out as `5.9604644775390625e-8`, seventeen digits, where
+  sixteen read back (`5.960464477539063e-8`, as every other
+  implementation writes it). PHP's own shortest conversion now gives the
+  digits. Found by the conformance suite.
+
 - **The docs' stylesheet indents the `--warn` line of its second
   dark-theme block as its neighbours** (as dextrin 7c45598), so
   `bin/dextrin docs` writes the reference's `example/doc` byte for byte

@@ -230,15 +230,35 @@ final class Canonical
         if ($magnitude === 0.0) {
             return ($negative ? '-' : '') . '0.0';
         }
-        for ($places = 0; $places <= 17; $places++) {
-            $written = sprintf("%.{$places}e", $magnitude);
-            if ((float) $written === $magnitude) {
-                break;
+        [$digits, $n] = self::shortest($magnitude);
+        return ($negative ? '-' : '') . self::laidOut($digits, $n);
+    }
+
+    /**
+     * The fewest significant digits that read back as `$magnitude`, and
+     * the n of 0.d1..dk × 10^n: PHP's own shortest conversion
+     * (`serialize_precision` -1), as every other implementation writes it.
+     * Trying `%.Ne` widths instead misses a power of two, where the
+     * nearest N digits need not be the ones that read back.
+     *
+     * @return array{string, int}
+     */
+    private static function shortest(float $magnitude): array
+    {
+        $previous = ini_set('serialize_precision', '-1');
+        try {
+            $text = strtoupper(var_export($magnitude, true));
+        } finally {
+            if ($previous !== false) {
+                ini_set('serialize_precision', $previous);
             }
         }
-        [$mantissa, $exponent] = explode('e', $written);
-        $digits = rtrim(str_replace('.', '', $mantissa), '0');
-        return ($negative ? '-' : '') . self::laidOut($digits === '' ? '0' : $digits, (int) $exponent + 1);
+        [$mantissa, $exponent] = array_pad(explode('E', $text), 2, '0');
+        [$whole, $fraction] = array_pad(explode('.', $mantissa), 2, '');
+        $all = $whole . $fraction;
+        $leading = strlen($all) - strlen(ltrim($all, '0'));
+        $digits = rtrim(ltrim($all, '0'), '0');
+        return [$digits === '' ? '0' : $digits, strlen($whole) - $leading + (int) $exponent];
     }
 
     /** The digits with value 0.d1..dk × 10^n, laid out by DXN.md §1.5. */

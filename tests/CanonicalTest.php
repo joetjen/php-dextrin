@@ -139,4 +139,18 @@ final class CanonicalTest extends TestCase
             self::assertSame('encode/unsupported', $err->category);
         }
     }
+
+    /**
+     * The shortest digits that read back, even on a power of two, where the
+     * gap below the value is half the gap above it (2^-24: sixteen digits,
+     * rounding to the nearest sixteen gives ...062, which does not read
+     * back; ...063 does).
+     */
+    public function testAFloatOnABinaryBoundaryIsWrittenInItsShortestDigits(): void
+    {
+        $this->assertSame('5.960464477539063e-8', Canonical::float(2 ** -24));
+        $this->assertSame('0.1', Canonical::float(0.1));
+        $this->assertSame('5.0e-324', Canonical::float(5e-324));
+        $this->assertSame('1.7976931348623157e308', Canonical::float(1.7976931348623157e308));
+    }
 }
