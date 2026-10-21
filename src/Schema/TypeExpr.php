@@ -633,7 +633,9 @@ final class TypeExpr
         $valueType = $this->value ?? throw new \LogicException('unreachable: map-of type expr missing value');
         $out = [];
         foreach ($value as $k => $v) {
-            if ($keyType->conform($k, $ctx) === NoMatch::Instance) {
+            // The key as the DXN value it stands for: a string key is held
+            // with a leading space, to tell `"a" =>` from `a:`.
+            if ($keyType->conform(MapBuilder::toDxnMapKey($k), $ctx) === NoMatch::Instance) {
                 return NoMatch::Instance;
             }
             $c = $valueType->conform($v, $ctx);
