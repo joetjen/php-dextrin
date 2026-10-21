@@ -161,7 +161,7 @@ final class ValidatorTest extends TestCase
 
     public function testEncodeNeverConvertsAFloatToARationalField(): void
     {
-        // Nothing is converted to make a value match (DXN.md §4.7).
+        // Nothing is converted to make a value match (DXNS.md §7).
         $doc = <<<'DXN'
             %{
               Fraction: %schema{ value: :rational }

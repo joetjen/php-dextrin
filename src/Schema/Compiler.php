@@ -66,13 +66,13 @@ final class Compiler
      * {@see SchemaCompileError} (category `schema/compile`), or a
      * {@see \JOetjen\Dextrin\DXNError} of category
      * `schema/duplicate-version` for a version the registry has loaded
-     * already (DXN.md §4.8).
+     * already (DXNS.md §8).
      *
      * Every named type in a document sees every other, in any order, and
      * may reach itself through a guard -- a field, or a collection's
-     * elements (DXN.md §4.5, Jan, 2026-10-20). `$names` maps an entry's
+     * elements (DXNS.md §5, Jan, 2026-10-20). `$names` maps an entry's
      * key to the name it is registered under -- a tree's full names
-     * (DXN.md §4.6, {@see Layout}); a bare symbol naming a sibling
+     * (DXNS.md §6, {@see Layout}); a bare symbol naming a sibling
      * resolves to it.
      *
      * @param array<string, string> $names
@@ -406,7 +406,7 @@ final class Compiler
     /**
      * Refuses a schema written in Dextrin 0.1's syntax -- `fields:
      * @ordered %{...}`, `closed: true`, `forbidden: [...]` -- saying so,
-     * and what a schema is written as now (DXN.md §4.4), rather than that
+     * and what a schema is written as now (DXNS.md §4), rather than that
      * a field has no known type. Only those shapes: now `fields`, `closed`
      * and `forbidden` are ordinary field names, whose values are type
      * expressions. The format stays 1.0 until 1.0.0 (Jan, 2026-10-20), so
@@ -422,7 +422,7 @@ final class Compiler
                 || ($key === 'forbidden' && $value instanceof DXNList)) {
                 throw new SchemaCompileError(
                     "this is Dextrin 0.1's schema syntax (fields:, closed:, forbidden:); a schema lists its fields directly, "
-                    . '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXN.md §4.4)'
+                    . '%schema(N){field: type, ...}, and refuses undeclared fields with strict: true (DXNS.md §4)'
                 );
             }
         }
@@ -554,7 +554,7 @@ final class Compiler
             if (TypeExpr::isPrimitiveName($value->name)) {
                 return TypeExpr::primitive($value->name);
             }
-            // Sugar (DXN.md §4.1, Jan, 2026-10-20): protobuf's and MongoDB's
+            // Sugar (DXNS.md §1, Jan, 2026-10-20): protobuf's and MongoDB's
             // sized numbers as their ranges, `:float32` as single
             // precision, `:number` as every kind of number.
             if (array_key_exists($value->name, self::SIZED)) {
@@ -712,7 +712,7 @@ final class Compiler
                 return TypeExpr::refine($base, self::refineConstraints($rest[1], $aliases));
             }
             // `{:list-items p ...}`: a list's items in order, each `p` a
-            // type for one item or a `{:repeat ...}` (DXN.md §4.1a).
+            // type for one item or a `{:repeat ...}` (DXNS.md §1a).
             if ($tag === 'list-items') {
                 return TypeExpr::listItems(self::particles($rest, $aliases));
             }
@@ -723,7 +723,7 @@ final class Compiler
                 throw new SchemaCompileError("a {$tag} stands only among {:list-items ...}'s items");
             }
             // `{:tagged name type}`: a custom tag of that name, its value a
-            // type (DXN.md §4.1).
+            // type (DXNS.md §1).
             if ($tag === 'tagged') {
                 $name = count($rest) === 2 ? self::literalName($rest[0]) : null;
                 if (count($rest) !== 2) {
@@ -756,7 +756,7 @@ final class Compiler
                     self::compileTypeExpr($rest[2] ?? new DXNKeyword('any'), $aliases),
                 );
             }
-            // `{:doc type %{...}}`: the type, annotated (DXN.md §4.1b).
+            // `{:doc type %{...}}`: the type, annotated (DXNS.md §1b).
             if ($tag === 'doc') {
                 if (count($rest) !== 2) {
                     throw new SchemaCompileError('a doc is {:doc type %{description: ..., ...}}');
@@ -833,7 +833,7 @@ final class Compiler
     private const CONTENT_READERS = ['application/dxn', 'application/dxnb'];
 
     /**
-     * A refine's constraints by name, every key one DXN.md §4.2 knows and
+     * A refine's constraints by name, every key one DXNS.md §2 knows and
      * every argument one it takes: a misspelt key would otherwise refuse
      * every value, silently, and a bad argument fail at check time. The
      * types ({@see TypeExpr::TYPE_KEYS}) are compiled here; `unique-by`,
@@ -871,7 +871,7 @@ final class Compiler
         sort($keys, SORT_STRING);
         foreach ($keys as $key) {
             if (!in_array($key, self::REFINE_KEYS, true)) {
-                throw new SchemaCompileError("{$key} is no refine constraint (DXN.md §4.2)");
+                throw new SchemaCompileError("{$key} is no refine constraint (DXNS.md §2)");
             }
         }
     }
@@ -1047,7 +1047,7 @@ final class Compiler
         };
     }
 
-    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b) ---------------------------
+    // ---- annotations, {:doc T %{...}} (DXNS.md §1b) ---------------------------
 
     private const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
 
@@ -1089,7 +1089,7 @@ final class Compiler
     }
 
     /**
-     * A doc's annotations by name, each of its kind (DXN.md §4.1b), and
+     * A doc's annotations by name, each of its kind (DXNS.md §1b), and
      * each enum value's under `values` keyed by name as well. `$type` is
      * what they annotate -- `null` for a whole schema or one enum value --
      * so `values` can be checked against an enum's literals.

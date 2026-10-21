@@ -270,6 +270,6 @@ its name, and memoized in the registry for the rest of that decode.
 typed `geo/Address` is found as the entry `Address` in
 `<searchPath>/geo.dxns`, or in a versioned file of its own
 (`geo/Address-v2.dxns`, `geo/Address/v2.dxns`, `geo.Address-v2.dxns` --
-DXN.md §4.6). A struct in that field is written under the same name,
+DXNS.md §6). A struct in that field is written under the same name,
 `%geo/Address{...}`: a field takes a struct of exactly the name it
 references.

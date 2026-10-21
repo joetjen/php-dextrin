@@ -468,7 +468,7 @@ The version 2 reader has `x` and `y` the wrong way round, and nothing
 said so: both are integers. Text, read by name, gets it right. So a
 schema whose older readers must keep working **only ever appends**
 fields; reordering, inserting or removing one is for when every reader
-has the new version — deploy readers first (DXN.md §4.8).
+has the new version — deploy readers first (DXNS.md §8).
 
 ### Checking a change before it ships
 

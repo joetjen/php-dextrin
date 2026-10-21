@@ -6,7 +6,7 @@ namespace JOetjen\Dextrin\Schema;
 
 /**
  * The names a `.dxns` file's entries have, from where the file lies under
- * its root (DXN.md §4.6) -- one rule for every reader of a tree: the docs
+ * its root (DXNS.md §6) -- one rule for every reader of a tree: the docs
  * generator, {@see Tree} and the file resolver; the port of
  * `Dextrin.Schema.Layout`.
  *

@@ -217,7 +217,7 @@ final class TypeExprTest extends TestCase
 
     public function testAReferenceRefusesAValueThatIsNotAStruct(): void
     {
-        // A struct is matched only by a struct (DXN.md §4.7): an array or
+        // A struct is matched only by a struct (DXNS.md §7): an array or
         // any other value is not one, however much it looks like it.
         self::assertFalse(TypeExpr::reference('Point')->matches(42));
         self::assertFalse(TypeExpr::reference('Point')->matches(['x' => 1]));

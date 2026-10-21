@@ -14,11 +14,11 @@ namespace JOetjen\Dextrin\Schema;
  * mapping `.dxnb`'s positional struct encoding needs, and it is the
  * order the fields are written in the `%schema(N){...}` body.
  *
- * `version` is which version of `name` this is (DXN.md §4.8), 1 for a
+ * `version` is which version of `name` this is (DXNS.md §8), 1 for a
  * schema written without a header.
  *
  * `annotations` are what a `{:doc %schema{...} %{...}}` around the entry
- * says about it (DXN.md §4.1b), by name; `[]` without one.
+ * says about it (DXNS.md §1b), by name; `[]` without one.
  */
 final class Compiled
 {
@@ -58,7 +58,7 @@ final class Compiled
 
     /**
      * `$instance` -- a registered application class instance -- as the
-     * keyed struct named `$name` it is written as (DXN.md §4.3, §4.7), its fields in
+     * keyed struct named `$name` it is written as (DXNS.md §3, §4.7), its fields in
      * this schema's order. A field it does not have -- a property the
      * class does not declare, or a typed one left uninitialised -- is
      * absent, never null: a reader refuses null unless the type admits

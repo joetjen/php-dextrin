@@ -22,7 +22,7 @@ final class VersionedPoint
  * Every struct written against a schema carries the version it was
  * written with -- `%Point(2){...}` in text and the type name `"Point(2)"`
  * in binary -- and that version is always the latest one loaded
- * (DXN.md §4.8).
+ * (DXNS.md §8).
  */
 final class VersionsInDocumentsTest extends TestCase
 {

@@ -25,7 +25,7 @@ use JOetjen\Dextrin\Value\DXNValueInterface;
  * already uses, via `wrapAndCheck()`, so there's one type-checking
  * implementation, not two that could drift.
  *
- * **Nothing is converted to make a value match** (DXN.md §4.7): a
+ * **Nothing is converted to make a value match** (DXNS.md §7): a
  * schema accepts or rejects a value, and never changes what it means.
  * `wrapAndCheck()` rebuilds every container it walks from its children,
  * so a checked struct reaches the printer/binary encoder wrapped.
@@ -95,7 +95,7 @@ final class Validator
         $resolved = [];
         foreach ($compiled->fields as $field) {
             // An absent optional field stays absent: null is not a
-            // stand-in for it (DXN.md §4.3), and each writer decides what
+            // stand-in for it (DXNS.md §3), and each writer decides what
             // absent means there.
             $value = self::resolveField($field, $given, $registry);
             if (!$value instanceof Absent) {
@@ -187,7 +187,7 @@ final class Validator
 
     private static function checkCompiled(Compiled $compiled, mixed $value, Registry $registry): Validated
     {
-        // An extra field never shadows a declared one (DXN.md §4.7), on
+        // An extra field never shadows a declared one (DXNS.md §7), on
         // the way out as on the way in.
         if ($value instanceof DXNStruct) {
             $declared = array_flip($compiled->fieldNames());

@@ -43,7 +43,7 @@ use JOetjen\Dextrin\Value\Nanos;
 
 /**
  * Internal, compiled representation of a `.dxns` type expression -- the
- * vocabulary of DXN.md §4.1 (`any`, `never`, `primitive`, `reference`,
+ * vocabulary of DXNS.md §1 (`any`, `never`, `primitive`, `reference`,
  * `list-of`, `list-items`, `set-of`, `tuple-of`, `tuple-of-all`, `map-of`, `array-of`, `tagged`, `doc`, `if`,
  * `ordered-map-of`, `sorted-set-of`, `enum`, `one-of`, `any-of`,
  * `all-of`, `not`, `nilable`, `refine`) {@see Compiler} turns a parsed `.dxns` value
@@ -67,7 +67,7 @@ use JOetjen\Dextrin\Value\Nanos;
 final class TypeExpr
 {
     /**
-     * A refine's keys whose argument is a type (DXN.md §4.2), compiled,
+     * A refine's keys whose argument is a type (DXNS.md §2), compiled,
      * resolved and substituted as its base is.
      *
      * @internal
@@ -196,7 +196,7 @@ final class TypeExpr
     }
 
     /**
-     * `{:list-items p ...}`: a list's items in order (DXN.md §4.1a).
+     * `{:list-items p ...}`: a list's items in order (DXNS.md §1a).
      *
      * @param list<Particle> $particles
      */
@@ -213,7 +213,7 @@ final class TypeExpr
 
     /**
      * `{:tagged name type}`: a custom tag named `$name` whose value is an
-     * `$elem` (DXN.md §4.1).
+     * `$elem` (DXNS.md §1).
      */
     public static function tagged(string $name, self $elem): self
     {
@@ -221,7 +221,7 @@ final class TypeExpr
     }
 
     /**
-     * `{:doc type %{...}}`: `$elem`, annotated (DXN.md §4.1b). The
+     * `{:doc type %{...}}`: `$elem`, annotated (DXNS.md §1b). The
      * annotations change nothing it takes.
      *
      * @param array<string, mixed> $notes
@@ -528,7 +528,7 @@ final class TypeExpr
      * `$at`th, then `$rest` against the position they leave: the items
      * conformed, in order, or {@see NoMatch}. A repeat takes as many
      * items as it can while the rest still matches, and gives back one at
-     * a time until it does (DXN.md §4.1a).
+     * a time until it does (DXNS.md §1a).
      *
      * @param list<Particle> $particles
      * @param list<mixed> $items
@@ -875,7 +875,7 @@ final class TypeExpr
         if ($value instanceof Validated) {
             return $value->name === $name;
         }
-        // A struct is matched only by a struct (DXN.md §4.7): past a
+        // A struct is matched only by a struct (DXNS.md §7): past a
         // struct or checked value of the right name, only the class
         // registered for `$name` is one. An array, or any other value, is
         // not a struct, however much it looks like one -- nothing is
@@ -929,7 +929,7 @@ final class TypeExpr
             'ip' => $value instanceof DXNIp,
             'uri' => $value instanceof DXNUri,
             'bytes' => $value instanceof DXNBytes,
-            // Bits and bytes are one value space (DXN.md §4.1): `:bits` takes both.
+            // Bits and bytes are one value space (DXNS.md §1): `:bits` takes both.
             'bits' => $value instanceof DXNBits || $value instanceof DXNBytes,
             'regex' => $value instanceof DXNRegex,
             default => false,
@@ -972,7 +972,7 @@ final class TypeExpr
     /**
      * Every constraint holds. A constraint on a value it does not apply
      * to -- a length on an integer, a range on a string -- refuses it
-     * (DXN.md §4.2, Jan, 2026-10-20). `$base` is the type refined, which
+     * (DXNS.md §2, Jan, 2026-10-20). `$base` is the type refined, which
      * says whether a length counts bytes or bits.
      *
      * @param array<string, mixed> $constraints
@@ -1174,7 +1174,7 @@ final class TypeExpr
     }
 
     /**
-     * One refine key against `$value` (DXN.md §4.2). NaN lies outside
+     * One refine key against `$value` (DXNS.md §2). NaN lies outside
      * every range, as every IEEE 754 comparison with it is false; the
      * infinities compare as the numbers they are (Jan, 2026-10-20).
      * Dates, times and durations compare with their own kind.
@@ -1208,7 +1208,7 @@ final class TypeExpr
             'encoding' => is_string($value) && is_string($arg) && self::decoded($arg, $value) !== null,
             // What the string holds; it checks nothing more (`content` reads it).
             'media-type' => is_string($value),
-            // One of DXN.md §4.2a's formats, checked as Format says.
+            // One of DXNS.md §2a's formats, checked as Format says.
             'format' => is_string($value) && is_string($arg) && Format::valid($arg, $value),
             'min-count' => self::within(self::countOf($value), $arg, null),
             'max-count' => self::within(self::countOf($value), null, $arg),

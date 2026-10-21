@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
  * `format:`, the superset's group 5 (design/schema-superset.md, Jan,
  * 2026-10-20; as dextrin 71fbec0): a string in one of a closed set of
  * formats. Each is checked the same way in every implementation: by the
- * reader DXN has for the tagged value, or by the grammar DXN.md §4.2a
+ * reader DXN has for the tagged value, or by the grammar DXNS.md §2a
  * gives.
  */
 final class FormatTest extends TestCase

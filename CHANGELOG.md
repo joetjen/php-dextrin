@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **DXNS has guides of its own** (Jan, 2026-10-21), as in the reference:
+  a tutorial, the reference (`DXNS.md`, DXN.md's old §4, its sections
+  renumbered 1 to 8 -- "DXNS.md §2" is the old "DXN.md §4.2"), examples
+  and a cheatsheet; every citation follows the new numbers.
+
 ### Added
 
 - **`bench/schema-validation`**: the Elixir reference's schema-validation
@@ -64,11 +71,11 @@ that misused a refine key no longer compiles.
   2026-10-21), as php-dextrin already refused it.
 ### Added
 
-- **Sugar** (Jan, 2026-10-20; DXN.md §4.1; the superset's group 9; as
+- **Sugar** (Jan, 2026-10-20; DXNS.md §1; the superset's group 9; as
   dextrin d1b050a): `:int32`, `:int64`, `:uint32`, `:uint64` and
   `:float32`, `:number`, `{:const v}`, and `{:if I T E}` (JSON Schema's
   if/then/else).
-- **Annotations, `{:doc T %{...}}`** (Jan, 2026-10-20; DXN.md §4.1b;
+- **Annotations, `{:doc T %{...}}`** (Jan, 2026-10-20; DXNS.md §1b;
   the superset's group 8; as dextrin 0b4225d and 053432a): a `title`,
   `description`, `examples`, `read-only`, `write-only`, `deprecated` and
   free `meta` on any type, around a whole schema, named type or generic
@@ -79,12 +86,12 @@ that misused a refine key no longer compiles.
   examples, meta and an enum's values beside the definition,
   deprecated, read-only and write-only as chips; the example tree
   carries a few.
-- **`{:tagged name T}`** (Jan, 2026-10-20; DXN.md §4.1; the superset's
+- **`{:tagged name T}`** (Jan, 2026-10-20; DXNS.md §1; the superset's
   group 7; as dextrin bdb20b3): a custom tag of that name whose value is
   a `T` -- or an application's value its registered tag encoder
   (`Registry::putTagEncoder()`) writes as one. A built-in tag's name is
   refused, `bits` included, which DXN.md §1.3 builds in.
-- **Encoded content** (Jan, 2026-10-20; DXN.md §4.2; as dextrin
+- **Encoded content** (Jan, 2026-10-20; DXNS.md §2; as dextrin
   6918cf8): `encoding:` (RFC 4648's base64, base64url, base32, base16),
   `media-type:` and `content: T` on strings -- the string, decoded, is a
   DXN document of type T, `.dxnb` under `application/dxnb` -- and
@@ -92,7 +99,7 @@ that misused a refine key no longer compiles.
   `.cborseq`. `Binary\Decoder::decodeSequence()` reads documents back to
   back. The encodings are checked by their alphabet and padding, not by
   `base64_decode()` alone, which takes forms the reference refuses.
-- **`format:`** (Jan, 2026-10-20; DXN.md §4.2a; as dextrin 71fbec0): a
+- **`format:`** (Jan, 2026-10-20; DXNS.md §2a; as dextrin 71fbec0): a
   string in one of a closed set of 22 formats -- `date`, `time`,
   `datetime`, `local-datetime`, `duration`, `uuid`, `ipv4`, `ipv6`,
   `hostname`, `idn-hostname`, `email`, `idn-email`, `uri`,
@@ -104,7 +111,7 @@ that misused a refine key no longer compiles.
   1677-2262 is refused, as everywhere in this port: 64 bits of
   nanoseconds hold no more.
 
-- **Refine keys on scalars** (Jan, 2026-10-20; DXN.md §4.2; the
+- **Refine keys on scalars** (Jan, 2026-10-20; DXNS.md §2; the
   superset's group 5; as dextrin 2f20707): `min-length`/`max-length` on
   keywords, symbols, bytes (in bytes) and bits (in bits, under `:bits`);
   `min-bytes`/`max-bytes` (UTF-8); `pattern` on keywords, symbols and
@@ -114,7 +121,7 @@ that misused a refine key no longer compiles.
   times, datetimes, local date-times and durations; `before-now`,
   `after-now`, `within: @duration "PT1H"`; `resolution: :millisecond`.
 - **A list's items in order, and lists' refine keys** (Jan, 2026-10-20;
-  DXN.md §4.1a, §4.2; the superset's group 4; as dextrin f2639a9).
+  DXNS.md §1a, §4.2; the superset's group 4; as dextrin f2639a9).
   `{:list-items :string {:repeat :integer 0 nil}}` is a list item by
   item: a type for one item, `{:repeat p min max}` for several (`max`
   `nil` for no bound), and `{:repeat {:group a b} min max}` for several
@@ -138,7 +145,7 @@ that misused a refine key no longer compiles.
   and reads back, and a sign (`+1.2.3.4`) is `syntax`. **`.dxnb` uses the smallest
   representation that keeps a value**, now said in DXN.md §2.2.
 - **`%shape{...}`, `{:case field %{...}}`, recursive and generic named
-  types** (DXN.md §4.4a, §4.5, Jan, 2026-10-20), as the reference has
+  types** (DXNS.md §4a, §4.5, Jan, 2026-10-20), as the reference has
   them: a shape is a named, unversioned plain-map type that fills its
   missing fields' defaults; a case chooses a field's type by its sibling's
   value; a named type may refer to itself through a field or a
@@ -163,7 +170,7 @@ that misused a refine key no longer compiles.
   link, every version shown, light or dark kept in localStorage.
   `example/` holds the shared Acme schemas and their generated `doc/`; a
   test checks the generated site against it.
-- **New type forms** (DXN.md §4.1, as dextrin 47d6d1d): `{:not t}`,
+- **New type forms** (DXNS.md §1, as dextrin 47d6d1d): `{:not t}`,
   `:never` (JSON Schema's `false`), and element types for the
   collections that had none: `{:array-of t}`, `{:ordered-map-of k v}`,
   `{:sorted-set-of t}`.
@@ -181,7 +188,7 @@ that misused a refine key no longer compiles.
 - **Dotted names** (DXN.md §1.1, as dextrin 0d1c7f5): segments joined by
   `.`, with at most one `/` -- `%Foo.Bar/Baz{...}`, `acme.billing/invoice`,
   `:a.b`, `a.b: 1`. Two slashes or an empty segment are refused.
-- **`FileResolver::forPaths()` follows DXN.md §4.6** (as dextrin
+- **`FileResolver::forPaths()` follows DXNS.md §6** (as dextrin
   fd34537): the four layouts, the first search path deciding, a file's
   version its schema's, one version found once, every version loaded. A
   resolver answers a list of every version found and throws
@@ -261,11 +268,11 @@ that misused a refine key no longer compiles.
   time, 219 datetime, 220 duration, 217 local date-time); 0.2's
   microsecond tags (1, 210, 211, 212) are still read, as what they
   meant, and never written, so a tag never changes its meaning.
-- **Refine keys `finite:` and `offsets:`** (DXN.md §4.2), and **NaN lies
+- **Refine keys `finite:` and `offsets:`** (DXNS.md §2), and **NaN lies
   outside every range**: `min`, `max` and both exclusive bounds refuse it.
 - **The README's size table is measured again**: the pretty layout and
   the datetime spelling both changed it.
-- **A named type sees the named types beside it** (DXN.md §4.5): a
+- **A named type sees the named types beside it** (DXNS.md §5): a
   reference to a sibling in the same document resolves, in any order; a
   named type that reaches itself unguarded is refused.
 - **The API docs' front page opens with the development warning**
@@ -297,7 +304,7 @@ that misused a refine key no longer compiles.
   this way. A nested collection holding a comment, or a blank line
   between its entries, stays over lines.
 - **A field typed with a namespaced reference takes a struct of that
-  name** (DXN.md §4.7): a field typed `geo/Address` accepts
+  name** (DXNS.md §7): a field typed `geo/Address` accepts
   `%geo/Address{...}` and refuses `%Address{...}` -- the other way round
   from before, when a resolved schema kept its file's name. Breaking for
   documents that wrote the bare name. `forPaths()`' resolver answers a
@@ -354,7 +361,7 @@ that misused a refine key no longer compiles.
   canonical form's shortest digits that read back exactly.
 - **`Document::update()` with an empty array writes `@array[]`**: it took
   an empty native array for an empty map, which decodes to a `DXNMap`.
-- **A field naming another file's named type resolves** (DXN.md §4.6):
+- **A field naming another file's named type resolves** (DXNS.md §6):
   `FileResolver` compiled each file on its own, so a field naming another
   file's shape or named type named a struct that never came.
 - **A document with a character of more than one byte garbled when it
@@ -443,7 +450,7 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
   reading across them, the materializer, the positional risk and
   `dextrin compat`. The cheatsheet gains versions and extra fields.
 - `Schema::compat()` and `dextrin compat OLD NEW` -- the version
-  discipline check (DXN.md §4.8), for CI against the previous release's
+  discipline check (DXNS.md §8), for CI against the previous release's
   schema files: a version whose content changed without a new version,
   or a version that went down, fails; what the latest version's
   materializer has to upgrade is listed either way.
@@ -462,7 +469,7 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
   its keys compared by canonical form (DXN.md §1.6). `MapKey` holds the
   map-key rule.
 
-- **Versioned schemas** (DXN.md §4.8). `%schema(3){...}` is version 3
+- **Versioned schemas** (DXNS.md §8). `%schema(3){...}` is version 3
   of its name, and one with no header is version 1. A registry keeps every
   loaded version side by side: `addStructSchema()` refuses a version that
   is already loaded (`schema/duplicate-version`), `replaceStructSchema()`
@@ -482,14 +489,14 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
   both text writers share. A `.dxnb` type name whose version is not a
   positive integer is a `binary` error.
 - **A struct is read according to the version it was written with**
-  (DXN.md §4.8, `Schema\Reader`), in text and binary alike. The latest
+  (DXNS.md §8, `Schema\Reader`), in text and binary alike. The latest
   version, or none, is read exactly. A newer version is read against the
   latest: text by name, binary by position, dropping items beyond the
   reader's fields and leaving missing optional fields absent. An older
   version that is loaded is read with its own schema and handed to the
   materializer, and refused as `schema/no-materializer` without one; an
   older version that is not loaded is refused as `schema/unknown-version`.
-- **One materializer per schema, for every version** (DXN.md §4.8).
+- **One materializer per schema, for every version** (DXNS.md §8).
   `Registry::putStructMaterializer()` takes a closure of
   `(string $name, int $version, array $fields)`; it is called for every
   decoded struct of its schema, upgrades older versions, and its result is
@@ -502,7 +509,7 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
   optional field that was absent stays absent instead of becoming `null`.
 - `Validator::materialize()` is replaced by `resolve()`; building the value
   is `Schema\Reader`'s job.
-- **A struct may carry extra fields** (DXN.md §4.7), kept in
+- **A struct may carry extra fields** (DXNS.md §7), kept in
   `DXNStruct`'s new `extra` list and written back with it: in text as
   entries -- after a positional struct's items,
   `%User(3)["a" "a@x" nick: "b"]` -- and in `.dxnb` as one trailing map
@@ -514,7 +521,7 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
   `Registry::putStrict()`).
 - A keyed struct entry whose key is not a name -- `%Point{1 => 2}` -- is an
   extra field instead of an error.
-- **A struct is matched only by a struct** (DXN.md §4.7). A field typed
+- **A struct is matched only by a struct** (DXNS.md §7). A field typed
   `User` accepts a `DXNStruct` named `User`, or the class registered for
   `User`; a bare array, any other value, and a class registered for no
   schema or another are type errors. Until now every non-struct value was
@@ -534,13 +541,13 @@ to be rewritten, and decoding a checked struct answers a `DXNStruct`.
 - The format guides in `dxn/` are `DXN.md`'s current text, copied from
   the Elixir reference; the tutorial no longer calls PHP "JS".
 - **A native `\DateTimeInterface` encodes as a `datetime`**, keeping its
-  offset, with or without a schema (DXN.md §4.7). It was written as an
+  offset, with or without a schema (DXNS.md §7). It was written as an
   empty struct named after its class. `DXNDateTime::fromNative()` is
   new.
 - **A registered class instance carries extra fields**: a public
   property its schema does not declare is written as an extra field, as
   an Elixir struct's undeclared keys are. It was dropped.
-- **An absent field is never written as `nil`** (DXN.md §4.3): a property
+- **An absent field is never written as `nil`** (DXNS.md §3): a property
   an instance lacks, or a typed one left uninitialised, is left out of
   text, and in `.dxnb`, which fills every position, written as its
   default or refused (`schema/missing-field`). The writers and the

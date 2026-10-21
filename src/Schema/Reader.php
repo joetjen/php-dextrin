@@ -10,7 +10,7 @@ use JOetjen\Dextrin\Value\DXNStruct;
 
 /**
  * Which schema a decoded struct is read with, given the version it was
- * written with and the versions loaded (DXN.md §4.8). Shared by the text
+ * written with and the versions loaded (DXNS.md §8). Shared by the text
  * parser and the binary decoder, so both answer every case the same way
  * -- mirrors `Dextrin.Schema.Reader`:
  *
@@ -140,7 +140,7 @@ final class Reader
 
     /**
      * `$struct` with only the fields `$reading` declares, and its extra
-     * fields apart (DXN.md §4.7): a keyed struct's undeclared names join
+     * fields apart (DXNS.md §7): a keyed struct's undeclared names join
      * the extras. A name given twice -- a declared field and an extra of
      * the same name, or a keyed field written twice -- is refused: an extra
      * never shadows a declared field. A positional struct gives every

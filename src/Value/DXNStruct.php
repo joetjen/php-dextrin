@@ -16,11 +16,11 @@ namespace JOetjen\Dextrin\Value;
  * needing to be built into a `DXNStruct` by hand first.
  *
  * `version` is the schema version the struct was written with --
- * `%Name(3){...}`, DXN.md §4.8 -- or `null` when it was written
+ * `%Name(3){...}`, DXNS.md §8 -- or `null` when it was written
  * without one.
  *
  * `extra` holds the fields a struct carries beyond its declared ones
- * (DXN.md §4.7), as `[key, value]` pairs in the order they were written:
+ * (DXNS.md §7), as `[key, value]` pairs in the order they were written:
  * a name for a named field, any other map key (§1.6) as itself. In text
  * they are entries after the fields or the items; in `.dxnb`, one
  * trailing tag-215 map.

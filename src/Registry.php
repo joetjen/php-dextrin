@@ -72,7 +72,7 @@ final class Registry
     /**
      * Marks this registry as decoding *strictly*: a schema-backed struct
      * that carries a field its schema does not declare is refused
-     * (`schema/undeclared-field`, DXN.md §4.7) instead of keeping it as an
+     * (`schema/undeclared-field`, DXNS.md §7) instead of keeping it as an
      * extra field. A config loader decodes strictly; a message consumer
      * does not. {@see \JOetjen\Dextrin\Dextrin::decode()} and
      * `decodeBinary()` take it as `strict: true`.
@@ -148,7 +148,7 @@ final class Registry
     /**
      * Loads `$compiled` as a new version of the schema `$name`. A version
      * that is already loaded is refused as `schema/duplicate-version`
-     * (DXN.md §4.8): two documents both claiming to be `User` v3 is a
+     * (DXNS.md §8): two documents both claiming to be `User` v3 is a
      * mistake, not an update.
      *
      * @throws DXNError
@@ -191,7 +191,7 @@ final class Registry
     }
 
     /**
-     * The schema's materializer (DXN.md §4.8): called for every decoded
+     * The schema's materializer (DXNS.md §8): called for every decoded
      * struct of `$name`, whatever the version, with the schema's name,
      * the version the fields were read with and the fields keyed by name;
      * it answers the application's latest-version value, which is checked
@@ -251,7 +251,7 @@ final class Registry
 
     /**
      * What the resolver answers for `$name`, every version of it loaded --
-     * so an older struct reaches the materializer (DXN.md §4.6, §4.8) --
+     * so an older struct reaches the materializer (DXNS.md §6, §4.8) --
      * and the latest answered. A resolver's refusal is thrown on.
      */
     private function resolve(string $name): ?FetchedSchema
@@ -277,7 +277,7 @@ final class Registry
 
     /**
      * `$struct` as it is written here: carrying the latest loaded version
-     * of its schema (DXN.md §4.8), whatever version it says itself. A
+     * of its schema (DXNS.md §8), whatever version it says itself. A
      * struct whose name has no schema keeps its own version, or none.
      * Every writer goes through this -- text, the formatter and binary --
      * so encoding never writes a version other than the latest, and never

@@ -242,7 +242,7 @@ final class Encoder
             $named[$key] = $value;
         }
         // Every position must be filled, and null is not a stand-in for an
-        // absent field (DXN.md §4.3): a reader refuses null unless the type
+        // absent field (DXNS.md §3): a reader refuses null unless the type
         // is nilable. So an absent field is written as its default where
         // it has one, and is otherwise refused (`schema/missing-field`).
         return array_map(static function (Field $field) use ($named, $struct): mixed {
