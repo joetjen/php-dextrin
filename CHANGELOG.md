@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Documentation
+
+- **DXN.md says a pattern PCRE does not compile is `syntax`** (Jan,
+  2026-10-21), as php-dextrin already refused it.
 ### Added
 
 - **Sugar** (Jan, 2026-10-20; DXN.md §4.1; the superset's group 9; as
