@@ -77,7 +77,7 @@ final class DocsTest extends TestCase
         Docs::site($root);
     }
 
-    // ---- annotations, {:doc T %{...}} (DXN.md §4.1b; as dextrin 053432a) ----------
+    // ---- annotations, {:doc T %{...}} (DXNS.md §1b; as dextrin 053432a) ----------
 
     private const ANNOTATED = <<<'DXN'
         %{

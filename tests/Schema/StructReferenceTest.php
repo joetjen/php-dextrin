@@ -27,7 +27,7 @@ final class StructReferenceTestOther
 
 /**
  * A value matches only its declared type, and nothing is converted to
- * make it match (DXN.md §4.7). A field typed `User` accepts only a `User`
+ * make it match (DXNS.md §7). A field typed `User` accepts only a `User`
  * struct; a map is not a struct.
  */
 final class StructReferenceTest extends TestCase

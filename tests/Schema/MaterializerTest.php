@@ -22,7 +22,7 @@ final class MaterializerTestUser
  * One materializer per schema, `(schemaName, version, fields)` with
  * fields keyed by name, called for every decoded struct of its schema
  * whatever the version, its result validated against the latest schema
- * (DXN.md §4.8). Without one, the latest version comes back as a generic
+ * (DXNS.md §8). Without one, the latest version comes back as a generic
  * {@see DXNStruct}.
  */
 final class MaterializerTest extends TestCase

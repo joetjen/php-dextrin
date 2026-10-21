@@ -10,7 +10,7 @@ use JOetjen\Dextrin\Value\DXNStruct;
  * A decoded value with every keyed {@see DXNStruct} in it turned into an
  * array of its fields, keyed by name -- for tests about what a schema
  * accepts, which care about the checked fields and not about the generic
- * struct a schema with no materializer decodes to (DXN.md §4.8).
+ * struct a schema with no materializer decodes to (DXNS.md §8).
  */
 final class DecodedFields
 {

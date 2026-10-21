@@ -9,7 +9,7 @@ use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNUuid;
 
 /**
- * The formats a refine's `format:` names (DXN.md §4.2a, Jan,
+ * The formats a refine's `format:` names (DXNS.md §2a, Jan,
  * 2026-10-20; as dextrin 71fbec0): a closed set, each checked the same
  * way in every implementation. A format DXN has a tag for is read by
  * that tag's reader; every other one by a grammar written as a regular

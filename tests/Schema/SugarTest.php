@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
  * Sugar, the superset's group 9 (design/schema-superset.md, Jan,
  * 2026-10-20; as dextrin d1b050a): protobuf's and MongoDB's sized
  * numbers, `:number`, `{:const v}` and `{:if I T E}`. Each says nothing
- * a longer form does not; DXN.md §4.1 gives the form each stands for.
+ * a longer form does not; DXNS.md §1 gives the form each stands for.
  */
 final class SugarTest extends TestCase
 {

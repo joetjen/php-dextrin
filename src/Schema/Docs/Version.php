@@ -7,7 +7,7 @@ namespace JOetjen\Dextrin\Schema\Docs;
 /**
  * One version of a definition: the file it is in, what that file says
  * about it, its fields, its value, and the annotations of a `{:doc}`
- * around it (DXN.md §4.1b; `Docs::undoc()`).
+ * around it (DXNS.md §1b; `Docs::undoc()`).
  *
  * @internal
  */

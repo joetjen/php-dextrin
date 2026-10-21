@@ -19,7 +19,7 @@ namespace JOetjen\Dextrin;
  * its canonical form; `encode` reads `text` and answers the exact bytes
  * as base64. A case may carry `schemas`, `.dxns` sources compiled in
  * order into the registry it runs with, and `strict: true`, which
- * decodes strictly (DXN.md §4.7). `format` reads `text` as a document and
+ * decodes strictly (DXNS.md §7). `format` reads `text` as a document and
  * answers it laid out, comments kept, as `text`; `edit` reads `text` as a
  * document, makes its `edits` in order -- `replace`, `delete`, `insert`,
  * `update`, their `path`, `value` and `where` written as DXN text -- and

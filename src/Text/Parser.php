@@ -483,7 +483,7 @@ final class Parser
 
     /**
      * `[items... entries...]`: a positional struct's items, then its extra
-     * fields as entries (DXN.md §4.7). An item is a value not followed by
+     * fields as entries (DXNS.md §7). An item is a value not followed by
      * `=>`; once an entry has begun, an item is a syntax error.
      *
      * @return array{0: list<mixed>, 1: list<array{0: mixed, 1: mixed}>}
@@ -528,7 +528,7 @@ final class Parser
 
     /**
      * The `(3)` of `%Name(3){...}` -- the schema version a struct was
-     * written with (DXN.md §4.8), a positive integer -- or `null` when
+     * written with (DXNS.md §8), a positive integer -- or `null` when
      * there is none.
      */
     private function parseStructVersion(): ?int

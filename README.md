@@ -204,7 +204,7 @@ switch, for two reasons:
   `Dextrin::decodeBinary()`, or a registry made with
   `$registry->putStrict(true)`) refuses them (`schema/undeclared-field`),
   and without `strict:` they are kept -- in `.dxnb` as one trailing item
-  (DXN.md §4.7) -- and written back out.
+  (DXNS.md §7) -- and written back out.
 - **A closed type breaks the next version.** Adding a field to a closed
   type makes every older reader refuse every newer message, which turns
   each compatible change into a breaking one. DXN's versions (below)
@@ -218,7 +218,7 @@ the application knows what it means.
 
 Several services reading and writing the same schema never all deploy
 at once. DXNS makes that safe with versions, not with compatibility
-modes (DXN.md §4.8):
+modes (DXNS.md §8):
 
 - **Every schema has a version**, `%schema(3){...}`, and every version
   stays loadable beside the others. A writer always writes the latest it
@@ -373,7 +373,7 @@ struct anywhere in a value by default (`validate: false` to skip), and
 a `schema:` name additionally validates — and, for a nameless bare
 array, *names* — the top-level value itself against one named schema.
 
-**Nothing is converted to make a value match** (DXN.md §4.7): a host
+**Nothing is converted to make a value match** (DXNS.md §7): a host
 value always means the same DXN type, with or without a schema. A plain
 `float` is a `float`, so a `:rational` field refuses it rather than
 turning it into a `DXNRational`; say which type a value is with the
@@ -387,7 +387,7 @@ schema without depending on this one, see `src/Schema/Provider.php`),
 `Std::registry()`'s standard library of common named types
 (`PositiveInteger`, `NonEmptyString`, ...), and
 `FileResolver::forPaths([...])`'s resolver from names to `.dxns` files,
-by DXN.md §4.6's convention, for `Registry::putResolver()`:
+by DXNS.md §6's convention, for `Registry::putResolver()`:
 
 ```php
 use JOetjen\Dextrin\Schema\FileResolver;

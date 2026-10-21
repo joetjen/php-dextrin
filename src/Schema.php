@@ -29,7 +29,7 @@ use JOetjen\Dextrin\Value\DXNStruct;
  *     {@see \JOetjen\Dextrin\Schema\Validator}'s own doc on
  *     schema-driven coercion).
  *   - {@see self::annotations()} -- what a `{:doc}` around a schema or
- *     named type says about it (DXN.md §4.1b).
+ *     named type says about it (DXNS.md §1b).
  *
  * Enforcement during actual decoding is fail-fast and automatic: every
  * registered struct name is checked unconditionally as part of
@@ -47,7 +47,7 @@ final class Schema
      * Compiles a decoded `.dxns` document into `$baseRegistry` -- a
      * struct schema for each `%schema(N){}` entry, and a reusable named
      * type for every other entry. `$names`, when given, maps each entry's
-     * key to the full name a tree gives it (DXN.md §4.6) -- how {@see
+     * key to the full name a tree gives it (DXNS.md §6) -- how {@see
      * Schema\Tree} compiles a file -- a bare symbol naming a sibling
      * resolving to it.
      *
@@ -120,7 +120,7 @@ final class Schema
 
     /**
      * What the `{:doc ... %{...}}` around the schema or named type `$name`
-     * says about it (DXN.md §4.1b): its annotations by name, `[]` when it
+     * says about it (DXNS.md §1b): its annotations by name, `[]` when it
      * has none, `null` when `$registry` knows no such name. A schema
      * answers for its latest version. An enum's `values` are a map, as a
      * decode builds one, from each value to its own annotations by name.
@@ -169,7 +169,7 @@ final class Schema
      * *before* encoding produces any output. The mirror image of
      * {@see self::validate()}, for data on its way out rather than in.
      * Returns the checked value, stripped of internal bookkeeping;
-     * nothing is converted (DXN.md §4.7).
+     * nothing is converted (DXNS.md §7).
      */
     public static function validateEncode(mixed $value, Registry $registry, string $schemaName): mixed
     {
@@ -205,7 +205,7 @@ final class Schema
     }
 
     /**
-     * The version discipline check ({@see Compat}, DXN.md §4.8): `$old`'s
+     * The version discipline check ({@see Compat}, DXNS.md §8): `$old`'s
      * schemas against `$new`'s, as the problems -- a version whose
      * content changed without a new version, a version that went down --
      * and what the latest versions' materializers have to upgrade.

@@ -126,7 +126,7 @@ function cmdCheck(array $argv): void
 
 /**
  * `dextrin compat OLD NEW` -- the version discipline check
- * (`Schema::compat`, DXN.md §4.8), for CI against the previous release's
+ * (`Schema::compat`, DXNS.md §8), for CI against the previous release's
  * schema files. Lists what the latest versions' materializers have to
  * upgrade; a version whose content changed without a new version, or a
  * version that went down, is reported and exits non-zero.

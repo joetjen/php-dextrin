@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * A struct is read according to the version it was written with, set
- * against the versions loaded (DXN.md §4.8).
+ * against the versions loaded (DXNS.md §8).
  */
 final class ReadingAcrossVersionsTest extends TestCase
 {
