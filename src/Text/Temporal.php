@@ -7,30 +7,47 @@ namespace JOetjen\Dextrin\Text;
 use JOetjen\Dextrin\Value\DXNDate;
 use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDuration;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
+use JOetjen\Dextrin\Value\Nanos;
 
 /**
- * ISO 8601 parsing/formatting shared by the `.dxn` text parser and
- * printer for `date`/`time`/`timestamp`/`datetime`/`duration` -- one
- * implementation so encode/decode never drift apart. Builds instants
- * via `DateTimeImmutable` (constructing the wall-clock value directly
- * in the relevant `DateTimeZone`, then reading back the UTC epoch)
- * rather than hand-rolling epoch arithmetic -- PHP's own offset
- * handling is already correct, unlike JS, which needed a hand-written
- * floor-division helper to get pre-epoch instants right.
+ * DXN's dates and times as text (DXN.md §1.2, §1.5; Jan, 2026-10-20):
+ * the ISO 8601 strings under `@date`, `@time`, `@datetime`,
+ * `@local-datetime` and `@duration`, read and written in one place so
+ * the parser, the printer and the canonical form never drift apart.
+ *
+ * Times keep up to nine fraction digits, nanoseconds; written, the
+ * fraction loses its trailing zeros, and a datetime at offset zero is
+ * written `Z`. A datetime's offset is `Z` or `±HH:MM`, and `-00:00`
+ * ("offset unknown") is refused -- a value with no offset is a
+ * local date-time. Every parse throws `\InvalidArgumentException` for
+ * text that is not the form its tag names, which the parser turns into
+ * a `syntax` error at the tag.
  */
 final class Temporal
 {
-    private const DATE_RE = '/^(\d{4})-(\d{2})-(\d{2})$/';
-    private const TIME_RE = '/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/';
-    private const OFFSET_RE = '/^([+-])(\d{2}):(\d{2})$/';
-    private const DURATION_RE = '/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/';
+    // `D`: `$` is the text's end, so no reader takes a final newline (the
+    // reference's `\z`, Jan, 2026-10-20).
+    private const DATE_RE = '/^(\d{4})-(\d{2})-(\d{2})$/D';
+    private const TIME_RE = '/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?$/D';
+    private const DATETIME_RE = '/^(\d{4}-\d{2}-\d{2})T([^Z+-]+)(Z|[+-]\d{2}:\d{2})$/D';
+    private const LOCAL_RE = '/^(\d{4}-\d{2}-\d{2})T(.+)$/D';
+    // A field's sign is its own, `P-1DT2H`; seconds take up to nine
+    // fraction digits.
+    private const DURATION_RE = '/^P(?:(-?\d+)Y)?(?:(-?\d+)M)?(?:(-?\d+)W)?(?:(-?\d+)D)?(?:T(?:(-?\d+)H)?(?:(-?\d+)M)?(?:(-?)(\d+)(?:\.(\d{1,9}))?S)?)?$/D';
 
     private function __construct()
     {
     }
 
+    // ---- reading text ----------------------------------------------------------
+
+    /**
+     * `YYYY-MM-DD`.
+     *
+     * @throws \InvalidArgumentException for any other text, or a date that is none.
+     */
     public static function parseDate(string $text): DXNDate
     {
         if (!preg_match(self::DATE_RE, $text, $m)) {
@@ -39,116 +56,86 @@ final class Temporal
         return new DXNDate((int) $m[1], (int) $m[2], (int) $m[3]);
     }
 
-    public static function formatDate(DXNDate $date): string
-    {
-        return sprintf('%04d-%02d-%02d', $date->year, $date->month, $date->day);
-    }
-
+    /**
+     * `HH:MM:SS`, then up to nine fraction digits.
+     *
+     * @throws \InvalidArgumentException for any other text, or a time that is none.
+     */
     public static function parseTime(string $text): DXNTime
     {
         if (!preg_match(self::TIME_RE, $text, $m)) {
             throw new \InvalidArgumentException("invalid time \"{$text}\"");
         }
         $fraction = $m[4] ?? '';
-        $microsecond = $fraction === '' ? 0 : (int) str_pad($fraction, 6, '0');
-        return new DXNTime((int) $m[1], (int) $m[2], (int) $m[3], $microsecond);
+        $nanosecond = $fraction === '' ? 0 : (int) str_pad($fraction, 9, '0');
+        return new DXNTime((int) $m[1], (int) $m[2], (int) $m[3], $nanosecond);
     }
 
-    public static function formatTime(DXNTime $time): string
+    /**
+     * A date, `T`, a time, and an offset, `Z` or `±HH:MM`.
+     *
+     * @throws \InvalidArgumentException for any other text, `-00:00`, or an instant 64 bits cannot hold.
+     */
+    public static function parseDateTime(string $text): DXNDateTime
     {
-        $base = sprintf('%02d:%02d:%02d', $time->hour, $time->minute, $time->second);
-        if ($time->microsecond === 0) {
-            return $base;
-        }
-        return $base . '.' . str_pad((string) $time->microsecond, 6, '0', STR_PAD_LEFT);
-    }
-
-    /** `~U[YYYY-MM-DD HH:MM:SSZ]` -- date and time separated by one literal space, `Z` mandatory. */
-    public static function parseInstant(string $inner): DXNTimestamp
-    {
-        $spaceAt = strpos($inner, ' ');
-        if ($spaceAt === false) {
-            throw new \InvalidArgumentException("invalid timestamp \"{$inner}\"");
-        }
-        $datePart = substr($inner, 0, $spaceAt);
-        $timePart = substr($inner, $spaceAt + 1);
-        if (!str_ends_with($timePart, 'Z')) {
-            throw new \InvalidArgumentException("timestamp must end in 'Z': \"{$inner}\"");
-        }
-        $timePart = substr($timePart, 0, -1);
-
-        $date = self::parseDate($datePart);
-        $time = self::parseTime($timePart);
-        return DXNTimestamp::fromDateTimeImmutable(self::buildDateTimeImmutable($date, $time, new \DateTimeZone('UTC')));
-    }
-
-    public static function formatInstant(DXNTimestamp $ts): string
-    {
-        $d = $ts->toDateTimeImmutable();
-        return self::formatDate(DXNDate::fromDateTimeImmutable($d)) . ' ' . self::formatTime(self::extractTime($d)) . 'Z';
-    }
-
-    /** `YYYY-MM-DDTHH:MM:SS(.ffffff)?(Z|±HH:MM)` -- RFC 3339 separator, offset required (`Z` accepted defensively). */
-    public static function parseOffsetDateTime(string $text): DXNDateTime
-    {
-        $tAt = strpos($text, 'T');
-        if ($tAt === false) {
+        if (!preg_match(self::DATETIME_RE, $text, $m)) {
             throw new \InvalidArgumentException("invalid datetime \"{$text}\"");
         }
-        $datePart = substr($text, 0, $tAt);
-        $rest = substr($text, $tAt + 1);
-
-        if (str_ends_with($rest, 'Z')) {
-            $timePart = substr($rest, 0, -1);
-            $offsetMinutes = 0;
-        } else {
-            $offsetCandidate = substr($rest, -6);
-            if (!preg_match(self::OFFSET_RE, $offsetCandidate, $om)) {
-                throw new \InvalidArgumentException("invalid datetime offset in \"{$text}\"");
-            }
-            $timePart = substr($rest, 0, -6);
-            $sign = $om[1] === '-' ? -1 : 1;
-            $offsetMinutes = $sign * ((int) $om[2] * 60 + (int) $om[3]);
-        }
-
-        $date = self::parseDate($datePart);
-        $time = self::parseTime($timePart);
-        $local = self::buildDateTimeImmutable($date, $time, self::offsetTimeZone($offsetMinutes));
-        return DXNDateTime::fromDateTimeImmutable($local, $offsetMinutes);
+        $offset = self::offsetMinutes($m[3], $text);
+        $local = Nanos::local(self::parseDate($m[1]), self::parseTime($m[2]));
+        return new DXNDateTime(Nanos::checked($local - $offset * 60 * Nanos::PER_SECOND, "datetime \"{$text}\""), $offset);
     }
 
-    public static function formatOffsetDateTime(DXNDateTime $dt): string
+    /**
+     * A date, `T` and a time, no offset.
+     *
+     * @throws \InvalidArgumentException for any other text, or a value 64 bits cannot hold.
+     */
+    public static function parseLocalDateTime(string $text): DXNLocalDateTime
     {
-        $d = $dt->toDateTimeImmutable();
-        $date = self::formatDate(DXNDate::fromDateTimeImmutable($d));
-        $time = self::formatTime(self::extractTime($d));
-        return $date . 'T' . $time . self::formatOffsetMinutes($dt->offsetMinutes);
-    }
-
-    private static function formatOffsetMinutes(int $offsetMinutes): string
-    {
-        if ($offsetMinutes === 0) {
-            return 'Z';
+        if (!preg_match(self::LOCAL_RE, $text, $m)) {
+            throw new \InvalidArgumentException("invalid local-datetime \"{$text}\"");
         }
-        $sign = $offsetMinutes < 0 ? '-' : '+';
-        $abs = abs($offsetMinutes);
-        return sprintf('%s%02d:%02d', $sign, intdiv($abs, 60), $abs % 60);
+        return new DXNLocalDateTime(Nanos::local(self::parseDate($m[1]), self::parseTime($m[2])));
     }
 
+    /** `Z` is zero; `-00:00`, an unknown offset, is refused. */
+    private static function offsetMinutes(string $offset, string $text): int
+    {
+        if ($offset === 'Z') {
+            return 0;
+        }
+        $hours = (int) substr($offset, 1, 2);
+        $minutes = (int) substr($offset, 4, 2);
+        if ($offset === '-00:00' || $hours > 23 || $minutes > 59) {
+            throw new \InvalidArgumentException("invalid datetime \"{$text}\"");
+        }
+        return ($offset[0] === '-' ? -1 : 1) * ($hours * 60 + $minutes);
+    }
+
+    /**
+     * `P...`, ISO 8601, each field's sign its own, the seconds with up to
+     * nine fraction digits.
+     *
+     * @throws \InvalidArgumentException for any other text, or no field at all.
+     */
     public static function parseDuration(string $text): DXNDuration
     {
-        if ($text === 'P' || $text === 'PT' || !preg_match(self::DURATION_RE, $text, $m)) {
+        if ($text === 'P' || str_ends_with($text, 'T') || !preg_match(self::DURATION_RE, $text, $m)) {
             throw new \InvalidArgumentException("invalid duration \"{$text}\"");
         }
 
-        $microseconds = null;
-        $secondsRaw = $m[7] ?? '';
-        if ($secondsRaw !== '') {
-            $parts = explode('.', $secondsRaw, 2);
-            $whole = (int) $parts[0];
-            $fracStr = $parts[1] ?? '';
-            $frac = (int) str_pad(substr($fracStr, 0, 6), 6, '0');
-            $microseconds = $whole * 1_000_000 + $frac;
+        $nanoseconds = null;
+        $seconds = $m[8] ?? '';
+        if ($seconds !== '') {
+            $fraction = $m[9] ?? '';
+            $nanoseconds = Nanos::checked(
+                (int) $seconds * Nanos::PER_SECOND + ($fraction === '' ? 0 : (int) str_pad($fraction, 9, '0')),
+                "duration \"{$text}\"",
+            );
+            if (($m[7] ?? '') === '-') {
+                $nanoseconds = -$nanoseconds;
+            }
         }
 
         return new DXNDuration(
@@ -158,52 +145,8 @@ final class Temporal
             days: self::intOrNull($m[4] ?? ''),
             hours: self::intOrNull($m[5] ?? ''),
             minutes: self::intOrNull($m[6] ?? ''),
-            microseconds: $microseconds,
+            nanoseconds: $nanoseconds,
         );
-    }
-
-    public static function formatDuration(DXNDuration $d): string
-    {
-        $out = 'P';
-        if ($d->years !== null) {
-            $out .= "{$d->years}Y";
-        }
-        if ($d->months !== null) {
-            $out .= "{$d->months}M";
-        }
-        if ($d->weeks !== null) {
-            $out .= "{$d->weeks}W";
-        }
-        if ($d->days !== null) {
-            $out .= "{$d->days}D";
-        }
-
-        $time = '';
-        if ($d->hours !== null) {
-            $time .= "{$d->hours}H";
-        }
-        if ($d->minutes !== null) {
-            $time .= "{$d->minutes}M";
-        }
-        if ($d->microseconds !== null) {
-            $time .= self::formatSeconds($d->microseconds) . 'S';
-        }
-        if ($time !== '') {
-            $out .= "T{$time}";
-        }
-
-        return $out === 'P' ? 'PT0S' : $out;
-    }
-
-    private static function formatSeconds(int $microseconds): string
-    {
-        $whole = intdiv($microseconds, 1_000_000);
-        $frac = abs($microseconds % 1_000_000);
-        if ($frac === 0) {
-            return (string) $whole;
-        }
-        $fracStr = rtrim(str_pad((string) $frac, 6, '0', STR_PAD_LEFT), '0');
-        return "{$whole}.{$fracStr}";
     }
 
     private static function intOrNull(string $s): ?int
@@ -211,37 +154,89 @@ final class Temporal
         return $s === '' ? null : (int) $s;
     }
 
-    private static function buildDateTimeImmutable(DXNDate $date, DXNTime $time, \DateTimeZone $tz): \DateTimeImmutable
+    // ---- writing text ------------------------------------------------------------
+
+    public static function formatDate(DXNDate $date): string
     {
-        $formatted = sprintf(
-            '%04d-%02d-%02d %02d:%02d:%02d.%06d',
-            $date->year,
-            $date->month,
-            $date->day,
-            $time->hour,
-            $time->minute,
-            $time->second,
-            $time->microsecond,
-        );
-        $dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s.u', $formatted, $tz);
-        if ($dt === false) {
-            throw new \RuntimeException("failed to build DateTimeImmutable for \"{$formatted}\"");
-        }
-        return $dt;
+        return sprintf('%04d-%02d-%02d', $date->year, $date->month, $date->day);
     }
 
-    private static function extractTime(\DateTimeImmutable $d): DXNTime
+    /** `HH:MM:SS`, then the fraction with trailing zeros removed, or nothing when it is zero (DXN.md §1.5). */
+    public static function formatTime(DXNTime $time): string
     {
-        return new DXNTime((int) $d->format('G'), (int) $d->format('i'), (int) $d->format('s'), (int) $d->format('u'));
+        return sprintf('%02d:%02d:%02d', $time->hour, $time->minute, $time->second) . self::fraction($time->nanosecond);
     }
 
-    private static function offsetTimeZone(int $offsetMinutes): \DateTimeZone
+    /** The wall clock at its offset, then `Z` for zero or `±HH:MM`. */
+    public static function formatDateTime(DXNDateTime $dt): string
     {
-        if ($offsetMinutes === 0) {
-            return new \DateTimeZone('UTC');
+        $local = Nanos::checked($dt->epochNanoseconds + $dt->offsetMinutes * 60 * Nanos::PER_SECOND, 'a datetime at its offset');
+        return self::formatLocalNanos($local) . self::offsetName($dt->offsetMinutes);
+    }
+
+    /** `YYYY-MM-DDTHH:MM:SS` and the fraction. */
+    public static function formatLocalDateTime(DXNLocalDateTime $local): string
+    {
+        return self::formatLocalNanos($local->localNanoseconds);
+    }
+
+    private static function formatLocalNanos(int $local): string
+    {
+        [$date, $time] = Nanos::split($local);
+        return self::formatDate($date) . 'T' . self::formatTime($time);
+    }
+
+    /** An offset in minutes as a datetime writes it: `Z`, or `±HH:MM`. */
+    public static function offsetName(int $minutes): string
+    {
+        return $minutes === 0 ? 'Z' : Nanos::zoneName($minutes);
+    }
+
+    /** `P...`: the fields in DXN.md §2.3's order, absent ones left out, `PT0S` when none. */
+    public static function formatDuration(DXNDuration $d): string
+    {
+        $date = self::part($d->years, 'Y') . self::part($d->months, 'M') . self::part($d->weeks, 'W') . self::part($d->days, 'D');
+        $time = self::part($d->hours, 'H') . self::part($d->minutes, 'M');
+        if ($d->nanoseconds !== null) {
+            $abs = abs($d->nanoseconds);
+            $time .= ($d->nanoseconds < 0 ? '-' : '') . intdiv($abs, Nanos::PER_SECOND) . self::fraction($abs % Nanos::PER_SECOND) . 'S';
         }
-        $sign = $offsetMinutes < 0 ? '-' : '+';
-        $abs = abs($offsetMinutes);
-        return new \DateTimeZone(sprintf('%s%02d:%02d', $sign, intdiv($abs, 60), $abs % 60));
+        return match (true) {
+            $date === '' && $time === '' => 'PT0S',
+            $time === '' => "P{$date}",
+            default => "P{$date}T{$time}",
+        };
+    }
+
+    private static function part(?int $n, string $unit): string
+    {
+        return $n === null ? '' : $n . $unit;
+    }
+
+    /** `.` and the nanoseconds as nine digits less their trailing zeros, or nothing for none. */
+    private static function fraction(int $nanos): string
+    {
+        return $nanos === 0 ? '' : '.' . rtrim(str_pad((string) $nanos, 9, '0', STR_PAD_LEFT), '0');
+    }
+
+    /**
+     * A date, time, datetime, local date-time or duration as its tag and
+     * ISO 8601 text, `['date', '2026-10-20']`, or null for any other
+     * value -- what the printer and the canonical form both write. A
+     * native `\DateTimeInterface` is the datetime it always means.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public static function tagged(mixed $value): ?array
+    {
+        return match (true) {
+            $value instanceof DXNDate => ['date', self::formatDate($value)],
+            $value instanceof DXNTime => ['time', self::formatTime($value)],
+            $value instanceof DXNDateTime => ['datetime', self::formatDateTime($value)],
+            $value instanceof \DateTimeInterface => ['datetime', self::formatDateTime(DXNDateTime::fromNative($value))],
+            $value instanceof DXNLocalDateTime => ['local-datetime', self::formatLocalDateTime($value)],
+            $value instanceof DXNDuration => ['duration', self::formatDuration($value)],
+            default => null,
+        };
     }
 }

@@ -82,6 +82,32 @@ final class VersionedSchemaTest extends TestCase
         ));
     }
 
+    // A schema in Dextrin 0.1's syntax says what changed, rather than that
+    // a field has no known type -- as the reference.
+    public function testA01SchemaSaysItIsOneAndWhatASchemaIsWrittenAsNow(): void
+    {
+        foreach ([
+            '%{P: %schema{fields: @ordered %{x: :integer}}}',
+            '%{P: %schema{closed: true, x: :integer}}',
+            '%{P: %schema{forbidden: [y], x: :integer}}',
+        ] as $old) {
+            try {
+                self::compiled($old);
+            } catch (\JOetjen\Dextrin\Schema\SchemaCompileError $err) {
+                self::assertStringContainsString('Dextrin 0.1', $err->getMessage());
+                self::assertStringContainsString('%schema(N){field: type, ...}', $err->getMessage());
+                continue;
+            }
+            self::fail("expected {$old} to be refused");
+        }
+    }
+
+    public function testASchemaMayStillHaveFieldsSoNamed(): void
+    {
+        self::compiled('%{P: %schema{fields: {:list-of :string}, closed: :boolean, forbidden?: :string}}');
+        $this->addToAssertionCount(1);
+    }
+
     public function testVersionsLoadFromSeparateDocumentsAndAreKeptApart(): void
     {
         $registry = self::compiled(

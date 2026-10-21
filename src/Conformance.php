@@ -24,7 +24,12 @@ namespace JOetjen\Dextrin;
  * document, makes its `edits` in order -- `replace`, `delete`, `insert`,
  * `update`, their `path`, `value` and `where` written as DXN text -- and
  * answers the document rendered, as `text`; a refused edit answers
- * `document/<reason>`. Any of them may answer `error` instead: the error's
+ * `document/<reason>`. `media-type` answers the form `media-type` names
+ * (DXN.md §6) as `form` -- `text`, `binary`, `schema` or `none`;
+ * `identify` whether `text` is worth decoding as its `form`, `text` or
+ * `schema`, and `identify-binary` whether `binary`, base64, is a `.dxnb`
+ * document, each as `identified`: `true` or `false`. Any of them may
+ * answer `error` instead: the error's
  * category (DXN.md §5), never its message. An error with no category yet
  * is `uncategorised`, which no case expects, so it shows as a
  * disagreement rather than passing by accident.
@@ -49,6 +54,27 @@ final class Conformance
         )];
     }
 
+    /** Whether a body was identified, as the suite reads it. */
+    private static function truth(bool $yes): string
+    {
+        return $yes ? 'true' : 'false';
+    }
+
+    /**
+     * Whether `$base64` is a `.dxnb` document, or `binary` when it is not
+     * base64 at all.
+     *
+     * @return array<string, string>
+     */
+    private static function identifiedBinary(string $base64): array
+    {
+        $bytes = base64_decode($base64, true);
+        if ($bytes === false) {
+            return ['error' => 'binary'];
+        }
+        return ['identified' => self::truth(Format::identifies($bytes, Form::Binary))];
+    }
+
     /**
      * @param array<string, mixed> $case
      * @return array<string, string>
@@ -71,6 +97,12 @@ final class Conformance
                     Dextrin::decode(self::text($case, 'text'), $registry, $strict),
                     registry: $registry,
                 ))],
+                'media-type' => ['form' => Format::form(self::text($case, 'media-type'))->value ?? 'none'],
+                'identify' => ['identified' => self::truth(Format::identifies(
+                    self::text($case, 'text'),
+                    ($case['form'] ?? null) === 'schema' ? Form::Schema : Form::Text,
+                ))],
+                'identify-binary' => self::identifiedBinary(self::text($case, 'binary')),
                 default => ['error' => 'unsupported operation ' . json_encode($case['operation'] ?? null)],
             };
         } catch (DXNError $err) {

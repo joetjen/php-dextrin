@@ -7,9 +7,11 @@ namespace JOetjen\Dextrin\Tests\Support;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNDate;
+use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNSet;
@@ -19,6 +21,8 @@ use JOetjen\Dextrin\Value\DXNTime;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
+use JOetjen\Dextrin\Value\DXNIp;
+use JOetjen\Dextrin\Value\DXNObjectId;
 
 /**
  * Hand-rolled random `DXNValue` tree generator -- this project's
@@ -56,17 +60,32 @@ final class RandomValueGenerator
             8 => new DXNChar($rng->getInt(0x20, 0x7e)),
             9 => new DXNSymbol(self::randomIdentifier($rng)),
             10 => new DXNKeyword(self::randomIdentifier($rng)),
-            11 => new DXNUuid($rng->getBytes(16)),
+            11 => self::randomIdentity($rng),
             12 => new DXNUri('https://example.com/' . self::randomIdentifier($rng)),
             13 => new DXNBytes($rng->getInt(0, 3) === 0 ? '' : $rng->getBytes($rng->getInt(1, 8))),
             14 => new DXNDate($rng->getInt(1, 2900), $rng->getInt(1, 12), $rng->getInt(1, 28)),
-            15 => new DXNTime($rng->getInt(0, 23), $rng->getInt(0, 59), $rng->getInt(0, 59), $rng->getInt(0, 999999)),
+            15 => self::randomClock($rng),
             16 => new DXNList(self::items($rng, $depth)),
             17 => new DXNTuple(self::items($rng, $depth)),
             18 => self::items($rng, $depth), // bare array -> DXN `array`
             19 => new DXNSet(self::items($rng, $depth)),
             20 => self::structOrMap($rng, $depth),
             default => null,
+        };
+    }
+
+    /**
+     * A time, datetime or local date-time, to the nanosecond (DXN.md
+     * §1.3): epoch nanoseconds kept well inside the 64-bit range, so the
+     * wall clock a datetime's offset moves it to fits too.
+     */
+    private static function randomClock(\Random\Randomizer $rng): DXNTime|DXNDateTime|DXNLocalDateTime
+    {
+        $nanos = $rng->getInt(-4_000_000_000_000_000_000, 4_000_000_000_000_000_000);
+        return match ($rng->getInt(0, 2)) {
+            0 => new DXNTime($rng->getInt(0, 23), $rng->getInt(0, 59), $rng->getInt(0, 59), $rng->getInt(0, 999_999_999)),
+            1 => new DXNDateTime($nanos, $rng->getInt(-1439, 1439)),
+            default => new DXNLocalDateTime($nanos),
         };
     }
 
@@ -123,9 +142,37 @@ final class RandomValueGenerator
         return $s;
     }
 
+    /**
+     * A float half, single or double precision holds: `.dxnb` writes the
+     * shortest exact width (DXN.md §2.2).
+     */
     private static function randomFloat(\Random\Randomizer $rng): float
     {
-        return $rng->getInt(-100000, 100000) / 100.0;
+        return match ($rng->getInt(0, 2)) {
+            0 => $rng->getInt(-2048, 2048) / 8.0,
+            1 => $rng->getInt(-16_777_216, 16_777_216) / 1024.0,
+            default => $rng->getInt(-100000, 100000) / 100.0,
+        };
+    }
+
+    /** A uuid, an objectid, or an ip address or prefix (DXN.md §1.3). */
+    private static function randomIdentity(\Random\Randomizer $rng): DXNUuid|DXNObjectId|DXNIp
+    {
+        return match ($rng->getInt(0, 3)) {
+            0 => new DXNUuid($rng->getBytes(16)),
+            1 => new DXNObjectId($rng->getBytes(12)),
+            2 => new DXNIp($rng->getBytes($rng->getInt(0, 1) === 0 ? 4 : 16)),
+            default => self::randomPrefix($rng),
+        };
+    }
+
+    /** An ip prefix of whole bytes, the bytes past its length zero. */
+    private static function randomPrefix(\Random\Randomizer $rng): DXNIp
+    {
+        $size = $rng->getInt(0, 1) === 0 ? 4 : 16;
+        $whole = $rng->getInt(0, $size);
+        $network = $whole === 0 ? '' : $rng->getBytes($whole);
+        return new DXNIp(str_pad($network, $size, "\0"), $whole * 8);
     }
 
     /** @return numeric-string */

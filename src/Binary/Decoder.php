@@ -11,6 +11,7 @@ use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -19,8 +20,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -29,10 +33,10 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
+use JOetjen\Dextrin\Value\Nanos;
 
 /**
  * `.dxnb` decoder -- the mirror image of {@see Encoder}. Envelope
@@ -72,20 +76,54 @@ final class Decoder
         $this->registry = $registry;
     }
 
+    /**
+     * The one `.dxnb` document `$bytes` holds. Its shared-item and
+     * stringref state is its own: each document is read by a decoder of
+     * its own, so a schema check that reads a document inside a document
+     * (`encodes:`) leaves the outer one's state as it was.
+     */
     public static function decode(string $bytes, ?Registry $registry = null): mixed
     {
-        if (strlen($bytes) < 3 || $bytes[0] !== 'D' || $bytes[1] !== 'X' || ord($bytes[2]) !== 1) {
+        [$value, $end] = self::document($bytes, 0, $registry);
+        if ($end !== strlen($bytes)) {
+            $trailing = strlen($bytes) - $end;
+            throw new BinaryError("trailing bytes after top-level value ({$trailing} left over)", $end);
+        }
+        return $value;
+    }
+
+    /**
+     * `$bytes` read as `.dxnb` documents back to back, each with its own
+     * envelope -- a CBOR sequence of documents, as a schema's
+     * `encodes-seq:` reads one (DXN.md §4.2); no bytes at all are no
+     * documents.
+     *
+     * @return list<mixed>
+     */
+    public static function decodeSequence(string $bytes, ?Registry $registry = null): array
+    {
+        $documents = [];
+        for ($at = 0; $at < strlen($bytes);) {
+            [$documents[], $at] = self::document($bytes, $at, $registry);
+        }
+        return $documents;
+    }
+
+    /**
+     * The document at `$at` in `$bytes`, and the offset just past it.
+     *
+     * @return array{0: mixed, 1: int}
+     */
+    private static function document(string $bytes, int $at, ?Registry $registry): array
+    {
+        if (strlen($bytes) - $at < 3 || $bytes[$at] !== 'D' || $bytes[$at + 1] !== 'X' || ord($bytes[$at + 2]) !== 1) {
             throw new BinaryError('missing or invalid .dxnb envelope (expected magic "DX" + version 1)');
         }
-        $decoder = new self($bytes, 3, $registry);
+        $decoder = new self($bytes, $at + 3, $registry);
         $value = $decoder->decodeItem();
-        if ($decoder->pos !== strlen($bytes)) {
-            $trailing = strlen($bytes) - $decoder->pos;
-            throw new BinaryError("trailing bytes after top-level value ({$trailing} left over)", $decoder->pos);
-        }
         // The true top of decoding -- see Text\Parser::parse()'s
         // identical stripping and its own doc for why.
-        return Validated::strip($value);
+        return [Validated::strip($value), $decoder->pos];
     }
 
     private function readByte(): int
@@ -154,7 +192,10 @@ final class Decoder
             20 => false,
             21 => true,
             22 => null,
-            25 => throw new BinaryError('half-precision (16-bit) CBOR floats are not supported', $this->pos),
+            // Every width CBOR has; the encoder writes the shortest exact
+            // one (DXN.md §2.2). A single's specials and subnormals are
+            // PHP floats as unpacked.
+            25 => FloatWidth::fromHalf(self::unpackUint($this->take(2), 'n')),
             26 => self::unpackFloat($this->take(4), 'G'),
             27 => self::unpackFloat($this->take(8), 'E'),
             default => throw new BinaryError("unsupported CBOR item (major 7, arg {$info})", $this->pos),
@@ -347,10 +388,14 @@ final class Decoder
             Tags::T_BIGNUM_POS => $this->buildBignum($value, $tag, false),
             Tags::T_BIGNUM_NEG => $this->buildBignum($value, $tag, true),
             Tags::T_DECIMAL => $this->buildDecimal($value),
-            Tags::T_TIMESTAMP => new DXNTimestamp($this->requireInteger($value, $tag, 'timestamp')),
+            // DXN 0.2's UTC timestamp, epoch microseconds (DXN.md §2.3).
+            Tags::T_TIMESTAMP_US => $this->buildDatetime([$this->scaled($value, $tag, 'timestamp', 1000), 0], $tag),
             Tags::T_RATIONAL => $this->buildRational($value),
             Tags::T_URI => $this->expectString($value, $tag, 'uri', static fn (string $v): DXNUri => new DXNUri($v)),
             Tags::T_UUID => $this->buildUuid($value),
+            Tags::T_OBJECTID => $this->buildObjectId($value),
+            Tags::T_IPV4 => $this->buildIp($value, $tag, 4),
+            Tags::T_IPV6 => $this->buildIp($value, $tag, 16),
             Tags::T_CHAR => $this->buildChar($value),
             Tags::T_SYMBOL => $this->expectString($value, $tag, 'symbol', static fn (string $v): DXNSymbol => new DXNSymbol($v)),
             Tags::T_KEYWORD => $this->expectString($value, $tag, 'keyword', static fn (string $v): DXNKeyword => new DXNKeyword($v)),
@@ -359,11 +404,22 @@ final class Decoder
             Tags::T_SET => $this->buildFromList($value, $tag, 'set', static fn (array $items): DXNSet => new DXNSet($items)),
             Tags::T_SORTED_SET => $this->buildFromList($value, $tag, 'sorted-set', static fn (array $items): DXNSortedSet => DXNSortedSet::fromArray($items)),
             Tags::T_DATE => $this->buildDate($value),
-            Tags::T_TIME => $this->buildTime($value),
-            Tags::T_DATETIME_OFFSET => $this->buildDatetimeOffset($value),
-            Tags::T_DURATION => $this->buildDuration($value),
+            Tags::T_TIME => $this->buildTime($this->requireSmallInt($value, $tag, 'time')),
+            // In UTC the bare nanoseconds, otherwise with the offset (DXN.md §2.2).
+            Tags::T_DATETIME => $this->buildDatetime(
+                is_int($value) || $value instanceof DXNInteger ? [$this->scaled($value, $tag, 'datetime', 1), 0] : $this->pair($value, $tag, 1),
+                $tag,
+            ),
+            Tags::T_LOCAL_DATETIME => new DXNLocalDateTime($this->requireSmallInt($value, $tag, 'local-datetime')),
+            Tags::T_DURATION => $this->buildDuration($value, $tag, 1),
+            // DXN 0.2's microsecond encodings, read as what they meant: a
+            // tag never changes its meaning (DXN.md §2.3).
+            Tags::T_TIME_US => $this->buildTime($this->scaled($value, $tag, 'time', 1000)),
+            Tags::T_DATETIME_US => $this->buildDatetime($this->pair($value, $tag, 1000), $tag),
+            Tags::T_DURATION_US => $this->buildDuration($value, $tag, 1000),
             Tags::T_REGEX => $this->buildRegex($value),
             Tags::T_CUSTOM => $this->buildCustom($value),
+            Tags::T_BITS => $this->buildBits($value),
             default => throw new BinaryError("unrecognized CBOR tag {$tag}", $this->pos),
         };
     }
@@ -454,6 +510,37 @@ final class Decoder
             throw new BinaryError('malformed uuid (tag ' . Tags::T_UUID . ') payload', $this->pos);
         }
         return new DXNUuid($value->data);
+    }
+
+    private function buildObjectId(mixed $value): DXNObjectId
+    {
+        if (!$value instanceof DXNBytes || strlen($value->data) !== 12) {
+            throw new BinaryError('malformed objectid (tag ' . Tags::T_OBJECTID . ') payload', $this->pos);
+        }
+        return new DXNObjectId($value->data);
+    }
+
+    /**
+     * RFC 9164: an address is its raw bytes; a prefix is its length and
+     * the bytes with trailing zero bytes left off, put back here.
+     */
+    private function buildIp(mixed $value, int $tag, int $size): DXNIp
+    {
+        if ($value instanceof DXNBytes && strlen($value->data) === $size) {
+            return new DXNIp($value->data);
+        }
+        if (!$value instanceof DXNList || count($value->items) !== 2) {
+            throw new BinaryError("malformed ip (tag {$tag}) payload", $this->pos);
+        }
+        [$length, $bytes] = $value->items;
+        if (!is_int($length) || !$bytes instanceof DXNBytes || strlen($bytes->data) > $size) {
+            throw new BinaryError("malformed ip (tag {$tag}) payload", $this->pos);
+        }
+        try {
+            return new DXNIp(str_pad($bytes->data, $size, "\0"), $length);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError('invalid ip prefix: its host bits are not zero', $this->pos);
+        }
     }
 
     private function buildChar(mixed $value): DXNChar
@@ -569,41 +656,68 @@ final class Decoder
         return DXNDate::fromDateTimeImmutable($target);
     }
 
-    private function buildTime(mixed $value): DXNTime
+    // Nanoseconds throughout (DXN.md §2.2, Jan, 2026-10-20). An integer
+    // past 64 bits -- CBOR integers are unbounded, and a malformed or
+    // adversarial document can hold one -- is refused, not wrapped.
+
+    /**
+     * An integer payload times `$scale`: 0.2's microseconds as
+     * nanoseconds.
+     */
+    private function scaled(mixed $value, int $tag, string $name, int $scale): int
     {
-        $i = $this->requireInteger($value, Tags::T_TIME, 'time');
-        $totalMicro = $this->integerAsString($i);
-        if (bccomp($totalMicro, '0', 0) < 0) {
-            throw new BinaryError('malformed time (tag ' . Tags::T_TIME . ') payload', $this->pos);
+        try {
+            return Nanos::checked($this->requireSmallInt($value, $tag, $name) * $scale, $name);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError("{$name} (tag {$tag}) out of range", $this->pos);
         }
-        $microsecond = (int) bcmod($totalMicro, '1000000');
-        $totalSeconds = bcdiv($totalMicro, '1000000', 0);
-        $second = (int) bcmod($totalSeconds, '60');
-        $totalMinutes = bcdiv($totalSeconds, '60', 0);
-        $minute = (int) bcmod($totalMinutes, '60');
-        $hour = (int) bcdiv($totalMinutes, '60', 0);
-        return new DXNTime($hour, $minute, $second, $microsecond);
     }
 
-    private function buildDatetimeOffset(mixed $value): DXNDateTime
+    /**
+     * A datetime payload, `[epoch, offset-minutes]`, the epoch times
+     * `$scale`.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function pair(mixed $value, int $tag, int $scale): array
     {
         if (!$value instanceof DXNList || count($value->items) !== 2) {
-            throw new BinaryError('malformed datetime (tag ' . Tags::T_DATETIME_OFFSET . ') payload', $this->pos);
+            throw new BinaryError("malformed datetime (tag {$tag}) payload", $this->pos);
         }
-        [$epochMicros, $offsetMinutes] = $value->items;
-        $epoch = $this->requireInteger($epochMicros, Tags::T_DATETIME_OFFSET, 'datetime');
-        $offset = $this->requireSmallInt($offsetMinutes, Tags::T_DATETIME_OFFSET, 'datetime');
-        return new DXNDateTime($epoch, $offset);
+        return [$this->scaled($value->items[0], $tag, 'datetime', $scale), $this->requireSmallInt($value->items[1], $tag, 'datetime')];
     }
 
-    private function buildDuration(mixed $value): DXNDuration
+    private function buildTime(int $nanos): DXNTime
+    {
+        try {
+            return DXNTime::fromNanosecondsSinceMidnight($nanos);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError('malformed time (tag ' . Tags::T_TIME . ') payload', $this->pos);
+        }
+    }
+
+    /** @param array{0: int, 1: int} $parts */
+    private function buildDatetime(array $parts, int $tag): DXNDateTime
+    {
+        try {
+            return new DXNDateTime($parts[0], $parts[1]);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError("datetime (tag {$tag}) out of range", $this->pos);
+        }
+    }
+
+    /**
+     * `$scale` turns the seventh field into nanoseconds: 1 for tag 220,
+     * 1000 for 0.2's microseconds (tag 212).
+     */
+    private function buildDuration(mixed $value, int $tag, int $scale): DXNDuration
     {
         if (!$value instanceof DXNList || $value->items === []) {
-            throw new BinaryError('malformed duration (tag ' . Tags::T_DURATION . ') payload', $this->pos);
+            throw new BinaryError("malformed duration (tag {$tag}) payload", $this->pos);
         }
         $items = $value->items;
         $bitmaskItem = array_shift($items);
-        $bitmask = $this->requireSmallInt($bitmaskItem, Tags::T_DURATION, 'duration');
+        $bitmask = $this->requireSmallInt($bitmaskItem, $tag, 'duration');
         $fields = Tags::durationFieldsPresent($bitmask);
         if (count($fields) !== count($items)) {
             throw new BinaryError('duration bitmask does not match field count', $this->pos);
@@ -611,13 +725,19 @@ final class Decoder
         /** @var array<string, int> $values */
         $values = [];
         foreach ($fields as $i => $field) {
-            $values[$field] = $this->requireSmallInt($items[$i], Tags::T_DURATION, 'duration');
+            $values[$field] = $field === 'nanoseconds'
+                ? $this->scaled($items[$i], $tag, 'duration', $scale)
+                : $this->requireSmallInt($items[$i], $tag, 'duration');
         }
         return new DXNDuration(...$values);
     }
 
+    /** The bare pattern for a regex without flags (DXN.md §2.2), or `[pattern, flags]`. */
     private function buildRegex(mixed $value): DXNRegex
     {
+        if (is_string($value)) {
+            return new DXNRegex($value, Tags::regexByteToFlags(0));
+        }
         if (!$value instanceof DXNList || count($value->items) !== 2) {
             throw new BinaryError('malformed regex (tag ' . Tags::T_REGEX . ') payload', $this->pos);
         }
@@ -691,5 +811,26 @@ final class Decoder
     {
         \JOetjen\Dextrin\MapKey::checkPairs($pairs);
         return new DXNOrderedMap($pairs);
+    }
+
+    /**
+     * T_BITS, `[bytes, count]` (DXN.md §2.3): the count must match the
+     * bytes; a whole number of them is bytes.
+     */
+    private function buildBits(mixed $value): DXNBits|DXNBytes
+    {
+        $malformed = 'malformed bits (tag ' . Tags::T_BITS . ') payload: [bytes, count] with the count matching the bytes';
+        if (!$value instanceof DXNList || count($value->items) !== 2) {
+            throw new BinaryError($malformed, $this->pos);
+        }
+        [$data, $count] = $value->items;
+        if (!$data instanceof DXNBytes || !is_int($count)) {
+            throw new BinaryError($malformed, $this->pos);
+        }
+        try {
+            return DXNBits::from($data->data, $count);
+        } catch (\InvalidArgumentException) {
+            throw new BinaryError($malformed, $this->pos);
+        }
     }
 }

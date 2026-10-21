@@ -16,6 +16,7 @@ use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -24,7 +25,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -170,18 +170,19 @@ final class ParserTest extends TestCase
         self::assertEquals(new DXNBytes('hi'), Parser::parse('@bytes "aGk="'));
     }
 
-    public function testParsesTemporalSigilsAndTags(): void
+    public function testParsesTemporalTags(): void
     {
-        self::assertEquals(new DXNDate(2024, 6, 1), Parser::parse('~D[2024-06-01]'));
-        self::assertEquals(new DXNTime(13, 45, 30), Parser::parse('~T[13:45:30]'));
-        self::assertInstanceOf(DXNTimestamp::class, Parser::parse('~U[2024-06-01 13:45:30Z]'));
+        self::assertEquals(new DXNDate(2024, 6, 1), Parser::parse('@date "2024-06-01"'));
+        self::assertEquals(new DXNTime(13, 45, 30), Parser::parse('@time "13:45:30"'));
+        self::assertEquals(new DXNDateTime(1_717_249_530_000_000_000, 0), Parser::parse('@datetime "2024-06-01T13:45:30Z"'));
         self::assertInstanceOf(DXNDateTime::class, Parser::parse('@datetime "2024-06-01T13:45:30+02:00"'));
+        self::assertInstanceOf(DXNLocalDateTime::class, Parser::parse('@local-datetime "2024-06-01T13:45:30"'));
         self::assertInstanceOf(DXNDuration::class, Parser::parse('@duration "P1Y"'));
     }
 
-    public function testParsesRegexSigil(): void
+    public function testParsesARegexItsFlagsInAHeader(): void
     {
-        $re = Parser::parse('~r/foo/im');
+        $re = Parser::parse('@regex(im) "foo"');
         self::assertInstanceOf(DXNRegex::class, $re);
         self::assertSame('foo', $re->pattern);
         self::assertTrue($re->flags['i']);

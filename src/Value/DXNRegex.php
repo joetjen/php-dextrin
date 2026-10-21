@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Value;
 
 /**
- * DXN `regex` (`~r/pattern/flags`) -- PCRE-style semantics (matching
- * Erlang `:re`/Elixir `Regex`, per `dxn/DXN.md` §2.3), which happens
+ * DXN `regex` (`@regex "pattern"`, or `@regex(flags) "pattern"`) -- its
+ * flags in a header, PCRE's inline modifiers part of the pattern, so
+ * `@regex "(?i)a"` is a different value from `@regex(i) "a"` (DXN.md
+ * §1.2). PCRE-style semantics (matching Erlang `:re`/Elixir `Regex`,
+ * per `dxn/DXN.md` §2.3), which happens
  * to make PHP's own PCRE-backed `preg_*` a *better* native fit than
  * JS's `RegExp` had: DXN's `x` (extended) and `r` (ungreedy) flags
  * both have real PHP modifier equivalents (`r` maps to PHP's

@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin\Tests\Conformance;
 
 use JOetjen\Dextrin\Dextrin;
+use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRegex;
 use JOetjen\Dextrin\Value\DXNSet;
 use JOetjen\Dextrin\Value\DXNStruct;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUuid;
 use JOetjen\Dextrin\Value\Equality;
@@ -32,10 +32,10 @@ final class WorkedExampleTest extends TestCase
           active:  true
           score:   19.99M
           tags:    @{:admin :staff}
-          meta:    @ordered %{created: ~U[1990-01-01 00:00:00Z]}
+          meta:    @ordered %{created: @datetime "1990-01-01T00:00:00Z"}
           address: %Point[51.05, 13.74]
           result:  {:ok, 200}
-          handle:  ~r/^[a-z0-9_]{3,20}$/i
+          handle:  @regex(i) "^[a-z0-9_]{3,20}$"
         }
         DXN;
 
@@ -50,7 +50,7 @@ final class WorkedExampleTest extends TestCase
         self::assertEquals(DXNDecimal::fromString('19.99'), $value['score']);
         self::assertEquals(new DXNSet([new DXNKeyword('admin'), new DXNKeyword('staff')]), $value['tags']);
         self::assertInstanceOf(DXNOrderedMap::class, $value['meta']);
-        self::assertInstanceOf(DXNTimestamp::class, $value['meta']->pairs[0][1]);
+        self::assertInstanceOf(DXNDateTime::class, $value['meta']->pairs[0][1]);
         self::assertInstanceOf(DXNStruct::class, $value['address']);
         self::assertSame([51.05, 13.74], $value['address']->values());
         self::assertEquals(new DXNTuple([new DXNKeyword('ok'), 200]), $value['result']);

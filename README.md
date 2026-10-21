@@ -1,5 +1,11 @@
 # php-dextrin
 
+> [!WARNING]
+> **Under heavy development: not for production use before `1.0.0`.**
+> Things can and will break, and the specification can and will change,
+> between any two releases until `1.0.0`. Do not use this library in a
+> production system yet.
+
 [![CI](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml/badge.svg)](https://github.com/joetjen/php-dextrin/actions/workflows/ci.yml)
 [![Packagist](https://img.shields.io/packagist/v/joetjen/dextrin.svg)](https://packagist.org/packages/joetjen/dextrin)
 [![Docs](https://img.shields.io/badge/docs-phpDocumentor-blue.svg)](https://joetjen.github.io/php-dextrin/)
@@ -90,10 +96,10 @@ as a string in JSON, for instance).
 
 | | config file | API response, 100 records | time series, 1,000 points | record with a 4 KiB blob |
 |---|---:|---:|---:|---:|
-| DXN text | 279 / 199 | 18,602 / 4,192 | 55,159 / 13,682 | 5,516 / 4,222 |
-| DXN text, pretty | 362 / 223 | 24,804 / 4,281 | 71,161 / 13,878 | 5,527 / 4,234 |
-| `.dxnb` | 270 / 214 | 14,085 / 3,739 | 33,006 / 13,611 | 4,145 / 4,168 |
-| `.dxnb`, shared | 270 / 214 | 9,117 / 3,678 | 26,017 / 13,339 | 4,145 / 4,168 |
+| DXN text | 279 / 199 | 19,402 / 4,218 | 63,159 / 13,895 | 5,516 / 4,222 |
+| DXN text, pretty | 314 / 216 | 23,504 / 4,249 | 67,161 / 13,961 | 5,527 / 4,234 |
+| `.dxnb` | 264 / 212 | 14,185 / 3,802 | 34,006 / 14,381 | 4,145 / 4,168 |
+| `.dxnb`, shared | 264 / 212 | 9,217 / 3,752 | 27,017 / 14,019 | 4,145 / 4,168 |
 | JSON | 306 / 207 | 19,202 / 4,201 | 56,159 / 13,692 | 5,514 / 4,216 |
 | JSON, pretty | 403 / 229 | 26,253 / 4,287 | 74,160 / 14,182 | 5,527 / 4,231 |
 | BSON | 312 / 231 | 17,621 / 4,448 | 36,903 / 15,700 | 4,161 / 4,184 |
@@ -102,15 +108,17 @@ as a string in JSON, for instance).
 | Protocol Buffers | 141 / 111 | 8,552 / 3,702 | 19,000 / 10,832 | 4,122 / 4,145 |
 
 - **DXN text is about JSON's size** -- keys need no quotes -- while
-  carrying the types JSON drops.
+  carrying the types JSON drops. Data full of dates and times is the
+  exception, about an eighth larger: each datetime names its type
+  (`@datetime "..."`) where JSON writes a bare string.
 - **`.dxnb` sits between JSON and the compact binaries.** Value sharing
   writes a repeated key or string once; on the API response that brings
-  it within 7% of Protocol Buffers, with no schema needed to read it.
+  it within 8% of Protocol Buffers, with no schema needed to read it.
   This package reads shared `.dxnb`; the Elixir and Praxis encoders
   write it.
-- **Where it is larger, it is carrying more.** A `.dxnb` timestamp keeps
-  microseconds and its type, where CBOR's and MessagePack's carry whole
-  seconds; a keyword key is tagged as a keyword rather than written as a
+- **Where it is larger, it is carrying more.** A `.dxnb` datetime keeps
+  nanoseconds, its offset and its type, where CBOR's and MessagePack's
+  carry whole seconds; a keyword key is tagged as a keyword rather than written as a
   plain string. Protocol Buffers is smallest because its schema, not the
   data, holds the field names.
 - **Compressed, the gap narrows.** Gzipped, DXN text stays within about
@@ -127,7 +135,7 @@ parser, and through Dextrin:
 | `9223372036854775808` | integer / integer | **9223372036854776000** / `BigInt` | **float** / `DXNInteger` | integer / integer |
 | `19.99` as an exact decimal | **float** / `Decimal` | **float** / `DXNDecimal` | **float** / `DXNDecimal` | **float** / `dextrin.decimal` |
 | `1.0` | float / float | **1, an integer** / float | float, **written back as `1`** / float | float / float |
-| a timestamp | **string** / `DateTime` | **string** / `DXNTimestamp` | **string** / `DXNTimestamp` | **string** / a `praxis.time` instant |
+| a datetime | **string** / `DateTime` | **string** / `DXNDateTime` | **string** / `DXNDateTime` | **string** / a `praxis.time` instant |
 | bytes | **base64 string** / `Dextrin.Bytes` | **base64 string** / `DXNBytes` | **base64 string** / `DXNBytes` | **base64 string** / `dextrin.bytes` |
 | a map keyed by integers | **string keys** / integer keys | **string keys** / integer keys | **string keys** / integer keys | **string keys** / integer keys |
 | a set | **list** / `MapSet` | **array** / `Set` | **array** / `DXNSet` | **vector** / set |
@@ -136,6 +144,113 @@ A bold entry is a value that did not come back as what was written. With
 Dextrin, the same document means the same thing in all four, and every
 implementation is held to that by the
 [Dextrin Conformance Suite](https://github.com/joetjen/praxis/tree/develop/libs_prx/dextrin_conformance).
+
+### How DXNS compares, as a schema language
+
+A `.dxns` schema is DXN data. It is meant to say everything the schema
+languages of the formats above can say, except what has no value or no
+meaning in DXN (the reference's
+[`design/schema-superset.md`](https://github.com/joetjen/dextrin/blob/develop/design/schema-superset.md)
+goes through them construct by construct). YAML, TOML and MessagePack
+have no schema language of their own; people use JSON Schema for them.
+
+| | DXNS | JSON Schema | MongoDB `$jsonSchema` | CDDL | Protobuf | Ion Schema |
+|---|---|---|---|---|---|---|
+| Written in the format it describes | ✓ | ✓ | ✓ | – | – | ✓ |
+| Typed records, with versions | ✓ | – | – | – | ~¹ | – |
+| Version changes checked in CI | ✓ | – | – | – | ~¹ | – |
+| Recursive types | ✓ | ✓ | – | ✓ | ✓ | ✓ |
+| Generic types | ✓ | ~² | – | ✓ | – | – |
+| A list's items in order | ✓ | ✓ | ✓ | ✓ | – | ✓ |
+| A type chosen by a sibling field | ✓ | ~³ | – | ~⁴ | ~⁵ | – |
+| String formats, checked the same everywhere | ✓ | ~⁶ | – | ~⁷ | ~⁸ | ~⁷ |
+| Decimals, ratios, dates, times, durations as types | ✓ | – | ~⁹ | ~¹⁰ | – | ~¹¹ |
+| Bytes holding an encoded document | ✓ | ✓ | – | ✓ | – | – |
+| Annotations and free metadata | ✓ | ✓ | ~¹² | – | ✓ | ✓ |
+| Closing a type to unknown fields | –¹³ | ✓ | ✓ | ✓ | – | ✓ |
+| One test suite every implementation passes | ✓ | ~⁶ | – | – | – | – |
+
+¹ Field numbers keep old readers working; checking a change takes a
+tool outside the language, such as `buf breaking`.
+² `$dynamicRef`, since draft 2020-12.
+³ `if`/`then`/`else`; OpenAPI adds a `discriminator` on top.
+⁴ A group choice, `//`, over maps with a literal member.
+⁵ `oneof` picks one field of several, not the type of one.
+⁶ The official test suite exists, but `format` only annotates unless a
+validator opts in, and each implements the formats its own way.
+⁷ Regular expressions (CDDL's `.regexp`, Ion Schema's `regex`); CDDL's
+`.abnf` takes a grammar.
+⁸ Through the separate `protovalidate` rules.
+⁹ `decimal` and `date` BSON types; no times of day or durations.
+¹⁰ Through tags and the prelude (`tdate`, `decfrac`); no durations.
+¹¹ `decimal` and `timestamp`, with precision and offsets; no durations.
+¹² `title` and `description` only.
+¹³ On purpose: see the next section.
+
+In PHP, a datetime and a local date-time range only from 1677 to 2262
+(see [below](#why-a-port-and-why-this-value-model)).
+
+### Why a DXNS type is never closed
+
+JSON Schema's `additionalProperties: false`, Ion Schema's `closed` and
+CDDL's maps refuse a field the schema does not list. DXNS has no such
+switch, for two reasons:
+
+- **Closing is the reader's choice, not the type's.** A config loader
+  wants a typo in a hand-written file caught; a message consumer wants a
+  newer producer's fields to pass through untouched. The same `Order`
+  schema serves both, so whether unknown fields are refused belongs to
+  the decode: `Dextrin::decode($text, $registry, strict: true)` (or
+  `Dextrin::decodeBinary()`, or a registry made with
+  `$registry->putStrict(true)`) refuses them (`schema/undeclared-field`),
+  and without `strict:` they are kept -- in `.dxnb` as one trailing item
+  (DXN.md §4.7) -- and written back out.
+- **A closed type breaks the next version.** Adding a field to a closed
+  type makes every older reader refuse every newer message, which turns
+  each compatible change into a breaking one. DXN's versions (below)
+  rest on readers that let what they do not know pass.
+
+A check that needs more -- say, refusing exactly the fields another
+schema allows -- runs after the decode, on the value it returns, where
+the application knows what it means.
+
+### Changing a schema across services
+
+Several services reading and writing the same schema never all deploy
+at once. DXNS makes that safe with versions, not with compatibility
+modes (DXN.md §4.8):
+
+- **Every schema has a version**, `%schema(3){...}`, and every version
+  stays loadable beside the others. A writer always writes the latest it
+  has loaded, and says which: `%Order(3){...}`.
+- **A newer message reaches an older reader**: it reads the fields it
+  knows, by name in text and by position in `.dxnb`, and keeps the rest
+  as extra fields. This is why a field is only ever *appended*: in
+  `.dxnb`, an older reader takes positions as they were.
+- **An older message reaches a newer reader** through the schema's
+  *materializer*, one function per schema that upgrades the old fields
+  to the latest version (`$registry->putStructMaterializer('Order',
+  fn (string $name, int $version, array $fields) => ...)`, which answers
+  a new registry). Without one, reading the old version is an error
+  (`schema/no-materializer`), not a guess.
+- **CI checks the discipline**: `vendor/bin/dextrin compat OLD NEW`
+  (`Schema::compat()` underneath) compares the last release's schemas
+  with the current ones, each a `.dxns` file or a directory of them, and
+  exits non-zero on a problem. A version whose content changed is an
+  error -- two documents claiming to be `Order` v3 must mean the same
+  thing -- and it lists, for each schema, what changed since each older
+  version: the materializer's checklist.
+
+So a change deploys like this:
+
+1. **A compatible change** -- fields appended, nothing else -- deploys
+   in either order.
+2. **A breaking change** -- a field removed, moved or retyped -- deploys
+   **readers first**, each with a materializer for the old version, then
+   the writers.
+3. **A schema that services both read and write** changes only
+   compatibly, or is replaced by a new name (`OrderV2`) beside the old
+   one, and the services move over one at a time.
 
 ## Why a port, and why this value model
 
@@ -170,6 +285,13 @@ flexible native container (`array`) where JS had distinct
   `sorted-set`) gets its own wrapper class, since PHP's single
   flexible container can't safely host more than those two without
   losing the ability to tell them apart again on `encode`.
+- A datetime and a local date-time hold their nanoseconds since 1970
+  in a native 64-bit `int`, so they range only from 1677-09-21 to
+  2262-04-11; a value outside that is refused, in text, in `.dxnb` and
+  in a schema's `format: :datetime`. DXN itself has no such bound, and
+  the Elixir reference has none. This is a documented limit of PHP
+  itself, of its 64-bit integers, not of DXN; a future PHP may lift
+  it.
 - Encoding a plain PHP object (`stdClass` or any class with public
   properties) auto-produces a DXN `struct` literal named after its
   class — `(object) ['x' => 1]` encodes as `%stdClass{x:1}` — without
@@ -206,7 +328,7 @@ Dextrin::decodeBinary($bytes);          // => the same value back
 ```
 
 Hand-rolled CBOR over raw PHP strings (not built on a generic CBOR
-library — bignum precision, timestamp integer-only encoding, and the
+library — bignum precision, integer-only nanosecond datetimes, and the
 private tag block aren't things a generic library gets right by
 default; see `src/Binary/Encoder.php`'s own doc). `decodeBinary()`
 accepts documents using the spec's value-sharing extensions
@@ -264,8 +386,8 @@ Also included, each mirroring its `Dextrin.Schema.*` counterpart:
 schema without depending on this one, see `src/Schema/Provider.php`),
 `Std::registry()`'s standard library of common named types
 (`PositiveInteger`, `NonEmptyString`, ...), and
-`FileResolver::forPaths([...])`'s `Namespace/Name` → `.dxns`-file
-resolver for `Registry::putResolver()`:
+`FileResolver::forPaths([...])`'s resolver from names to `.dxns` files,
+by DXN.md §4.6's convention, for `Registry::putResolver()`:
 
 ```php
 use JOetjen\Dextrin\Schema\FileResolver;

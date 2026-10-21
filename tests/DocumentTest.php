@@ -170,13 +170,85 @@ final class DocumentTest extends TestCase
         }
     }
 
+    // Jan, 2026-10-20: a nested collection that fits goes on one line, as
+    // the pretty printer writes it -- unless it holds a comment or a blank
+    // line, which keep it over lines.
+
+    // The lexer counts in code points and a document slices its source in
+    // bytes: a character of more than one byte before an entry garbled
+    // every offset after it.
+    public function testADocumentWithMultiByteCharactersFormatsAndEditsAsAnyOther(): void
+    {
+        $doc = Document::parse("# a→b\n%{x: 1, ä: \"ö\"}");
+        self::assertSame("# a→b\n%{\n  x: 1\n  ä: \"ö\"\n}", $doc->format());
+        self::assertSame("# a→b\n%{x: 2, ä: \"ö\"}", $doc->replace([new \JOetjen\Dextrin\Value\DXNKeyword('x')], 2)->render());
+    }
+
+    public function testFormatWritesANestedCollectionThatFitsOnOneLine(): void
+    {
+        self::assertSame(
+            "%{\n  deps: [\"a\" \"b\"]\n  at: %{x: 1 y: 2}\n}",
+            Document::parse('%{deps: ["a" "b"], at: %{x: 1, y: 2}}')->format(),
+        );
+    }
+
+    public function testFormatBreaksTheTopLevelHoweverShortItIs(): void
+    {
+        self::assertSame("[\n  1\n]", Document::parse('[1]')->format());
+    }
+
+    public function testFormatKeepsOneHoldingACommentOverLines(): void
+    {
+        self::assertSame("%{\n  deps: [\n    \"a\"  # why\n  ]\n}", Document::parse("%{deps: [\"a\" # why\n]}")->format());
+    }
+
+    public function testFormatKeepsOneWithABlankLineOverLines(): void
+    {
+        self::assertSame(
+            "%{\n  deps: [\n    \"a\"\n\n    \"b\"\n  ]\n}",
+            Document::parse("%{deps: [\"a\"\n\n\"b\"]}")->format(),
+        );
+    }
+
+    public function testFormatCountsTheIndentAndTheKeyInTheWidth(): void
+    {
+        $doc = Document::parse('%{key: [1 2 3]}');
+        self::assertSame("%{\n  key: [1 2 3]\n}", $doc->format(width: 14));
+        self::assertSame("%{\n  key: [\n    1\n    2\n    3\n  ]\n}", $doc->format(width: 13));
+    }
+
     public function testFormatLaysADocumentOutAndKeepsItsComments(): void
     {
         $text = "# top\n\n%{name: \"acme\", # the name\n deps: [\"a\" # temporary\n# still about a\n \"b\"\n\n# pinned\n \"c\"\n# nothing follows\n], empty: [], v: 1.50M}\n# the end\n";
         self::assertSame(
-            "# top\n\n%{\n  name: \"acme\"  # the name\n  deps: [\n    \"a\"  # temporary\n         # still about a\n    \"b\"\n\n    # pinned\n    \"c\"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end",
+            "# top\n\n%{\n  name: \"acme\"  # the name\n  deps: [\n    \"a\"  # temporary\n         # still about a\n    \"b\"\n\n    # pinned\n    \"c\"\n    # nothing follows\n  ]\n  empty: []\n  v: 1.50M\n}\n# the end\n",
             Document::parse($text)->format(),
         );
+    }
+
+    // The header is `@dxn` and its version, one space between them,
+    // however they were spaced.
+    public function testTheHeaderKeepsOneSpaceBetweenItsTagAndItsVersion(): void
+    {
+        self::assertSame("@dxn \"1.0\"\n[\n  1\n]", Document::parse("@dxn   \"1.0\"\n[1]")->format());
+        self::assertSame("@dxn \"1.0\"\n[\n  1\n]", Document::parse("@dxn\"1.0\"\n[1]")->format());
+    }
+
+    // A regex's flags header is written against its tag, however it was
+    // spaced, as the reference writes it; a comment after it is kept.
+    public function testARegexKeepsItsFlagsHeaderAgainstItsTag(): void
+    {
+        self::assertSame("%{\n  p: @regex(i) \"a\"\n}", Document::parse('%{p: @regex(i)   "a"}')->format());
+        self::assertSame("%{\n  p: @regex(i) \"a\"\n}", Document::parse('%{p: @regex (i) "a"}')->format());
+        self::assertSame("%{\n  p: @regex(i)  # c\n    \"a\"\n}", Document::parse("%{p: @regex(i) # c\n \"a\"}")->format());
+    }
+
+    // A formatter run on save must not take a file's last newline away;
+    // one the source did not end with, it does not add.
+    public function testADocumentEndsWithANewlineExactlyWhenTheSourceDid(): void
+    {
+        self::assertSame("%{\n  a: 1\n}\n", Document::parse("%{a: 1}\n")->format());
+        self::assertSame("%{\n  a: 1\n}", Document::parse("%{a: 1}")->format());
     }
 
     public function testADocumentWithNoCommentsComesOutAsThePrettyPrinterWritesItsValue(): void

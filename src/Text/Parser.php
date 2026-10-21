@@ -4,20 +4,26 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Text;
 
+use JOetjen\Dextrin\KeyNotAllowed;
+use JOetjen\Dextrin\HasCategory;
 use JOetjen\Dextrin\MapBuilder;
 use JOetjen\Dextrin\MapKey;
 use JOetjen\Dextrin\Registry;
 use JOetjen\Dextrin\Schema\Validated;
 use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Schema\Reader;
+use JOetjen\Dextrin\Schema\SchemaCompileError;
 use JOetjen\Dextrin\Schema\SchemaValidationError;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -44,9 +50,25 @@ use JOetjen\Dextrin\Value\DXNUuid;
 final class Parser
 {
     private const BUILT_IN_TAGS = [
-        'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true,
-        'uri' => true, 'bytes' => true, 'datetime' => true, 'duration' => true,
+        'ordered' => true, 'sorted-set' => true, 'array' => true, 'uuid' => true, 'objectid' => true, 'ip' => true,
+        'uri' => true, 'bytes' => true, 'bits' => true, 'date' => true, 'time' => true,
+        'datetime' => true, 'local-datetime' => true, 'duration' => true, 'regex' => true,
     ];
+
+    /**
+     * The tags DXN.md §1.3 builds in: no custom tag has one of their names
+     * ({@see \JOetjen\Dextrin\Schema\Compiler}'s `{:tagged name T}`).
+     *
+     * @internal
+     * @return list<string>
+     */
+    public static function builtInTags(): array
+    {
+        return array_keys(self::BUILT_IN_TAGS);
+    }
+
+    /** A regex's flag letters, as a header may give them (DXN.md §1.2). */
+    private const REGEX_FLAGS = ['i', 'm', 's', 'u', 'x', 'f', 'r'];
 
     /** @var list<Token> */
     private readonly array $tokens;
@@ -237,9 +259,32 @@ final class Parser
         }
     }
 
+    /**
+     * One value, read off the tokens.
+     *
+     * **A value written well that is not one** -- an impossible date, a
+     * uuid that is not one, an unknown escape -- is text that does not
+     * parse: the `\InvalidArgumentException` the value's own constructor
+     * throws becomes a `syntax` error at the token the value began with,
+     * as the reference answers. One that names its own category (a map
+     * key not allowed) and any other error pass through as they are.
+     */
     private function parseValueBody(): mixed
     {
         $tok = $this->peek();
+        try {
+            return $this->parseValueToken($tok);
+        } catch (\InvalidArgumentException $err) {
+            if ($err instanceof HasCategory) {
+                throw $err;
+            }
+            throw new ParseError($err->getMessage(), $tok->start);
+        }
+    }
+
+    /** The value `$tok` begins. */
+    private function parseValueToken(Token $tok): mixed
+    {
         return match ($tok->type) {
             'NIL' => $this->advanceAnd(null),
             'TRUE' => $this->advanceAnd(true),
@@ -256,10 +301,6 @@ final class Parser
             'LBRACE' => $this->parseTuple(),
             'PERCENT' => $this->parsePercent(),
             'AT' => $this->parseAt(),
-            'DATE_SIGIL' => Temporal::parseDate($this->advance()->value),
-            'TIME_SIGIL' => Temporal::parseTime($this->advance()->value),
-            'INSTANT_SIGIL' => Temporal::parseInstant($this->advance()->value),
-            'REGEX_SIGIL' => $this->parseRegexToken(),
             default => throw new ParseError("unexpected token {$tok->type}", $tok->start),
         };
     }
@@ -331,25 +372,30 @@ final class Parser
         return new DXNKeyword($name);
     }
 
-    private function parseRegexToken(): DXNRegex
+    /**
+     * `@regex "pattern"`, its flags the header's letters, each once
+     * (DXN.md §1.2). A pattern PCRE cannot compile is no regex: `syntax`,
+     * as the reference refuses one Erlang's `:re` cannot. `f` (firstline)
+     * has no PHP modifier, so the pattern is compiled without it.
+     *
+     * @throws \InvalidArgumentException for a flag given twice, an unknown one, or a pattern that is no regex.
+     */
+    private function parseRegexTag(string $flags, int $offset): DXNRegex
     {
-        $tok = $this->advance();
-        $sigil = $tok->value;
-        return new DXNRegex($sigil['pattern'], self::flagsStringToArray($sigil['flags']));
-    }
-
-    /** @return array<string, bool> */
-    private static function flagsStringToArray(string $flags): array
-    {
-        return [
-            'i' => str_contains($flags, 'i'),
-            'm' => str_contains($flags, 'm'),
-            's' => str_contains($flags, 's'),
-            'u' => str_contains($flags, 'u'),
-            'x' => str_contains($flags, 'x'),
-            'f' => str_contains($flags, 'f'),
-            'r' => str_contains($flags, 'r'),
-        ];
+        $letters = str_split($flags);
+        if ($flags !== '' && (array_diff($letters, self::REGEX_FLAGS) !== [] || count(array_unique($letters)) !== count($letters))) {
+            throw new \InvalidArgumentException("@regex({$flags}): the flags are i m s u x f r, each once");
+        }
+        $pattern = $this->parseStringValue('regex', $offset);
+        $set = [];
+        foreach (self::REGEX_FLAGS as $flag) {
+            $set[$flag] = str_contains($flags, $flag);
+        }
+        $probe = new DXNRegex($pattern, ['f' => false] + $set);
+        if (@preg_match($probe->toPcrePattern(), '') === false) {
+            throw new \InvalidArgumentException("invalid regex \"{$pattern}\": " . preg_last_error_msg());
+        }
+        return new DXNRegex($pattern, $set);
     }
 
     private function parseList(): DXNList
@@ -399,14 +445,18 @@ final class Parser
         }
         $this->begin('struct', $at);
         try {
-            return $this->parseStructBody();
+            return $this->parseStructBody($this->tokens[$at]->start);
         } finally {
             $this->end();
         }
     }
 
-    /** The rest of a struct after its `%`: its name, its version, and its keyed or positional body. */
-    private function parseStructBody(): mixed
+    /**
+     * The rest of a struct after its `%`: its name, its version, and its
+     * keyed or positional body. `$start` is where its `%` is, for its
+     * errors.
+     */
+    private function parseStructBody(int $start): mixed
     {
         $name = $this->next('IDENTIFIER')->value;
         $version = $this->parseStructVersion();
@@ -425,10 +475,10 @@ final class Parser
                     $extra[] = [$key, $value];
                 }
             }
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra));
+            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra), $start);
         }
         [$values, $extra] = $this->parsePositionalBody();
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra));
+        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra), $start);
     }
 
     /**
@@ -461,6 +511,7 @@ final class Parser
                 $this->rewrapAsEntry($keyAt);
                 $this->next('ARROW');
                 $this->mark('arrow');
+                $this->keyAllowed($value, $start);
                 $entries[] = [$value, $this->parseValue()];
                 $this->end();
             } elseif ($entries !== []) {
@@ -495,7 +546,7 @@ final class Parser
         return $version;
     }
 
-    private function materializeStruct(string $name, DXNStruct $struct): mixed
+    private function materializeStruct(string $name, DXNStruct $struct, int $start): mixed
     {
         if ($this->registry === null) {
             return $struct;
@@ -506,18 +557,42 @@ final class Parser
             // Which schema a struct is read with depends on its version
             // ({@see Reader}).
             $read = Reader::read($this->registry, $struct);
-        } catch (DXNError | SchemaValidationError $err) {
+        } catch (SchemaValidationError $err) {
             // A schema violation keeps its own category (DXN.md §5); it
-            // is not a syntax error for having been found here.
-            throw $err;
+            // is not a syntax error for having been found here. It is
+            // placed at this struct's `%` unless a struct inside it was
+            // already where it was found -- the innermost place wins, as
+            // the reference's.
+            throw $err->placedAt($start);
+        } catch (SchemaCompileError $err) {
+            // A resolver's refusal of the schema files it found keeps its
+            // category, placed at the struct that asked for them.
+            throw new DXNError($err->getMessage(), 'schema', $start, $err, $err->category());
+        } catch (DXNError $err) {
+            throw $err->offset === null ? new DXNError($err->getMessage(), $err->stage, $start, $err, $err->category) : $err;
         } catch (\Throwable $err) {
-            throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $this->pos);
+            throw new ParseError("struct \"{$name}\" violates its schema: {$err->getMessage()}", $start);
         }
         if ($read === null) {
             return $struct;
         }
         [$value, $this->registry] = $read;
         return $value;
+    }
+
+    /**
+     * Refuses `$key` as a map key (DXN.md §1.6) unless it may be one,
+     * placed at `$offset`, where the key was written -- as the reference
+     * places it. Checked here rather than once the map is built, where
+     * nothing says which entry it was.
+     */
+    private function keyAllowed(mixed $key, int $offset): void
+    {
+        try {
+            MapKey::check($key);
+        } catch (KeyNotAllowed $err) {
+            throw $err->placedAt($offset);
+        }
     }
 
     /**
@@ -546,9 +621,11 @@ final class Parser
                 $this->mark('key');
                 $pairs[] = [$key, $this->parseValue()];
             } else {
+                $keyStart = $this->peek()->start;
                 $key = $this->parseValue();
                 $this->next('ARROW');
                 $this->mark('arrow');
+                $this->keyAllowed($key, $keyStart);
                 $pairs[] = [$key, $this->parseValue()];
             }
             $this->end();
@@ -569,11 +646,16 @@ final class Parser
         return MapBuilder::build($pairs, static fn (string $message): ParseError => new ParseError($message));
     }
 
-    /** `@{...}` (set), or `@identifier value` (tag_form). Discard is already stripped in {@see self::parseValue()}. */
+    /**
+     * `@{...}` (set), or `@identifier value` (tag_form), or
+     * `@regex(flags) value` -- a header carries a regex's flags, as
+     * `%Name(3)` carries a version, and stands on no other tag (DXN.md
+     * §1.2). Discard is already stripped in {@see self::parseValue()}.
+     */
     private function parseAt(): mixed
     {
         $at = $this->pos;
-        $this->next('AT');
+        $atTok = $this->next('AT');
         if ($this->at('LBRACE')) {
             return $this->parseSet($at);
         }
@@ -581,6 +663,15 @@ final class Parser
         $nameTok = $this->next('IDENTIFIER');
         $this->mark('name');
         try {
+            if ($this->at('LPAREN')) {
+                $this->next('LPAREN');
+                $flags = $this->next('IDENTIFIER')->value;
+                $this->next('RPAREN');
+                if ($nameTok->value !== 'regex') {
+                    throw new ParseError("@{$nameTok->value} takes no (...) header; only @regex(flags) does", $atTok->start);
+                }
+                return $this->parseRegexTag($flags, $nameTok->start);
+            }
             return $this->dispatchTag($nameTok->value, $nameTok->start);
         } finally {
             $this->end();
@@ -606,14 +697,23 @@ final class Parser
             'sorted-set' => $this->parseSortedSetTag($offset),
             'array' => $this->parseArrayTag($offset),
             'uuid' => DXNUuid::fromString($this->parseStringValue($name, $offset)),
+            'objectid' => DXNObjectId::fromString($this->parseStringValue($name, $offset)),
+            'ip' => DXNIp::fromString($this->parseStringValue($name, $offset)),
             'uri' => DXNUri::fromString($this->parseStringValue($name, $offset)),
             'bytes' => $this->parseBytesTag($name, $offset),
-            'datetime' => Temporal::parseOffsetDateTime($this->parseStringValue($name, $offset)),
+            'bits' => $this->parseBitsTag($offset),
+            // Dates and times are ISO 8601 strings under their tag
+            // (DXN.md §1.2, Jan, 2026-10-20), read by Temporal.
+            'date' => Temporal::parseDate($this->parseStringValue($name, $offset)),
+            'time' => Temporal::parseTime($this->parseStringValue($name, $offset)),
+            'datetime' => Temporal::parseDateTime($this->parseStringValue($name, $offset)),
+            'local-datetime' => Temporal::parseLocalDateTime($this->parseStringValue($name, $offset)),
+            'duration' => Temporal::parseDuration($this->parseStringValue($name, $offset)),
             // No `default` arm: self::BUILT_IN_TAGS' keys are exactly
             // this match's arms, so PHPStan already proves this is
             // exhaustive -- adding a tag to that list without a
             // matching arm here is a static error, not a runtime one.
-            'duration' => Temporal::parseDuration($this->parseStringValue($name, $offset)),
+            'regex' => $this->parseRegexTag('', $offset),
         };
     }
 
@@ -658,6 +758,29 @@ final class Parser
             throw new ParseError('@array requires a list literal argument', $offset);
         }
         return $inner->toArray();
+    }
+
+    /**
+     * `@bits {"..." n}` (DXN.md §1.4): base64 and a bit count; a whole
+     * number of bytes reads as bytes, which is what it is.
+     */
+    private function parseBitsTag(int $offset): DXNBits|DXNBytes
+    {
+        $wanted = '@bits takes {"base64" bit-count}, the count matching the bytes';
+        $inner = $this->parseValue();
+        if (!$inner instanceof DXNTuple || count($inner->items) !== 2) {
+            throw new ParseError($wanted, $offset);
+        }
+        [$text, $count] = $inner->items;
+        $data = is_string($text) ? base64_decode($text, true) : false;
+        if ($data === false || !is_int($count)) {
+            throw new ParseError($wanted, $offset);
+        }
+        try {
+            return DXNBits::from($data, $count);
+        } catch (\InvalidArgumentException) {
+            throw new ParseError($wanted, $offset);
+        }
     }
 
     private function parseBytesTag(string $name, int $offset): DXNBytes

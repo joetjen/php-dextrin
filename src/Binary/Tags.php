@@ -15,19 +15,23 @@ use JOetjen\Dextrin\Value\DXNDuration;
 final class Tags
 {
     // ---- registered CBOR tags used (RFC 8949 + the extensions DXN.md §2 cites) --
-    public const T_TIMESTAMP = 1;
+    /** DXN 0.2's UTC timestamp, epoch microseconds: read, never written (DXN.md §2.3, Jan, 2026-10-20). */
+    public const T_TIMESTAMP_US = 1;
     public const T_BIGNUM_POS = 2;
     public const T_BIGNUM_NEG = 3;
     public const T_DECIMAL = 4;
     public const T_RATIONAL = 30;
     public const T_URI = 32;
     public const T_UUID = 37;
+    // RFC 9164: an IPv4 or IPv6 address, or a prefix.
+    public const T_IPV4 = 52;
+    public const T_IPV6 = 54;
     public const T_STRINGREF_NAMESPACE = 256;
     public const T_STRINGREF = 25;
     public const T_SHAREABLE = 28;
     public const T_SHARED_REF = 29;
 
-    // ---- private tag block, DXN.md §2.3 (200-214) --------------------------
+    // ---- private tag block, DXN.md §2.3 (200-221) --------------------------
     public const T_CHAR = 200;
     public const T_SYMBOL = 201;
     public const T_KEYWORD = 202;
@@ -38,16 +42,39 @@ final class Tags
     public const T_SORTED_SET = 207;
     public const T_STRUCT = 208;
     public const T_DATE = 209;
-    public const T_TIME = 210;
-    public const T_DATETIME_OFFSET = 211;
-    public const T_DURATION = 212;
+    // DXN 0.2's microsecond encodings: read, never written. A tag never
+    // changes its meaning, so a document 0.2 wrote reads as it was meant.
+    public const T_TIME_US = 210;
+    public const T_DATETIME_US = 211;
+    public const T_DURATION_US = 212;
     public const T_REGEX = 213;
     public const T_CUSTOM = 214;
     /** A struct's extra fields: only ever its last item (DXN.md §2.3). */
     public const T_EXTRA = 215;
 
+    /** A run of bits that is not whole bytes: `[bytes, count]` (DXN.md §2.3). */
+    public const T_BITS = 216;
+
+    /** A local date-time: nanoseconds since 1970-01-01T00:00:00 on the wall clock (DXN.md §2.3, Jan, 2026-10-20). */
+    public const T_LOCAL_DATETIME = 217;
+
+    /** Nanoseconds since midnight. */
+    public const T_TIME = 218;
+
+    /**
+     * `[epoch-nanoseconds, offset-minutes]`, or in UTC the bare
+     * epoch-nanoseconds (the smallest representation, DXN.md §2.2).
+     */
+    public const T_DATETIME = 219;
+
+    /** The duration bitmask, its seventh field nanoseconds. */
+    public const T_DURATION = 220;
+
+    /** BSON's ObjectId: 12 raw bytes (Jan, 2026-10-20). */
+    public const T_OBJECTID = 221;
+
     /** Duration bitmask field order, low bit first (`DXN.md` §2.3). */
-    public const DURATION_FIELDS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'microseconds'];
+    public const DURATION_FIELDS = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'nanoseconds'];
 
     /** Regex flags byte bit order, low bit first (`DXN.md` §2.3). */
     public const REGEX_FLAG_BITS = ['i', 'm', 's', 'u', 'x', 'f', 'r'];

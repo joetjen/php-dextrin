@@ -78,10 +78,37 @@ final class Document
         try {
             $read = $registry !== null && $strict !== null ? $registry->putStrict($strict) : $registry;
             [$value, $tree, $tokens] = Parser::parseTree($source, $read);
-            return new self($source, $tree, $tokens, $value, $registry, $strict);
+            return new self($source, $tree, self::inBytes($source, $tokens), $value, $registry, $strict);
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'parse');
         }
+    }
+
+    /**
+     * `$tokens` with their offsets in bytes. The lexer counts code points,
+     * and everything here slices the source in bytes -- `substr`, `strpos`,
+     * `preg` offsets -- so a character of more than one byte before an
+     * entry put every offset after it off, and formatting or editing such
+     * a document garbled it.
+     *
+     * @param list<Token> $tokens
+     * @return list<Token>
+     */
+    private static function inBytes(string $source, array $tokens): array
+    {
+        if (strlen($source) === mb_strlen($source, 'UTF-8')) {
+            return $tokens;
+        }
+        $bytes = [0];
+        $at = 0;
+        foreach (preg_split('//u', $source, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $char) {
+            $at += strlen($char);
+            $bytes[] = $at;
+        }
+        return array_map(
+            static fn (Token $t): Token => new Token($t->type, $t->value, $bytes[$t->start], $bytes[$t->end], $t->isQuoted),
+            $tokens,
+        );
     }
 
     /** The value this document holds: what {@see Dextrin::decode()} gives for its source. */
@@ -99,11 +126,12 @@ final class Document
     /**
      * This document laid out the way the pretty printer lays out a value,
      * with every comment kept beside the entry it belongs to. Layout only:
-     * every token is written as it was.
+     * every token is written as it was. `$indent` is the spaces per level,
+     * `$width` the columns a nested collection's one line must fit in.
      */
-    public function format(int $indent = 2): string
+    public function format(int $indent = 2, int $width = 80): string
     {
-        return Formatter::format($this, $indent);
+        return Formatter::format($this, $indent, $width);
     }
 
     // ---- edits ------------------------------------------------------------
@@ -235,7 +263,9 @@ final class Document
         if ($value instanceof DXNMap) {
             return $value->pairs();
         }
-        if (is_array($value) && ($value === [] || !array_is_list($value))) {
+        // An empty native array is the DXN array `@array[]`, as
+        // Equality::kindOf() reads it: an empty map decodes to a DXNMap.
+        if (is_array($value) && !array_is_list($value)) {
             // A native array holds a keyword key as its bare name; the
             // document's key is the keyword.
             $pairs = [];

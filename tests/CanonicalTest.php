@@ -111,9 +111,10 @@ final class CanonicalTest extends TestCase
 
     public function testDatesAndTimes(): void
     {
-        self::assertSame('~D[2026-10-17]', self::canonicalOf('~D[2026-10-17]'));
-        self::assertSame('~T[10:00:00.5]', self::canonicalOf('~T[10:00:00.500000]'));
-        self::assertSame('~U[2026-10-17 10:00:00Z]', self::canonicalOf('~U[2026-10-17 10:00:00Z]'));
+        self::assertSame('@date "2026-10-17"', self::canonicalOf('@date "2026-10-17"'));
+        self::assertSame('@time "10:00:00.5"', self::canonicalOf('@time "10:00:00.500000"'));
+        self::assertSame('@datetime "2026-10-17T10:00:00Z"', self::canonicalOf('@datetime "2026-10-17T10:00:00Z"'));
+        self::assertSame('@datetime "2026-10-17T10:00:00.25Z"', self::canonicalOf('@datetime "2026-10-17T10:00:00.250000+00:00"'));
         self::assertSame(
             '@datetime "2026-10-17T10:00:00+02:00"',
             self::canonicalOf('@datetime "2026-10-17T10:00:00+02:00"'),
@@ -137,5 +138,19 @@ final class CanonicalTest extends TestCase
         } catch (DXNError $err) {
             self::assertSame('encode/unsupported', $err->category);
         }
+    }
+
+    /**
+     * The shortest digits that read back, even on a power of two, where the
+     * gap below the value is half the gap above it (2^-24: sixteen digits,
+     * rounding to the nearest sixteen gives ...062, which does not read
+     * back; ...063 does).
+     */
+    public function testAFloatOnABinaryBoundaryIsWrittenInItsShortestDigits(): void
+    {
+        $this->assertSame('5.960464477539063e-8', Canonical::float(2 ** -24));
+        $this->assertSame('0.1', Canonical::float(0.1));
+        $this->assertSame('5.0e-324', Canonical::float(5e-324));
+        $this->assertSame('1.7976931348623157e308', Canonical::float(1.7976931348623157e308));
     }
 }

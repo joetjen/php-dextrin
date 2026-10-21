@@ -6,6 +6,7 @@ namespace JOetjen\Dextrin;
 
 use JOetjen\Dextrin\Text\Printer;
 use JOetjen\Dextrin\Text\Temporal;
+use JOetjen\Dextrin\Value\DXNBits;
 use JOetjen\Dextrin\Value\DXNBytes;
 use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNCustomTag;
@@ -14,8 +15,11 @@ use JOetjen\Dextrin\Value\DXNDateTime;
 use JOetjen\Dextrin\Value\DXNDecimal;
 use JOetjen\Dextrin\Value\DXNDuration;
 use JOetjen\Dextrin\Value\DXNInteger;
+use JOetjen\Dextrin\Value\DXNIp;
 use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNLocalDateTime;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNRational;
 use JOetjen\Dextrin\Value\DXNRegex;
@@ -24,7 +28,6 @@ use JOetjen\Dextrin\Value\DXNSortedSet;
 use JOetjen\Dextrin\Value\DXNStruct;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNTime;
-use JOetjen\Dextrin\Value\DXNTimestamp;
 use JOetjen\Dextrin\Value\DXNTuple;
 use JOetjen\Dextrin\Value\DXNUri;
 use JOetjen\Dextrin\Value\DXNUuid;
@@ -85,6 +88,7 @@ final class Canonical
                 : throw UnsupportedValue::symbol($value->name),
             $value instanceof DXNKeyword => self::keyword($value->name),
             $value instanceof DXNBytes => '@bytes ' . self::quoted(base64_encode($value->data)),
+            $value instanceof DXNBits => '@bits {' . self::quoted(base64_encode($value->data)) . ' ' . $value->bitLength . '}',
             $value instanceof DXNList => '[' . self::items($value->items) . ']',
             $value instanceof DXNTuple => '{' . self::items($value->items) . '}',
             $value instanceof DXNSet => '@{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',
@@ -92,15 +96,18 @@ final class Canonical
             $value instanceof DXNOrderedMap => '@ordered %{' . self::entries($value->pairs, false) . '}',
             $value instanceof \JOetjen\Dextrin\Value\DXNMap => '%{' . self::entries($value->pairs(), true) . '}',
             $value instanceof DXNStruct => self::struct($value),
-            $value instanceof DXNDate => '~D[' . Temporal::formatDate($value) . ']',
-            $value instanceof DXNTime => '~T[' . self::trimmed(Temporal::formatTime($value)) . ']',
-            $value instanceof DXNTimestamp => '~U[' . self::trimmedInstant(Temporal::formatInstant($value)) . ']',
-            $value instanceof DXNDateTime => '@datetime ' . self::quoted(self::trimmedInstant(Temporal::formatOffsetDateTime($value))),
-            $value instanceof \DateTimeInterface => self::text(DXNDateTime::fromNative($value)),
-            $value instanceof DXNDuration => '@duration ' . self::quoted(Temporal::formatDuration($value)),
+            // Dates and times are ISO 8601 strings under their tag
+            // (DXN.md §1.5, Jan, 2026-10-20): the fraction without
+            // trailing zeros, Z for a zero offset.
+            $value instanceof DXNDate, $value instanceof DXNTime, $value instanceof DXNDateTime,
+            $value instanceof \DateTimeInterface, $value instanceof DXNLocalDateTime,
+            $value instanceof DXNDuration => self::temporal($value),
             $value instanceof DXNUuid => '@uuid ' . self::quoted(strtolower($value->toString())),
+            $value instanceof DXNObjectId => '@objectid ' . self::quoted($value->toString()),
+            $value instanceof DXNIp => '@ip ' . self::quoted($value->toString()),
             $value instanceof DXNUri => '@uri ' . self::quoted($value->value),
-            $value instanceof DXNRegex => '~r/' . $value->pattern . '/' . self::regexFlags($value->flags),
+            // Its flags in §2.3's bit order.
+            $value instanceof DXNRegex => Printer::regexForm(Printer::printRegexFlags($value->flags), self::quoted($value->pattern)),
             $value instanceof DXNCustomTag => '@' . $value->name . ' ' . self::text($value->value),
             is_array($value) && array_is_list($value) => '@array[' . self::items($value) . ']',
             is_array($value) => '%{' . self::entries(self::mapPairs($value), true) . '}',
@@ -203,9 +210,10 @@ final class Canonical
      * ECMAScript's thresholds, `.0` on a whole number, no `+` in an
      * exponent, and the sign of negative zero kept. The digits are found
      * by asking for more until they read back exactly, so no ini setting
-     * (`precision`, `serialize_precision`) can change them.
+     * (`precision`, `serialize_precision`) can change them. Public so
+     * {@see Text\Printer} writes a float the same way.
      */
-    private static function float(float $n): string
+    public static function float(float $n): string
     {
         if (is_nan($n)) {
             return 'NaN';
@@ -222,15 +230,35 @@ final class Canonical
         if ($magnitude === 0.0) {
             return ($negative ? '-' : '') . '0.0';
         }
-        for ($places = 0; $places <= 17; $places++) {
-            $written = sprintf("%.{$places}e", $magnitude);
-            if ((float) $written === $magnitude) {
-                break;
+        [$digits, $n] = self::shortest($magnitude);
+        return ($negative ? '-' : '') . self::laidOut($digits, $n);
+    }
+
+    /**
+     * The fewest significant digits that read back as `$magnitude`, and
+     * the n of 0.d1..dk × 10^n: PHP's own shortest conversion
+     * (`serialize_precision` -1), as every other implementation writes it.
+     * Trying `%.Ne` widths instead misses a power of two, where the
+     * nearest N digits need not be the ones that read back.
+     *
+     * @return array{string, int}
+     */
+    private static function shortest(float $magnitude): array
+    {
+        $previous = ini_set('serialize_precision', '-1');
+        try {
+            $text = strtoupper(var_export($magnitude, true));
+        } finally {
+            if ($previous !== false) {
+                ini_set('serialize_precision', $previous);
             }
         }
-        [$mantissa, $exponent] = explode('e', $written);
-        $digits = rtrim(str_replace('.', '', $mantissa), '0');
-        return ($negative ? '-' : '') . self::laidOut($digits === '' ? '0' : $digits, (int) $exponent + 1);
+        [$mantissa, $exponent] = array_pad(explode('E', $text), 2, '0');
+        [$whole, $fraction] = array_pad(explode('.', $mantissa), 2, '');
+        $all = $whole . $fraction;
+        $leading = strlen($all) - strlen(ltrim($all, '0'));
+        $digits = rtrim(ltrim($all, '0'), '0');
+        return [$digits === '' ? '0' : $digits, strlen($whole) - $leading + (int) $exponent];
     }
 
     /** The digits with value 0.d1..dk × 10^n, laid out by DXN.md §1.5. */
@@ -301,33 +329,12 @@ final class Canonical
 
     // ---- time and the rest -------------------------------------------------
 
-    /** `HH:MM:SS.ffffff` with trailing zeros of the fraction removed, and a zero fraction dropped. */
-    private static function trimmed(string $clock): string
+    private static function temporal(mixed $value): string
     {
-        $parts = explode('.', $clock, 2);
-        if (count($parts) === 1) {
-            return $clock;
+        $tagged = Temporal::tagged($value);
+        if ($tagged === null) {
+            throw new \LogicException('unreachable: not a date or time: ' . get_debug_type($value));
         }
-        $kept = rtrim($parts[1], '0');
-        return $kept === '' ? $parts[0] : "{$parts[0]}.{$kept}";
-    }
-
-    /** An instant's text with its clock trimmed, the date and the zone kept. */
-    private static function trimmedInstant(string $instant): string
-    {
-        return (string) preg_replace_callback(
-            '/(\d\d:\d\d:\d\d)(\.\d+)?/',
-            static fn (array $m): string => self::trimmed($m[1] . ($m[2] ?? '')),
-            $instant,
-            1,
-        );
-    }
-
-    /** @param array<string, bool> $flags */
-    private static function regexFlags(array $flags): string
-    {
-        $set = array_keys(array_filter($flags));
-        sort($set, SORT_STRING);
-        return implode('', $set);
+        return '@' . $tagged[0] . ' ' . self::quoted($tagged[1]);
     }
 }

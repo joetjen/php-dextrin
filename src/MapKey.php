@@ -9,12 +9,13 @@ use JOetjen\Dextrin\Value\DXNChar;
 use JOetjen\Dextrin\Value\DXNDate;
 use JOetjen\Dextrin\Value\DXNInteger;
 use JOetjen\Dextrin\Value\DXNKeyword;
+use JOetjen\Dextrin\Value\DXNObjectId;
 use JOetjen\Dextrin\Value\DXNSymbol;
 use JOetjen\Dextrin\Value\DXNUuid;
 
 /**
  * Which values may be map keys (DXN.md §1.6): a string, keyword, integer,
- * uuid, date, bytes, symbol or char. Anything else is refused as
+ * uuid, objectid, date, bytes, symbol or char. Anything else is refused as
  * `key/not-allowed` -- in text, in binary and when encoding.
  *
  * The allowed types are those whose identity is exact and obvious in
@@ -36,6 +37,7 @@ final class MapKey
             || $key instanceof DXNInteger
             || $key instanceof DXNKeyword
             || $key instanceof DXNUuid
+            || $key instanceof DXNObjectId
             || $key instanceof DXNDate
             || $key instanceof DXNBytes
             || $key instanceof DXNSymbol

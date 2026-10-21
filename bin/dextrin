@@ -49,6 +49,8 @@ const USAGE = <<<'USAGE'
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
       compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
+      check SCHEMAS... [--extern NAMESPACE]...     Check a tree of .dxns schemas: syntax, compiling, layout and names
+      docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
@@ -65,9 +67,61 @@ function main(array $argv): int
         'format' => run(static fn () => cmdFormat($rest)),
         'validate' => run(static fn () => cmdValidate($rest)),
         'compat' => run(static fn () => cmdCompat($rest)),
+        'docs' => run(static fn () => cmdDocs($rest)),
+        'check' => run(static fn () => cmdCheck($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
+}
+
+/**
+ * `dextrin docs SCHEMAS [--out DIR] [--title TITLE]`: every `.dxns` file
+ * under `SCHEMAS` as HTML documentation in `DIR` (`doc/schemas` when not
+ * given), as `mix dextrin.docs` writes it.
+ *
+ * @param list<string> $argv
+ */
+function cmdDocs(array $argv): void
+{
+    ['positional' => $positional, 'options' => $options] = parseArgs($argv, optionNames: ['out', 'title']);
+    if (count($positional) !== 1) {
+        throw new \RuntimeException('usage: dextrin docs SCHEMAS [--out DIR] [--title TITLE]');
+    }
+    $out = $options['out'] ?? 'doc/schemas';
+    $written = \JOetjen\Dextrin\Schema\Docs::write($positional[0], $out, $options['title'] ?? null);
+    fwrite(STDOUT, 'wrote ' . count($written) . " files to {$out}\n");
+}
+
+/**
+ * `dextrin check SCHEMAS... [--extern NAMESPACE]...`: a tree of `.dxns`
+ * schemas checked as `mix dextrin.check` checks it -- every problem
+ * printed as `file:line: message`, and a non-zero exit.
+ *
+ * @param list<string> $argv
+ */
+function cmdCheck(array $argv): void
+{
+    $roots = [];
+    $extern = [];
+    for ($i = 0; $i < count($argv); $i++) {
+        if ($argv[$i] === '--extern') {
+            $extern[] = $argv[++$i] ?? '';
+        } else {
+            $roots[] = $argv[$i];
+        }
+    }
+    if ($roots === []) {
+        throw new \RuntimeException('usage: dextrin check SCHEMAS... [--extern NAMESPACE]...');
+    }
+    $result = \JOetjen\Dextrin\Schema\Tree::load($roots, $extern);
+    if ($result['ok']) {
+        fwrite(STDOUT, "OK: {$result['summary']['files']} files, {$result['summary']['definitions']} definitions\n");
+        return;
+    }
+    foreach ($result['problems'] as $p) {
+        fwrite(STDERR, "{$p['file']}:{$p['line']}: {$p['message']}\n");
+    }
+    throw new \RuntimeException(count($result['problems']) . ' problem(s)');
 }
 
 /**
@@ -290,10 +344,13 @@ function cmdFormat(array $argv): void
     // value.
     $doc = \JOetjen\Dextrin\Document::parse(readFileContents($path));
     $text = $mode === 'pretty' ? $doc->format() : Dextrin::encode($doc->toValue());
+    // A file written in place ends with one newline, and so does printed
+    // output, whether or not the formatted text kept the source's.
+    $line = rtrim($text, "\n") . "\n";
     if ($flags['in-place'] ?? false) {
-        file_put_contents($path, $text . "\n");
+        file_put_contents($path, $line);
     } else {
-        fwrite(STDOUT, $text . "\n");
+        fwrite(STDOUT, $line);
     }
 }
 

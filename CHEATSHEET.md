@@ -106,15 +106,17 @@ set          DXNSet{items}                             `@{...}` -- deduped, orde
 sorted-set   DXNSortedSet{items}                        `@sorted-set @{...}` -- always sorted, deduped
 array        array (bare, sequential)                  `@array[1 2 3]` -- the collections decision's other bare-native pairing
 struct       DXNStruct{name, kind, pairs|values}        `%Name{...}` / `%Name[...]`, opaque w/o schema
-date         DXNDate{year, month, day}                  `~D[YYYY-MM-DD]`
-time         DXNTime{hour, minute, second, microsecond} `~T[HH:MM:SS]`
-timestamp    DXNTimestamp{epochMicroseconds}            `~U[YYYY-MM-DD HH:MM:SSZ]`
-datetime     DXNDateTime{epochMicroseconds, offsetMinutes} `@datetime "..."`
-duration     DXNDuration{years, months, ...}            `@duration "P1Y2M"` -- 7 independent fields
+date         DXNDate{year, month, day}                  `@date "YYYY-MM-DD"`
+time         DXNTime{hour, minute, second, nanosecond}  `@time "HH:MM:SS.fffffffff"` -- nanoseconds
+datetime     DXNDateTime{epochNanoseconds, offsetMinutes} `@datetime "...Z"` / `"...+02:00"` -- an instant with its offset
+local-dt     DXNLocalDateTime{localNanoseconds}         `@local-datetime "YYYY-MM-DDTHH:MM:SS"` -- no offset
+duration     DXNDuration{years, months, ..., nanoseconds} `@duration "P1Y2M"` -- 7 independent fields
 uuid         DXNUuid{bytes}                             `@uuid "..."` -- 16 raw bytes, not the text form
+objectid     DXNObjectId{bytes}                         `@objectid "..."` -- 12 raw bytes, BSON's ObjectId
+ip           DXNIp{address, prefix}                     `@ip "10.0.0.0/8"` -- an address or a prefix, raw bytes
 uri          DXNUri{value}                              `@uri "..."` -- raw string, not parsed
 bytes        DXNBytes{data}                             `@bytes "..."` (base64 in text)
-regex        DXNRegex{pattern, flags}                    `~r/.../flags`
+regex        DXNRegex{pattern, flags}                    `@regex "..."` / `@regex(im) "..."`
 custom-tag   DXNCustomTag{name, value}                   `@tag value`, no decoder registered
 ```
 
@@ -157,8 +159,10 @@ $registry
 `$registry->fetchStructSchema($name)` answers the latest version, and
 `fetchStructSchema($name, $version)` exactly that one.
 
-`FileResolver::forPaths(array $paths)` builds
-a ready-made resolver for `Namespace/Name -> paths/Namespace.dxns`.
+`FileResolver::forPaths(array $paths)` builds a ready-made resolver
+following DXN.md §4.6: `Foo.Bar/Baz` version N in `Foo/Bar/Baz-vN.dxns`,
+`Foo/Bar/Baz/vN.dxns` or `Foo.Bar.Baz-vN.dxns` (`-v1` optional), or the
+entry `Baz` in `Foo.Bar.dxns`; every version found is loaded.
 
 ## Registry: third-party classes (`DXNSchemaProvider`)
 
@@ -192,13 +196,27 @@ Schema::validateEncodeTree(mixed $value, Registry $registry): mixed;          //
 :integer / :string / ...       one keyword per DXN.md §1.3 type name
 Address                        bare symbol -- a struct name or a named type
 {:list-of T}                   list whose every element matches T
+{:list-items A {:repeat B 0 nil}}  a list's items in order; {:repeat {:group A B} 1 nil}
 {:set-of T}                    set whose every element matches T
 {:tuple-of A B C}              fixed-arity positional tuple
+{:tuple-of-all T}              tuple of any length, every element a T
+{:tagged acme.money T}         a custom tag of that name, its value a T
+{:doc T %{description: ...}}   T, annotated: title description examples read-only write-only deprecated meta values
+:int32 :int64 :uint32 :uint64  integer ranges; :float32 single precision
+:number                        any integer, float, decimal or rational
+{:const v}                     the one value v
+{:if I T E}                    an I must be a T, anything else an E
 {:map-of K V}                  every key matches K, every value matches V
+{:array-of T}                  array whose every element matches T
+{:ordered-map-of K V}          ordered map: keys match K, values match V
+{:sorted-set-of T}             sorted set whose every element matches T
 {:enum :a :b :c}                value must equal one of the given literals
-{:one-of A B}                  union -- matches at least one
+{:one-of A B}                  exactly one matches (JSON Schema's oneOf)
+{:any-of A B}                  union -- matches one or more (anyOf)
 {:all-of A B}                  intersection -- matches all
-{:nilable T}                   sugar for {:one-of :nil T}
+{:not T}                       matches what T refuses
+:never                         matches nothing
+{:nilable T}                   sugar for {:any-of :nil T}
 {:refine T %{constraints}}     base type + refine constraints (below)
 %schema(N){field: T, ...}      struct/record shape, version N (1 without a header)
 ```
@@ -207,8 +225,25 @@ Address                        bare symbol -- a struct name or a named type
 
 ```text
 min / max / exclusive-min / exclusive-max / multiple-of   -- integer/float/decimal/rational
-min-length / max-length / pattern                          -- string
-min-count / max-count                                      -- list/set/tuple/sorted-set
+min / max / exclusive-*  on temporals                     -- date/time/datetime/local-datetime/duration, same kind
+min-bytes / max-bytes                                     -- string: UTF-8 bytes
+format                                                    -- string: :email :uri :hostname :semver ... (DXN.md §4.2a)
+encoding / media-type                                     -- string: :base64 ... / "type/subtype"
+content                                                   -- string: a DXN document of this type
+encodes / encodes-seq                                     -- bytes: .dxnb document(s) of this type
+float32                                                   -- float: single precision holds it
+min-precision / max-precision                             -- decimal: coefficient digits
+min-exponent / max-exponent                               -- decimal: exponent
+bits                                                      -- integer/bytes: only these bit numbers set
+before-now / after-now / within                           -- datetime against the clock
+resolution                                                -- time/datetime/duration: :second :millisecond ...
+min-length / max-length / pattern                          -- string/keyword/symbol/bytes (bits: length only)
+min-count / max-count                                      -- list/set/tuple/sorted-set/array
+contains / min-contains / max-contains                     -- how many elements are a given type
+unique / unique-by                                         -- no two elements, or their field, the same
+finite                                                     -- float: true refuses NaN and the infinities
+offsets                                                    -- datetime: ["Z" "+02:00" ...]
+version / prefix                                           -- ip: 4 or 6; true a prefix, false an address
 ```
 
 ## Struct schemas

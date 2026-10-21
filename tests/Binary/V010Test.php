@@ -41,7 +41,7 @@ final class V010Test extends TestCase
     public function testEveryValueReadsBackAsItsTextDecodes(): void
     {
         self::assertSame(
-            Canonical::print(Dextrin::decode(self::fixture('values.dxn'))),
+            Canonical::print(Dextrin::decode(self::fixture('values.respelled.dxn'))),
             Canonical::print(Dextrin::decodeBinary(self::fixture('values.dxnb'))),
         );
     }

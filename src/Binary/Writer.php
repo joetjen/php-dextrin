@@ -73,8 +73,21 @@ final class Writer
         return "\xfb";
     }
 
+    /**
+     * A float in the shortest of CBOR's three widths that holds it
+     * exactly (DXN.md §2.2, Jan, 2026-10-20: the smallest
+     * representation): half, single, then double. NaN and the
+     * infinities fit in half; -0.0 keeps its sign.
+     */
     public static function floatItem(float $n): string
     {
+        $half = FloatWidth::half($n);
+        if ($half !== null) {
+            return "\xf9" . pack('n', $half);
+        }
+        if (FloatWidth::single($n)) {
+            return "\xfa" . pack('G', $n);
+        }
         return self::floatHead() . pack('E', $n);
     }
 

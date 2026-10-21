@@ -16,21 +16,38 @@ namespace JOetjen\Dextrin\Schema;
  *
  * `version` is which version of `name` this is (DXN.md §4.8), 1 for a
  * schema written without a header.
+ *
+ * `annotations` are what a `{:doc %schema{...} %{...}}` around the entry
+ * says about it (DXN.md §4.1b), by name; `[]` without one.
  */
 final class Compiled
 {
-    /** @param list<Field> $fields */
+    /**
+     * @param list<Field> $fields
+     * @param array<string, mixed> $annotations
+     */
     public function __construct(
         public readonly ?string $name = null,
         public readonly array $fields = [],
         public readonly int $version = 1,
+        public readonly array $annotations = [],
     ) {
     }
 
     /** A schema's `name` is only known once {@see Compiler} finishes compiling its enclosing document -- returns a copy with it set. */
     public function withName(string $name): self
     {
-        return new self($name, $this->fields, $this->version);
+        return new self($name, $this->fields, $this->version, $this->annotations);
+    }
+
+    /**
+     * A copy annotated with `$annotations`.
+     *
+     * @param array<string, mixed> $annotations
+     */
+    public function withAnnotations(array $annotations): self
+    {
+        return new self($this->name, $this->fields, $this->version, $annotations);
     }
 
     /** @return list<string> */

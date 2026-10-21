@@ -67,4 +67,17 @@ final class DXNRationalTest extends TestCase
     {
         self::assertSame('rational', (new DXNRational('1', '2'))->dxnType());
     }
+
+    /** A final newline is no part of a numerator or a denominator: `$` is the string's end. */
+    public function testItRefusesPartsFollowedByANewline(): void
+    {
+        foreach ([["1\n", '2'], ['1', "2\n"]] as [$numerator, $denominator]) {
+            try {
+                new DXNRational($numerator, $denominator);
+                self::fail('a final newline should be refused');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
 }
