@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+The same release as dextrin 0.3.0: one way to write a value,
+nanoseconds, `@objectid` and `@ip`, the smallest `.dxnb`, and DXNS as a
+superset of the schema languages DXN is compared with. Breaking: sigils
+are gone, `.dxnb` gains tags a 0.2 reader does not know, and a schema
+that misused a refine key no longer compiles.
+
+### Migrating from 0.2.x
+
+- **Text: sigils are gone.** `~D[...]`, `~T[...]`, `~U[...]` and
+  `~r/.../` are `syntax`; write `@date "2026-10-20"`, `@time
+  "14:30:00"`, `@datetime "2026-10-20T14:30:00Z"`, `@local-datetime
+  "..."` and `@regex(i) "^a"`.
+- **Binary: deploy readers first.** 0.3 writes temporals in nanoseconds
+  (tags 217-220), `@objectid` and `@ip` (221, 52, 54), and floats in
+  half or single precision when that holds them exactly; a 0.2 reader
+  refuses these, and a 0.3 reader reads everything 0.2 wrote.
+- **Datetimes are nanoseconds**, so they range from 1677-09-21 to
+  2262-04-11: a documented limit of PHP's 64-bit integers, not of DXN.
+- **Schemas are checked harder**: an unknown refine key or a wrong
+  argument is a compile error, a constraint refuses a value it does not
+  apply to, and `{:enum 1}` no longer takes `1.0`.
+
 
 ### Documentation
 
