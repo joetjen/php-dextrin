@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-21
+
+DXNS guides of their own, the reference's schema-validation benchmark,
+and two `{:map-of}` fixes it found. Nothing breaks.
+
 ### Documentation
 
 - **DXNS has guides of its own** (Jan, 2026-10-21), as in the reference:
