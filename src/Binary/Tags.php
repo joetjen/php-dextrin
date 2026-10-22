@@ -109,7 +109,8 @@ final class Tags
     {
         $mask = 0;
         foreach (self::DURATION_FIELDS as $bit => $field) {
-            if ($d->$field !== null) {
+            // A zero field is left out, as in text (DXN.md §1.5).
+            if ($d->$field !== null && $d->$field !== 0) {
                 $mask |= 1 << $bit;
             }
         }
