@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- The README counts DXN's 31 types (it said 30), and DXN.md §4 names the old section right: "DXNS.md §2" is the old "DXN.md §4.2".
+
 ### Fixed
 
 - **A duration's zero fields are left out again** when it is written, as
