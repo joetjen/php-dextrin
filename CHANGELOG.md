@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-23
+
+A duration's zero fields are left out again, as in dextrin 0.3.2, and
+the README says how fast Dextrin is. Nothing breaks.
+
 ### Documentation
 
 - **The README says how fast it is**: decoding and checking timed for 90 minutes in each implementation, on the same data sets; and the size table's one changed cell (`.dxnb`, the config file gzipped, 210 bytes).
