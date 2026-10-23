@@ -192,12 +192,12 @@ final class Temporal
         return $minutes === 0 ? 'Z' : Nanos::zoneName($minutes);
     }
 
-    /** `P...`: the fields in DXN.md §2.3's order, absent ones left out, `PT0S` when none. */
+    /** `P...`: the fields in DXN.md §2.3's order, absent and zero ones left out, `PT0S` when none is left (§1.5). */
     public static function formatDuration(DXNDuration $d): string
     {
         $date = self::part($d->years, 'Y') . self::part($d->months, 'M') . self::part($d->weeks, 'W') . self::part($d->days, 'D');
         $time = self::part($d->hours, 'H') . self::part($d->minutes, 'M');
-        if ($d->nanoseconds !== null) {
+        if ($d->nanoseconds !== null && $d->nanoseconds !== 0) {
             $abs = abs($d->nanoseconds);
             $time .= ($d->nanoseconds < 0 ? '-' : '') . intdiv($abs, Nanos::PER_SECOND) . self::fraction($abs % Nanos::PER_SECOND) . 'S';
         }
@@ -210,7 +210,7 @@ final class Temporal
 
     private static function part(?int $n, string $unit): string
     {
-        return $n === null ? '' : $n . $unit;
+        return $n === null || $n === 0 ? '' : $n . $unit;
     }
 
     /** `.` and the nanoseconds as nine digits less their trailing zeros, or nothing for none. */

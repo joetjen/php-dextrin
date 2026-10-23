@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-23
+
+A duration's zero fields are left out again, as in dextrin 0.3.2, and
+the README says how fast Dextrin is. Nothing breaks.
+
+### Documentation
+
+- **The README says how fast it is**: decoding and checking timed for 90 minutes in each implementation, on the same data sets; and the size table's one changed cell (`.dxnb`, the config file gzipped, 210 bytes).
+- The README counts DXN's 31 types (it said 30), and DXN.md §4 names the old section right: "DXNS.md §2" is the old "DXN.md §4.2".
+
+### Fixed
+
+- **A duration's zero fields are left out again** when it is written, as
+  DXN.md §1.5 says, and one that is zero throughout is `PT0S`:
+  `@duration "P1DT0H"` is written `@duration "P1D"`, `@duration "P0D"`
+  `@duration "PT0S"`. `.dxnb` sets no bit for a zero field either, so the
+  two agree, and `P0D` and `PT0S` are one value to `unique:`. Reading
+  still keeps what was written. As dextrin 80c4e88.
+
+### Changed
+
+- **Tests hold writing a float to its promises**: `serialize_precision`
+  is put back as it was found, and no `serialize_precision` or
+  `precision` setting changes the digits. `Canonical::float`'s doc says
+  how the digits are found now.
+
 ## [0.3.1] - 2026-10-21
 
 DXNS guides of their own, the reference's schema-validation benchmark,
