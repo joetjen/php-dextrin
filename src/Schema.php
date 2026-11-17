@@ -158,7 +158,12 @@ final class Schema
         }
         $conformed = $type->conform($value, new Schema\Context($registry));
         if ($conformed === Schema\NoMatch::Instance) {
-            throw new SchemaValidationError("value does not match \"{$name}\"", 'schema/type-mismatch');
+            // Why, where it can say: asked only once the check has failed.
+            $why = Schema\TypeExpr::explain($type, $value, new Schema\Context($registry));
+            throw new SchemaValidationError(
+                "value does not match \"{$name}\"" . ($why === null ? '' : ": {$why}"),
+                'schema/type-mismatch',
+            );
         }
         return $conformed;
     }

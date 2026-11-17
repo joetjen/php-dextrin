@@ -87,7 +87,9 @@ final class TypeExpr
      * @param array<string, mixed>|null $constraints refine
      * @param list<Field>|null $fields shape
      * @param list<array{0: mixed, 1: self}>|null $branches case
-     * @param list<string>|null $params generic
+     * @param list<string|array{0: string, 1: self, 2: ?self}>|null $params generic: a bare
+     *        parameter's name, or `[name, bound, default]` for one with a bound (and a
+     *        default, `null` for none; G2 of dextrin's design/typespec.md)
      * @param list<Particle>|null $particles list-items
      * @param array<string, mixed>|null $notes doc: its annotations by name
      */
@@ -139,7 +141,11 @@ final class TypeExpr
         return new self('named', name: $name);
     }
 
-    /** @param list<string> $params */
+    /**
+     * `{:generic [t {u bound} {v bound default}] body}` (DXNS.md §5).
+     *
+     * @param list<string|array{0: string, 1: self, 2: ?self}> $params
+     */
     public static function generic(array $params, self $body): self
     {
         return new self('generic', base: $body, params: $params);
@@ -379,7 +385,7 @@ final class TypeExpr
                 }
                 /** @var self $body */
                 $body = $generic->base;
-                return $body->substitute(array_combine($generic->params ?? [], $args))->conform($value, $ctx);
+                return self::instantiate($generic->params ?? [], $body, $args)->conform($value, $ctx);
             case 'doc':
                 // Annotations change nothing a type takes.
                 return ($this->elem ?? self::any())->conform($value, $ctx);
@@ -760,7 +766,7 @@ final class TypeExpr
                 }
                 $replaced[$i] = $c;
             } elseif ($field->default !== Field::NO_DEFAULT) {
-                $added[] = [new DXNKeyword($field->name), $field->default];
+                $added[] = [new DXNKeyword($field->name), $field->defaultValue()];
             } elseif ($field->required) {
                 return NoMatch::Instance;
             }
@@ -792,7 +798,262 @@ final class TypeExpr
         };
     }
 
+    // ---- why a value is refused ----------------------------------------------------
+
+    /**
+     * Why `$type` refuses `$value`, in words, or `null` when there is
+     * nothing more to say than that it does not match. Asked only after
+     * {@see self::conform()} refused, so a check that passes never pays
+     * for it.
+     *
+     * It follows a refusal to where a document said something about it:
+     * a `messages` annotation's message for the constraint that refused
+     * (G5 of dextrin's design/typespec.md), and a `discriminator`
+     * annotation's choice of variant (G3) -- the variant the field names,
+     * and why that one refuses, instead of every variant's refusal --
+     * through a use of a generic, and into a shape's fields, to the first
+     * that is missing or refused.
+     *
+     * @internal
+     * @param self $type the type that refused
+     * @param mixed $value the value it refused
+     * @param Context $ctx the check's context
+     * @return string|null why, or `null` when nothing more is known
+     */
+    public static function explain(self $type, mixed $value, Context $ctx): ?string
+    {
+        switch ($type->form) {
+            case 'doc':
+                $notes = $type->notes ?? [];
+                $inner = $type->elem ?? self::any();
+                if (array_key_exists('discriminator', $notes)) {
+                    $variants = self::variantsOf($inner);
+                    if ($variants === null) {
+                        unset($notes['discriminator']);
+                        return self::explain(self::doc($inner, $notes), $value, $ctx);
+                    }
+                    return self::discriminated((string) $notes['discriminator'], $variants, $value, $ctx);
+                }
+                if (array_key_exists('messages', $notes) && is_array($notes['messages'])) {
+                    $message = self::message($notes['messages'], self::undocType($inner), $value, $ctx);
+                    return $message ?? self::explain($inner, $value, $ctx);
+                }
+                return self::explain($inner, $value, $ctx);
+            case 'named':
+                $named = $ctx->registry?->fetchTypeAlias($type->name ?? '');
+                return $named === null ? null : self::explain($named, $value, $ctx);
+            case 'apply':
+                // A use of a generic: why its body, the arguments in place,
+                // refuses.
+                $generic = $ctx->registry?->fetchTypeAlias($type->name ?? '');
+                return $generic === null || $generic->form !== 'generic'
+                    ? null
+                    : self::explain(self::instantiate($generic->params ?? [], $generic->base ?? self::any(), $type->elems ?? []), $value, $ctx);
+            case 'shape':
+                return is_array($value) || $value instanceof DXNMap ? self::shapeRefusal($type, $value, $ctx) : null;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * The message `$messages` gives for the constraint of the refine
+     * `$type` that refuses `$value`, or `null`: when `$type` is no refine,
+     * its base refuses the value, or no message names that constraint.
+     *
+     * @param array<mixed> $messages
+     */
+    private static function message(array $messages, self $type, mixed $value, Context $ctx): ?string
+    {
+        if ($type->form !== 'refine') {
+            return null;
+        }
+        $base = $type->base ?? self::any();
+        $conformed = $base->conform($value, $ctx);
+        if ($conformed === NoMatch::Instance) {
+            return null;
+        }
+        $key = self::failingKey($conformed, $type->constraints ?? [], $base, $ctx);
+        $message = $key === null ? null : ($messages[$key] ?? null);
+        return is_string($message) ? $message : null;
+    }
+
+    /**
+     * The first constraint, in the order of their names, that `$value`
+     * fails, each checked with the keys it reads beside its own.
+     *
+     * @param array<string, mixed> $constraints
+     */
+    private static function failingKey(mixed $value, array $constraints, self $base, Context $ctx): ?string
+    {
+        $keys = array_map('strval', array_keys($constraints));
+        sort($keys, SORT_STRING);
+        foreach ($keys as $key) {
+            $alone = array_intersect_key($constraints, array_flip([$key, ...self::companions($key)]));
+            if (!self::satisfiesConstraints($value, $alone, $base, $ctx)) {
+                return $key;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The keys a constraint reads beside its own.
+     *
+     * @return list<string>
+     */
+    private static function companions(string $key): array
+    {
+        return match ($key) {
+            'contains' => ['min-contains', 'max-contains'],
+            'content' => ['encoding', 'media-type'],
+            default => [],
+        };
+    }
+
+    /**
+     * The first of a shape's fields that is missing or refused, and why.
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     */
+    private static function shapeRefusal(self $shape, array|DXNMap $map, Context $ctx): ?string
+    {
+        $pairs = $map instanceof DXNMap
+            ? $map->pairs()
+            : array_map(static fn (int|string $k, mixed $v): array => [MapBuilder::toDxnMapKey($k), $v], array_keys($map), array_values($map));
+        $siblings = [];
+        foreach ($pairs as [$key, $v]) {
+            $name = self::keyName($key);
+            if ($name !== null) {
+                $siblings[$name] = $v;
+            }
+        }
+        $inner = new Context($ctx->registry, $siblings);
+        foreach ($shape->fields ?? [] as $field) {
+            $found = self::fieldOf($map, $field->name);
+            if ($found !== []) {
+                if ($field->type->conform($found[0], $inner) === NoMatch::Instance) {
+                    $why = self::explain($field->type, $found[0], $inner);
+                    return $why === null ? "field \"{$field->name}\" does not match its type" : "field \"{$field->name}\": {$why}";
+                }
+            } elseif ($field->required && $field->default === Field::NO_DEFAULT) {
+                return "field \"{$field->name}\" is missing";
+            }
+        }
+        return null;
+    }
+
+    private static function undocType(self $type): self
+    {
+        return $type->form === 'doc' ? self::undocType($type->elem ?? self::any()) : $type;
+    }
+
+    /** @return list<self>|null an any-of's or one-of's variants, through docs */
+    private static function variantsOf(self $type): ?array
+    {
+        return match ($type->form) {
+            'doc' => self::variantsOf($type->elem ?? self::any()),
+            'any-of', 'one-of' => $type->variants ?? [],
+            default => null,
+        };
+    }
+
+    /**
+     * The variant whose discriminating field takes the value's, and why
+     * that variant refuses it.
+     *
+     * @param list<self> $variants
+     */
+    private static function discriminated(string $field, array $variants, mixed $value, Context $ctx): string
+    {
+        $found = self::fieldOf($value, $field);
+        if ($found === []) {
+            return "field \"{$field}\" is missing; it chooses the variant";
+        }
+        $chosen = $found[0];
+        foreach ($variants as $variant) {
+            $type = self::variantField($variant, $field, $ctx);
+            if ($type !== null && $type->conform($chosen, $ctx) !== NoMatch::Instance) {
+                $why = self::explain($variant, $value, $ctx) ?? 'it does not match';
+                return "{$field} " . self::shown($chosen) . ' chooses ' . self::variantName($variant) . ": {$why}";
+            }
+        }
+        return "{$field} " . self::shown($chosen) . ' names no variant';
+    }
+
+    /** The type a variant gives its field `$name`, looked up through names. */
+    private static function variantField(self $type, string $name, Context $ctx): ?self
+    {
+        switch ($type->form) {
+            case 'doc':
+                return self::variantField($type->elem ?? self::any(), $name, $ctx);
+            case 'named':
+                $named = $ctx->registry?->fetchTypeAlias($type->name ?? '');
+                return $named === null ? null : self::variantField($named, $name, $ctx);
+            case 'shape':
+                foreach ($type->fields ?? [] as $field) {
+                    if ($field->name === $name) {
+                        return $field->type;
+                    }
+                }
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    private static function variantName(self $type): string
+    {
+        return match (true) {
+            $type->form === 'doc' => self::variantName($type->elem ?? self::any()),
+            $type->form === 'named', $type->form === 'reference' => (string) $type->name,
+            $type->form === 'shape' && $type->name !== null => $type->name,
+            default => 'a variant',
+        };
+    }
+
+    /** `$value` as DXN text, for a message; its PHP type when it has none. */
+    private static function shown(mixed $value): string
+    {
+        try {
+            return Dextrin::encode($value);
+        } catch (\Throwable) {
+            return get_debug_type($value);
+        }
+    }
+
     // ---- generics -----------------------------------------------------------------
+
+    /**
+     * A generic's body with `$args` standing where its parameters stand:
+     * the type one `{:of Name ...}` of it means. A parameter past the
+     * arguments stays standing.
+     *
+     * @internal
+     * @param list<string|array{0: string, 1: self, 2: ?self}> $params
+     * @param list<self> $args
+     */
+    public static function instantiate(array $params, self $body, array $args): self
+    {
+        $bound = [];
+        foreach (array_slice($params, 0, count($args)) as $i => $param) {
+            $bound[self::paramName($param)] = $args[$i];
+        }
+        return $body->substitute($bound);
+    }
+
+    /**
+     * A generic parameter's name: a bare parameter is its name, one with
+     * a bound or a default `[name, bound, default]` (G2 of dextrin's
+     * design/typespec.md).
+     *
+     * @internal
+     * @param string|array{0: string, 1: self, 2: ?self} $param
+     */
+    public static function paramName(string|array $param): string
+    {
+        return is_string($param) ? $param : $param[0];
+    }
 
     /**
      * This type with each parameter `$bound` names replaced by its argument.

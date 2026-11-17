@@ -180,7 +180,7 @@ final class Validator
             return self::checkType($field->name, $given[$field->name], $field->type, new Context($registry, $given));
         }
         if ($field->default !== Field::NO_DEFAULT) {
-            return $field->default;
+            return $field->defaultValue();
         }
         if ($field->required) {
             throw new SchemaValidationError("missing required field \"{$field->name}\"", 'schema/missing-field');
@@ -206,7 +206,13 @@ final class Validator
         }
 
 
-        throw new SchemaValidationError("field \"{$name}\" does not match its declared type", 'schema/type-mismatch');
+        // Why, where a document said something about it (a `messages`
+        // annotation, a `discriminator`), or where a shape's field refused.
+        $why = TypeExpr::explain($type, $value, $ctx);
+        throw new SchemaValidationError(
+            "field \"{$name}\" does not match its declared type" . ($why === null ? '' : ": {$why}"),
+            'schema/type-mismatch',
+        );
     }
 
     // ---- encode-time validation -----------------------------------------------

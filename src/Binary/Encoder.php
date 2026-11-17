@@ -253,7 +253,7 @@ final class Encoder
                 return $named[$field->name];
             }
             if ($field->default !== Field::NO_DEFAULT) {
-                return $field->default;
+                return $field->defaultValue();
             }
             throw new SchemaValidationError(
                 "struct \"{$struct->name}\" has no \"{$field->name}\", and .dxnb fills every position: "

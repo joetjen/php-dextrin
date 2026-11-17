@@ -78,8 +78,19 @@ final class Format
     private const NAMES = [
         'date', 'time', 'datetime', 'local-datetime', 'duration', 'uuid', 'ipv4', 'ipv6', 'hostname', 'idn-hostname',
         'email', 'idn-email', 'uri', 'uri-reference', 'iri', 'iri-reference', 'uri-template', 'json-pointer',
-        'relative-json-pointer', 'semver', 'mac', 'host-port',
+        'relative-json-pointer', 'semver', 'mac', 'host-port', 'http-date',
     ];
+
+    /** The weekdays as RFC 7231 writes them, Monday first (ISO 8601's 1). */
+    private const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    private const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    /**
+     * RFC 7231 §7.1.1.1's IMF-fixdate; the date, the time and the weekday
+     * are checked after it matches.
+     */
+    private const HTTP_DATE = '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), ([0-9]{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{4}) '
+        . '([0-9]{2}):([0-9]{2}):([0-9]{2}) GMT$';
 
     private function __construct()
     {
@@ -123,6 +134,7 @@ final class Format
             'iri' => self::isUri($text, self::IRI_EXTRA, true),
             'iri-reference' => self::isUri($text, self::IRI_EXTRA, true) || self::isUri($text, self::IRI_EXTRA, false),
             'host-port' => self::isHostPort($text),
+            'http-date' => self::isHttpDate($text),
             default => array_key_exists($name, self::GRAMMARS) && self::matches(self::GRAMMARS[$name], $text),
         };
     }
@@ -208,6 +220,45 @@ final class Format
             ? self::isAddressLiteral('[IPv6:' . substr($host, 1))
             : self::check('hostname', $host) || self::isAddress($host, 4);
         return $isHost && self::matches(self::PORT, $port) && (int) $port <= 65_535;
+    }
+
+    /**
+     * An IMF-fixdate: a real date, its weekday the date's own, hour 00 to
+     * 23, minute 00 to 59, second 00 to 60 (a leap second).
+     */
+    private static function isHttpDate(string $text): bool
+    {
+        if (preg_match(self::pattern(self::HTTP_DATE), $text, $m) !== 1) {
+            return false;
+        }
+        [, $day, $dd, $month, $yyyy, $hh, $mm, $ss] = $m;
+        $year = (int) $yyyy;
+        $monthNumber = (int) array_search($month, self::MONTHS, true) + 1;
+        // Not checkdate(): it refuses the year 0000, which the reference's
+        // proleptic calendar holds.
+        $leap = $year % 4 === 0 && ($year % 100 !== 0 || $year % 400 === 0);
+        $days = [31, $leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][$monthNumber - 1];
+        if ((int) $dd < 1 || (int) $dd > $days) {
+            return false;
+        }
+        return self::weekday($year, $monthNumber, (int) $dd) === (int) array_search($day, self::DAYS, true) + 1
+            && (int) $hh <= 23 && (int) $mm <= 59 && (int) $ss <= 60;
+    }
+
+    /**
+     * The ISO weekday of a proleptic Gregorian date, 1 for Monday: its
+     * days since 1970-01-01, a Thursday (H. Hinnant's days_from_civil),
+     * so every four-digit year reads alike.
+     */
+    private static function weekday(int $year, int $month, int $day): int
+    {
+        $y = $month <= 2 ? $year - 1 : $year;
+        $era = intdiv($y >= 0 ? $y : $y - 399, 400);
+        $yoe = $y - $era * 400;
+        $doy = intdiv(153 * ($month + ($month > 2 ? -3 : 9)) + 2, 5) + $day - 1;
+        $doe = $yoe * 365 + intdiv($yoe, 4) - intdiv($yoe, 100) + $doy;
+        $days = $era * 146_097 + $doe - 719_468;
+        return (($days % 7 + 7 + 3) % 7) + 1;
     }
 
     /**

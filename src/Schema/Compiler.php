@@ -91,14 +91,32 @@ final class Compiler
         if (!is_array($schemaDoc)) {
             throw new SchemaCompileError('expected a .dxns document (a map), got ' . self::describe($schemaDoc));
         }
-        $outer = self::$names;
+        $outer = [self::$names, self::$document, self::$loaded];
         self::$names = $names;
+        self::$loaded = $baseRegistry;
+        self::$document = [];
+        foreach ($schemaDoc as $key => $value) {
+            self::$document[$names[(string) $key] ?? (string) $key] = $value;
+        }
         try {
             return self::compileDocument($schemaDoc, $baseRegistry, $names);
         } finally {
-            self::$names = $outer;
+            [self::$names, self::$document, self::$loaded] = $outer;
         }
     }
+
+    /**
+     * The entries of the document being compiled, by full name, and the
+     * registry it is compiled into, as it was before: what a generic
+     * parameter's bound asks when it asks which schema extends which (G2
+     * of dextrin's design/typespec.md). Set for one compile, as
+     * {@see self::$names} is.
+     *
+     * @var array<string, mixed>
+     */
+    private static array $document = [];
+
+    private static ?Registry $loaded = null;
 
     /**
      * The names of the document being compiled (see {@see self::compile()}):
@@ -138,6 +156,13 @@ final class Compiler
             } catch (SchemaCompileError $err) {
                 throw new SchemaCompileError("schema \"{$name}\": {$err->getMessage()}");
             }
+            // A discriminator in a field's type has its variants checked
+            // as a named type's are.
+            self::discriminators(
+                [$name => TypeExpr::shape($name, $compiled->fields)],
+                ['document' => self::$document, 'compiled' => $registry->typeAliases(), 'scope' => $registry->typeAliases(), 'registry' => $registry],
+                $built,
+            );
             $registry = $registry->addStructSchema($name, $compiled);
         }
         return $registry;
@@ -222,13 +247,14 @@ final class Compiler
                 : $shape;
         }
         self::guarded($compiled);
+        self::discriminators($compiled, [...$lookup, 'compiled' => $compiled], $built);
         $known = array_merge($registry->typeAliases(), $compiled);
         $result = $registry;
         foreach ($aliasEntries as [$name]) {
             try {
                 $own = $compiled[$name];
                 $typeExpr = $own->form === 'generic'
-                    ? $own->with(['base' => self::resolved($own->base ?? TypeExpr::any(), $known, [$name])])
+                    ? $own->with(['base' => self::resolved($own->base ?? TypeExpr::any(), [...$known, ...self::paramBounds($own->params ?? [])], [$name])])
                     : self::resolved($own, $known, [$name]);
             } catch (SchemaCompileError $err) {
                 throw new SchemaCompileError("named type \"{$name}\": {$err->getMessage()}");
@@ -236,6 +262,129 @@ final class Compiler
             $result = $result->putTypeAlias($name, $typeExpr);
         }
         return [$result, $built];
+    }
+
+    // ---- discriminators (G3 of dextrin's design/typespec.md) -----------------
+
+    /**
+     * Every variant under a `discriminator` has that field: the field a
+     * value's variant is chosen by. Each variant is a schema or a shape.
+     *
+     * @param array<string, TypeExpr> $compiled
+     * @param Lookup $lookup
+     * @param array<string, Built> $built
+     */
+    private static function discriminators(array $compiled, array $lookup, array $built): void
+    {
+        ksort($compiled, SORT_STRING);
+        foreach ($compiled as $name => $type) {
+            foreach (self::discriminated($type) as [$field, $variants]) {
+                foreach ($variants as $variant) {
+                    $names = self::variantFields($variant, $lookup, $built, []);
+                    if ($names === null) {
+                        throw new SchemaCompileError(
+                            "\"{$name}\": its discriminator {$field} needs every variant to be a schema or a shape; "
+                            . self::variantLabel($variant) . ' is not',
+                        );
+                    }
+                    if (!in_array($field, $names, true)) {
+                        throw new SchemaCompileError("\"{$name}\": its discriminator {$field} is no field of " . self::variantLabel($variant));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Every `{:doc {:any-of ...} %{discriminator: f}}` in `$type`, as
+     * `[f, variants]`: through every type it holds, a shape's fields too,
+     * but a refine's constraints.
+     *
+     * @return list<array{0: string, 1: list<TypeExpr>}>
+     */
+    private static function discriminated(TypeExpr $type): array
+    {
+        $own = [];
+        if ($type->form === 'doc' && is_string($type->notes['discriminator'] ?? null)) {
+            $own[] = [$type->notes['discriminator'], self::variantList($type->elem ?? TypeExpr::any())];
+        }
+        $children = array_values(array_filter(
+            [$type->elem, $type->base, $type->key, $type->value, $type->otherwise],
+            static fn (?TypeExpr $t): bool => $t !== null,
+        ));
+        $bounds = [];
+        foreach ($type->params ?? [] as $param) {
+            if (is_array($param)) {
+                $bounds = [...$bounds, $param[1], ...($param[2] === null ? [] : [$param[2]])];
+            }
+        }
+        $children = [
+            ...$children,
+            ...($type->elems ?? []),
+            ...($type->variants ?? []),
+            ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? []),
+            ...array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? [])),
+            ...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []),
+            ...$bounds,
+        ];
+        return array_merge($own, ...array_map(self::discriminated(...), $children));
+    }
+
+    /** @return list<TypeExpr> */
+    private static function variantList(TypeExpr $type): array
+    {
+        return $type->form === 'doc' ? self::variantList($type->elem ?? TypeExpr::any()) : ($type->variants ?? []);
+    }
+
+    /**
+     * The names of a variant's fields: a shape's, or a schema's of the
+     * document or one loaded; `null` for any other variant.
+     *
+     * @param Lookup $lookup
+     * @param array<string, Built> $built
+     * @param list<string> $seen
+     * @return list<string>|null
+     */
+    private static function variantFields(TypeExpr $variant, array $lookup, array $built, array $seen): ?array
+    {
+        /** @param list<Field> $fields @return list<string> */
+        $names = static fn (array $fields): array => array_values(array_map(static fn (Field $f): string => $f->name, $fields));
+        switch ($variant->form) {
+            case 'doc':
+                return self::variantFields($variant->elem ?? TypeExpr::any(), $lookup, $built, $seen);
+            case 'shape':
+                return $names($variant->fields ?? []);
+            case 'named':
+                $name = (string) $variant->name;
+                $type = array_merge($lookup['registry']->typeAliases(), $lookup['compiled'])[$name] ?? null;
+                return $type === null || in_array($name, $seen, true) ? null : self::variantFields($type, $lookup, $built, [$name, ...$seen]);
+            case 'reference':
+                $name = (string) $variant->name;
+                if (isset($built[$name])) {
+                    return $names($built[$name]['fields']);
+                }
+                $raw = self::undoc($lookup['document'][$name] ?? null);
+                if ($raw instanceof DXNStruct && $raw->name === 'schema' && $raw->isKeyed()) {
+                    try {
+                        return $names(self::compileEntry($raw, $lookup['scope'])->fields);
+                    } catch (SchemaCompileError) {
+                        return null;
+                    }
+                }
+                $found = $lookup['registry']->fetchStructSchema($name);
+                return $found === null ? null : $names($found->compiled->fields);
+            default:
+                return null;
+        }
+    }
+
+    private static function variantLabel(TypeExpr $variant): string
+    {
+        return match ($variant->form) {
+            'doc' => self::variantLabel($variant->elem ?? TypeExpr::any()),
+            'named', 'reference' => (string) $variant->name,
+            default => 'an inline variant',
+        };
     }
 
     // ---- built from others (DXNS.md §4b) ------------------------------------
@@ -447,16 +596,75 @@ final class Compiler
     {
         $found = [];
         foreach ($bases as [$kind, $base, $version]) {
-            $full = self::$names[$base] ?? $base;
-            $answer = array_key_exists($full, $lookup['document'])
-                ? self::documentBase($full, self::undoc($lookup['document'][$full]), $version, $path, $lookup, $built)
-                : self::loadedBase($full, $version, $lookup['registry']);
+            $full = self::baseTarget(self::$names[$base] ?? $base, $lookup, []);
+            $generic = self::genericUse($full, $lookup);
+            $answer = match (true) {
+                $generic !== null && $version === null => [$generic, null],
+                $generic !== null => "a shape has no versions, so {$full}({$version}) names none",
+                array_key_exists($full, $lookup['document']) => self::documentBase($full, self::undoc($lookup['document'][$full]), $version, $path, $lookup, $built),
+                default => self::loadedBase($full, $version, $lookup['registry']),
+            };
             if (is_string($answer)) {
                 throw new SchemaCompileError("\"{$name}\": base {$base}: {$answer}");
             }
             $found[] = ['kind' => $kind, 'name' => $full, 'fields' => $answer[0], 'version' => $answer[1]];
         }
         return $found;
+    }
+
+    /**
+     * A base named by a named type that stands for a schema or a shape
+     * (`Human: Person`) is that schema or shape (G6 of dextrin's
+     * design/typespec.md): its name, followed through such names.
+     *
+     * @param Lookup $lookup
+     * @param list<string> $seen
+     */
+    private static function baseTarget(string $name, array $lookup, array $seen): string
+    {
+        $raw = self::undoc($lookup['document'][$name] ?? null);
+        if (($raw instanceof DXNStruct && ($raw->name === 'schema' || $raw->name === 'shape')) || in_array($name, $seen, true)) {
+            return $name;
+        }
+        $type = array_merge($lookup['registry']->typeAliases(), $lookup['compiled'])[$name] ?? null;
+        while ($type !== null && $type->form === 'doc') {
+            $type = $type->elem;
+        }
+        return $type !== null && ($type->form === 'reference' || $type->form === 'named')
+            ? self::baseTarget((string) $type->name, $lookup, [$name, ...$seen])
+            : $name;
+    }
+
+    /**
+     * A named type that is one use of a generic standing for a shape
+     * (`PageOfInt: {:of Page :integer}`): that shape's fields, its
+     * defaults filled, or `null`.
+     *
+     * @param Lookup $lookup
+     * @return list<Field>|null
+     */
+    private static function genericUse(string $name, array $lookup): ?array
+    {
+        $known = array_merge($lookup['registry']->typeAliases(), $lookup['compiled']);
+        $type = self::undocType($known[$name] ?? null);
+        if ($type === null || $type->form !== 'apply') {
+            return null;
+        }
+        $generic = self::undocType($known[$type->name ?? ''] ?? null);
+        if ($generic === null || $generic->form !== 'generic') {
+            return null;
+        }
+        try {
+            $args = self::filledArgs((string) $type->name, $type->elems ?? [], $known);
+        } catch (SchemaCompileError) {
+            return null;
+        }
+        return self::shapeFields(TypeExpr::instantiate($generic->params ?? [], $generic->base ?? TypeExpr::any(), $args));
+    }
+
+    private static function undocType(?TypeExpr $type): ?TypeExpr
+    {
+        return $type !== null && $type->form === 'doc' ? self::undocType($type->elem) : $type;
     }
 
     /**
@@ -565,19 +773,11 @@ final class Compiler
         if ($raw instanceof DXNTuple && ($raw->items[0] ?? null) instanceof DXNKeyword && $raw->items[0]->name === 'generic') {
             $params = $raw->items[1] ?? null;
             $list = $params instanceof DXNList ? $params->items : (is_array($params) ? $params : null);
-            if (count($raw->items) !== 3 || $list === null || $list === []) {
+            if (count($raw->items) !== 3 || $list === null) {
                 throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
             }
-            $names = [];
-            foreach ($list as $p) {
-                if (!$p instanceof DXNSymbol) {
-                    throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
-                }
-                $names[] = $p->name;
-            }
-            if (count(array_unique($names)) !== count($names)) {
-                throw new SchemaCompileError('a generic names a parameter twice');
-            }
+            $params = self::parameters(array_values($list), $scope);
+            $names = array_map(TypeExpr::paramName(...), $params);
             $body = $raw->items[2];
             if ($body instanceof DXNStruct && $body->name === 'schema') {
                 throw new SchemaCompileError(
@@ -588,10 +788,69 @@ final class Compiler
             foreach ($names as $n) {
                 $scope[$n] = TypeExpr::param($n);
             }
-            return TypeExpr::generic($names, self::compileNamed($name, $body, $scope));
+            return TypeExpr::generic($params, self::compileNamed($name, $body, [...$scope, ...self::paramBounds($params)]));
         }
         $type = self::compileTypeExpr($raw, $scope);
         return $type->form === 'shape' && $type->name === null ? $type->with(['name' => $name]) : $type;
+    }
+
+    /**
+     * `{:generic [t ...] body}`'s parameters, distinct: a bare symbol, or
+     * `{t bound}` or `{t bound default}` (G2 of dextrin's
+     * design/typespec.md), the bound and default compiled in the scope
+     * around the generic. A bare parameter stays its name; one with a
+     * bound is `[name, bound, default]`, `null` for no default. A
+     * parameter without a default follows none with one, and a default
+     * is within its own bound.
+     *
+     * @param list<mixed> $list
+     * @param array<string, TypeExpr> $scope
+     * @return list<string|array{0: string, 1: TypeExpr, 2: ?TypeExpr}>
+     */
+    private static function parameters(array $list, array $scope): array
+    {
+        $params = array_map(static fn (mixed $p): string|array => self::parameter($p, $scope), $list);
+        $names = array_map(TypeExpr::paramName(...), $params);
+        if ($params === []) {
+            throw new SchemaCompileError("a generic's parameters are symbols: {:generic [t ...] body}");
+        }
+        if (count(array_unique($names)) !== count($names)) {
+            throw new SchemaCompileError('a generic names a parameter twice');
+        }
+        $defaulted = false;
+        foreach ($params as $param) {
+            $hasDefault = is_array($param) && $param[2] !== null;
+            if ($defaulted && !$hasDefault) {
+                throw new SchemaCompileError("a generic's parameter without a default cannot follow one with a default");
+            }
+            $defaulted = $defaulted || $hasDefault;
+        }
+        foreach ($params as $param) {
+            if (is_array($param) && $param[2] !== null && !self::withinBound($param[2], $param[1], $scope)) {
+                throw new SchemaCompileError("{$param[0]}'s default is outside its own bound");
+            }
+        }
+        return $params;
+    }
+
+    /**
+     * @param array<string, TypeExpr> $scope
+     * @return string|array{0: string, 1: TypeExpr, 2: ?TypeExpr}
+     */
+    private static function parameter(mixed $param, array $scope): string|array
+    {
+        if ($param instanceof DXNSymbol) {
+            return $param->name;
+        }
+        $items = $param instanceof DXNTuple ? $param->items : [];
+        if (($items[0] ?? null) instanceof DXNSymbol && (count($items) === 2 || count($items) === 3)) {
+            return [
+                $items[0]->name,
+                self::compileTypeExpr($items[1], $scope),
+                count($items) === 3 ? self::compileTypeExpr($items[2], $scope) : null,
+            ];
+        }
+        throw new SchemaCompileError("a generic's parameter is a symbol, {t bound} or {t bound default}, not " . self::inspect($param));
     }
 
     /**
@@ -618,8 +877,9 @@ final class Compiler
                 }
                 return self::resolved($target, $known, [$name, ...$path]);
             case 'apply':
-                self::applies($type->name ?? '', count($type->elems ?? []), $known);
-                return $type->with(['elems' => $many($type->elems)]);
+                /** @var list<TypeExpr> $args */
+                $args = $many($type->elems) ?? [];
+                return $type->with(['elems' => self::filledArgs($type->name ?? '', $args, $known)]);
             case 'generic':
                 throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
             case 'shape':
@@ -740,28 +1000,217 @@ final class Compiler
     }
 
     /**
-     * Whether `$name` is a generic taking `$count` arguments.
+     * `$args` for the generic `$name`: every parameter given or defaulted,
+     * the defaults filled in, each argument within its parameter's bound
+     * (G2 of dextrin's design/typespec.md). A sibling not yet compiled
+     * takes them as they are; they are filled once it is.
      *
+     * @param list<TypeExpr> $args
      * @param array<string, TypeExpr> $known
+     * @return list<TypeExpr>
      */
-    private static function applies(string $name, int $count, array $known): void
+    private static function filledArgs(string $name, array $args, array $known): array
     {
         $target = $known[$name] ?? null;
         if ($target !== null && $target->form === 'named') {
-            return;
+            return $args;
         }
         if ($target === null || $target->form !== 'generic') {
             throw new SchemaCompileError("{:of {$name} ...} names no generic");
         }
-        $want = count($target->params ?? []);
-        if ($want !== $count) {
-            throw new SchemaCompileError("{$name} takes {$want} type argument(s), {:of {$name} ...} gives {$count}");
+        $params = $target->params ?? [];
+        $given = count($args);
+        $required = count(array_filter($params, static fn (string|array $p): bool => !is_array($p) || $p[2] === null));
+        if ($given < $required || $given > count($params)) {
+            $arity = $required === count($params) ? (string) $required : "{$required} to " . count($params);
+            throw new SchemaCompileError("{$name} takes {$arity} type argument(s), {:of {$name} ...} gives {$given}");
         }
+        $filled = $args;
+        foreach (array_slice($params, $given) as $param) {
+            // Only a parameter with a default is past the arguments given.
+            if (is_array($param) && $param[2] !== null) {
+                $filled[] = $param[2];
+            }
+        }
+        foreach ($params as $i => $param) {
+            if (is_array($param) && !self::withinBound($filled[$i], $param[1], $known)) {
+                throw new SchemaCompileError(
+                    "{:of {$name} ...}'s {$param[0]} takes what its bound takes; " . self::inspectArg($filled[$i]) . ' is outside it'
+                );
+            }
+        }
+        return $filled;
+    }
+
+    /**
+     * A generic's parameters' bounds, `:any` for a bare one, under the
+     * scope keys a use inside its body reads them by.
+     *
+     * @param list<string|array{0: string, 1: TypeExpr, 2: ?TypeExpr}> $params
+     * @return array<string, TypeExpr>
+     */
+    private static function paramBounds(array $params): array
+    {
+        $bounds = [];
+        foreach ($params as $param) {
+            $bounds[self::boundKey(TypeExpr::paramName($param))] = is_array($param) ? $param[1] : TypeExpr::any();
+        }
+        return $bounds;
+    }
+
+    /**
+     * The scope key the parameter `$name`'s bound travels under: no name
+     * a document can write, so it never stands for a type.
+     */
+    private static function boundKey(string $name): string
+    {
+        return "\0bound:{$name}";
+    }
+
+    /** An argument as a message names it. */
+    private static function inspectArg(TypeExpr $arg): string
+    {
+        return match ($arg->form) {
+            'named', 'reference', 'param' => (string) $arg->name,
+            'primitive' => ':' . $arg->name,
+            'any', 'never' => ':' . $arg->form,
+            default => $arg->form,
+        };
+    }
+
+    /**
+     * Whether `$arg` is `$bound`, or narrower: a refine or annotation of
+     * it, a name standing for it, a const or enum whose values it takes,
+     * or a schema that extends it. Nothing broader is worked out: DXNS
+     * has no general subtyping, so anything else is outside.
+     *
+     * @param array<string, TypeExpr> $known
+     */
+    private static function withinBound(TypeExpr $arg, TypeExpr $bound, array $known): bool
+    {
+        // A sibling not yet compiled passes for now: resolution checks
+        // again, through filledArgs(), with every definition in hand.
+        return self::pending($arg, $known) || self::pending($bound, $known) || self::within($arg, $bound, $known);
+    }
+
+    /**
+     * Whether `$type` names a sibling of the document not yet compiled:
+     * the scope holds it only as its own name.
+     *
+     * @param array<string, TypeExpr> $known
+     */
+    private static function pending(TypeExpr $type, array $known): bool
+    {
+        $target = $type->form === 'named' ? ($known[$type->name ?? ''] ?? null) : null;
+        return $target !== null && $target->form === 'named' && $target->name === $type->name;
+    }
+
+    /**
+     * {@see self::withinBound()} once neither side is pending.
+     *
+     * @param array<string, TypeExpr> $known
+     */
+    private static function within(TypeExpr $arg, TypeExpr $bound, array $known): bool
+    {
+        if ($bound->form === 'any' || serialize($arg) === serialize($bound)) {
+            return true;
+        }
+        if ($arg->form === 'doc') {
+            return self::withinBound($arg->elem ?? TypeExpr::any(), $bound, $known);
+        }
+        if ($bound->form === 'doc') {
+            return self::withinBound($arg, $bound->elem ?? TypeExpr::any(), $known);
+        }
+        switch ($arg->form) {
+            case 'refine':
+                return self::withinBound($arg->base ?? TypeExpr::any(), $bound, $known);
+            case 'enum':
+                $resolved = self::boundResolved($bound, $known);
+                foreach ($arg->literals ?? [] as $literal) {
+                    if (!$resolved->matches($literal)) {
+                        return false;
+                    }
+                }
+                return true;
+            case 'param':
+                // A parameter passed on is within a bound when its own is.
+                $own = $known[self::boundKey((string) $arg->name)] ?? null;
+                return $own !== null && self::withinBound($own, $bound, $known);
+            case 'named':
+                $target = $known[$arg->name ?? ''] ?? null;
+                return $target !== null && !($target->form === 'named' && $target->name === $arg->name)
+                    && self::withinBound($target, $bound, $known);
+        }
+        if ($arg->form === 'reference' && $bound->form === 'reference') {
+            return self::extends((string) $arg->name, (string) $bound->name, []);
+        }
+        // A bound naming a type: what that type is.
+        if ($bound->form === 'named') {
+            $target = $known[$bound->name ?? ''] ?? null;
+            return $target !== null && !($target->form === 'named' && $target->name === $bound->name)
+                && self::withinBound($arg, $target, $known);
+        }
+        return false;
+    }
+
+    /** @param array<string, TypeExpr> $known */
+    private static function boundResolved(TypeExpr $bound, array $known): TypeExpr
+    {
+        if ($bound->form !== 'named') {
+            return $bound;
+        }
+        $target = $known[$bound->name ?? ''] ?? null;
+        return $target === null || ($target->form === 'named' && $target->name === $bound->name) ? $bound : self::boundResolved($target, $known);
+    }
+
+    /**
+     * Whether the schema `$name` extends `$base`, directly or through
+     * others, in this document or as loaded.
+     *
+     * @param list<string> $seen
+     */
+    private static function extends(string $name, string $base, array $seen): bool
+    {
+        if ($name === $base) {
+            return true;
+        }
+        if (in_array($name, $seen, true)) {
+            return false;
+        }
+        foreach (self::extendedBases($name) as $next) {
+            if (self::extends($next, $base, [$name, ...$seen])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The bases the schema `$name` extends, as its head writes them, or
+     * as the loaded schema records them.
+     *
+     * @return list<string>
+     */
+    private static function extendedBases(string $name): array
+    {
+        $raw = self::undoc(self::$document[$name] ?? null);
+        if ($raw instanceof DXNStruct && $raw->name === 'schema') {
+            $bases = $raw->bases;
+        } else {
+            $bases = self::$loaded?->fetchStructSchema($name)?->compiled->bases ?? [];
+        }
+        $names = [];
+        foreach ($bases as [$kind, $base]) {
+            if ($kind === 'extends') {
+                $names[] = $base;
+            }
+        }
+        return $names;
     }
 
     private static function takesArguments(string $name, TypeExpr $generic): string
     {
-        return "{$name} is generic: write {:of {$name} " . implode(' ', $generic->params ?? []) . '}, with a type for each';
+        return "{$name} is generic: write {:of {$name} " . implode(' ', array_map(TypeExpr::paramName(...), $generic->params ?? [])) . '}, with a type for each';
     }
 
     /**
@@ -894,7 +1343,12 @@ final class Compiler
             $type = self::hasField($fieldPairs, 'type')
                 ? self::compileTypeExpr(self::getField($fieldPairs, 'type'), $aliases)
                 : TypeExpr::any();
-            $default = self::hasField($fieldPairs, 'default') ? self::getField($fieldPairs, 'default') : Field::NO_DEFAULT;
+            $default = self::fieldDefault(
+                self::hasField($fieldPairs, 'default') ? self::getField($fieldPairs, 'default') : Field::NO_DEFAULT,
+                self::hasField($fieldPairs, 'computed') ? self::getField($fieldPairs, 'computed') : Field::NO_DEFAULT,
+                $type,
+                $aliases,
+            );
             $descriptionRaw = self::getField($fieldPairs, 'description');
             return new Field(
                 name: $name,
@@ -906,6 +1360,77 @@ final class Compiler
         }
 
         return new Field(name: $name, required: !$optional, type: self::compileTypeExpr($value, $aliases));
+    }
+
+    /**
+     * A field's default: the value written, or one computed when the
+     * field is filled (G8 of dextrin's design/typespec.md). `computed:
+     * :now` takes a date, time, datetime or local date-time, possibly
+     * refined, annotated or nilable, and never stands beside a `default`.
+     *
+     * @param array<string, TypeExpr> $aliases
+     */
+    private static function fieldDefault(mixed $default, mixed $computed, TypeExpr $type, array $aliases): mixed
+    {
+        if ($computed === Field::NO_DEFAULT) {
+            return $default;
+        }
+        if ($default !== Field::NO_DEFAULT) {
+            throw new SchemaCompileError('a %field has a default or is computed, not both');
+        }
+        if (self::literalName($computed) !== 'now') {
+            throw new SchemaCompileError('a %field is computed: :now, the one value there is; not ' . self::inspect($computed));
+        }
+        $kind = self::temporalKind($type, $aliases);
+        if ($kind === null) {
+            throw new SchemaCompileError(
+                'a %field computed: :now is a date, time, datetime or local-datetime, not ' . self::inspectType($type),
+            );
+        }
+        return new Computed($kind);
+    }
+
+    /**
+     * The temporal type `$type` is, through refines, docs, nilables and
+     * names, or `null`.
+     *
+     * @param array<string, TypeExpr> $aliases
+     * @return 'date'|'time'|'datetime'|'local-datetime'|null
+     */
+    private static function temporalKind(TypeExpr $type, array $aliases): ?string
+    {
+        switch ($type->form) {
+            case 'primitive':
+                return match ($type->name) {
+                    'date' => 'date',
+                    'time' => 'time',
+                    'datetime' => 'datetime',
+                    'local-datetime' => 'local-datetime',
+                    default => null,
+                };
+            case 'refine':
+                return self::temporalKind($type->base ?? TypeExpr::any(), $aliases);
+            case 'doc':
+            case 'nilable':
+                return self::temporalKind($type->elem ?? TypeExpr::any(), $aliases);
+            case 'named':
+                $target = $aliases[$type->name ?? ''] ?? null;
+                return $target === null || ($target->form === 'named' && $target->name === $type->name)
+                    ? null
+                    : self::temporalKind($target, $aliases);
+            default:
+                return null;
+        }
+    }
+
+    /** A type as a message names it: its form, `:any` or `:never`. */
+    private static function inspectType(?TypeExpr $type): string
+    {
+        return match ($type?->form) {
+            null => 'a schema',
+            'any', 'never' => ':' . $type->form,
+            default => $type->form,
+        };
     }
 
     // ---- type expressions -----------------------------------------------------
@@ -1076,11 +1601,11 @@ final class Compiler
                     throw new SchemaCompileError('a use of a generic is {:of Name type ...}');
                 }
                 $name = self::fullName($rest[0]->name, $aliases);
-                self::applies($name, count($rest) - 1, $aliases);
-                return TypeExpr::apply($name, array_map(
+                $args = array_map(
                     static fn (mixed $v): TypeExpr => self::compileTypeExpr($v, $aliases),
                     array_slice($rest, 1),
-                ));
+                );
+                return TypeExpr::apply($name, self::filledArgs($name, $args, $aliases));
             }
             if ($tag === 'generic') {
                 throw new SchemaCompileError("a generic is a named type's whole definition, {:generic [t ...] body}");
@@ -1184,6 +1709,10 @@ final class Compiler
 
     /** The sized integers' ranges; a bound past PHP's int is its digits. */
     private const SIZED = [
+        'int8' => [-128, 127],
+        'int16' => [-32_768, 32_767],
+        'uint8' => [0, 255],
+        'uint16' => [0, 65_535],
         'int32' => [-2_147_483_648, 2_147_483_647],
         'int64' => [PHP_INT_MIN, PHP_INT_MAX],
         'uint32' => [0, 4_294_967_295],
@@ -1427,7 +1956,13 @@ final class Compiler
 
     // ---- annotations, {:doc T %{...}} (DXNS.md §1b) ---------------------------
 
-    private const ANNOTATION_KEYS = ['title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values'];
+    private const ANNOTATION_KEYS = [
+        'title', 'description', 'examples', 'read-only', 'write-only', 'deprecated', 'meta', 'values',
+        'discriminator', 'secret', 'key', 'visibility', 'messages',
+    ];
+
+    /** The stages a field may be seen in (TypeSpec's Lifecycle; G5 of dextrin's design/typespec.md). */
+    private const VISIBILITIES = ['create', 'read', 'update', 'delete', 'query'];
 
     /** Whether `$value` is a tuple headed by the keyword `$form`. */
     private static function isForm(mixed $value, string $form): bool
@@ -1488,6 +2023,12 @@ final class Compiler
                 throw new SchemaCompileError("a doc's {$key} is {$what}, not " . self::inspect($named[$key]));
             }
         }
+        // `read-only` says `visibility: [:read]`; the two together would
+        // say it twice, perhaps differently.
+        if (array_key_exists('visibility', $named) && array_key_exists('read-only', $named)) {
+            throw new SchemaCompileError("a doc's read-only and visibility say the same thing; give visibility alone");
+        }
+        $named = self::plainNames($named);
         if (array_key_exists('values', $named) && self::isMap($named['values'])) {
             $named['values'] = MapBuilder::build(
                 array_map(static fn (array $pair): array => [$pair[0], self::annotations($pair[1], null)], self::pairsOf($named['values'])),
@@ -1510,11 +2051,108 @@ final class Compiler
             'read-only', 'write-only' => is_bool($value) ? null : 'true or false',
             'deprecated' => is_bool($value) || is_string($value) ? null : 'true, false or a reason',
             'meta' => self::isMap($value) ? null : 'a map',
+            'secret' => is_bool($value) ? null : 'true or false',
+            'key' => is_bool($value) || is_string($value) ? null : 'true, false or a name',
+            'visibility' => self::visibility($value),
+            'messages' => self::messages($value),
+            'discriminator' => self::discriminator($value, $type),
             'values' => $type !== null && $type->form === 'enum' && self::isMap($value)
                 ? self::valueAnnotations($value, $type->literals ?? [])
                 : "a map of an enum's values to their annotations, on an enum",
             default => throw new SchemaCompileError("{$key} is no annotation; a doc holds " . implode(', ', self::ANNOTATION_KEYS)),
         };
+    }
+
+    /**
+     * What `visibility` takes when `$value` is not a list, `null` when it
+     * is; a list naming no stage throws.
+     */
+    private static function visibility(mixed $value): ?string
+    {
+        if (!$value instanceof DXNList) {
+            return 'a list of ' . implode(', ', self::VISIBILITIES);
+        }
+        foreach ($value->items as $item) {
+            if (!in_array(self::literalName($item), self::VISIBILITIES, true)) {
+                throw new SchemaCompileError(
+                    "a doc's visibility names " . self::inspect($item) . ', which is none of ' . implode(', ', self::VISIBILITIES),
+                );
+            }
+        }
+        return null;
+    }
+
+    /**
+     * What `messages` takes when `$value` is not a map, `null` when it
+     * is; a key that is no refine key, or a message that is no string,
+     * throws.
+     */
+    private static function messages(mixed $value): ?string
+    {
+        if (!self::isMap($value)) {
+            return 'a map of refine keys to messages';
+        }
+        $pairs = self::pairsOf($value);
+        usort($pairs, static fn (array $a, array $b): int => Equality::dxnCompare($a[0], $b[0]));
+        foreach ($pairs as [$key, $message]) {
+            if (!in_array(self::literalName($key), self::REFINE_KEYS, true)) {
+                throw new SchemaCompileError("a doc's messages are for refine keys; " . self::inspect($key) . ' is none');
+            }
+            if (!is_string($message)) {
+                throw new SchemaCompileError("a doc's messages are strings, not " . self::inspect($message));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * What `discriminator` takes when `$value` is no name, `null` when it
+     * is; one that does not stand on an any-of or a one-of throws.
+     */
+    private static function discriminator(mixed $value, ?TypeExpr $type): ?string
+    {
+        if (!($value instanceof DXNKeyword || $value instanceof DXNSymbol || is_string($value))) {
+            return "a field's name";
+        }
+        if (!self::hasVariants($type)) {
+            throw new SchemaCompileError("a doc's discriminator stands on an any-of or a one-of, not " . self::inspectType($type));
+        }
+        return null;
+    }
+
+    private static function hasVariants(?TypeExpr $type): bool
+    {
+        return match ($type?->form) {
+            'doc' => self::hasVariants($type->elem),
+            'any-of', 'one-of' => true,
+            default => false,
+        };
+    }
+
+    /**
+     * The annotations whose values are names, as strings -- what a reader
+     * compares, whatever spelling the document gave: `discriminator`, each
+     * stage of `visibility`, each key of `messages`.
+     *
+     * @param array<string, mixed> $named
+     * @return array<string, mixed>
+     */
+    private static function plainNames(array $named): array
+    {
+        if (array_key_exists('discriminator', $named)) {
+            $named['discriminator'] = self::literalName($named['discriminator']);
+        }
+        if (($named['visibility'] ?? null) instanceof DXNList) {
+            $named['visibility'] = new DXNList(array_map(self::literalName(...), $named['visibility']->items));
+        }
+        if (array_key_exists('messages', $named) && self::isMap($named['messages'])) {
+            $messages = [];
+            foreach (self::pairsOf($named['messages']) as [$key, $message]) {
+                $messages[(string) self::literalName($key)] = $message;
+            }
+            $named['messages'] = $messages;
+        }
+        return $named;
     }
 
     /**
