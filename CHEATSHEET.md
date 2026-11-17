@@ -269,6 +269,15 @@ dextrin encode data.dxn [--out data.dxnb]
 dextrin decode data.dxnb [--out data.dxn]
 dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps comments
 dextrin compat old-schemas/ schemas/     # changed schemas need new versions
+dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
+dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
+```
+
+```php
+use JOetjen\Dextrin\Convert\JsonSchema;
+
+['document' => $doc, 'inexact' => $inexact] = JsonSchema::toDxns(['order.json', $json], ['name' => 'Order']);
+$registry = Schema::compile($doc, new Registry());   // inexact: list of ['path' => ..., 'why' => ...]
 ```
 
 No analog of `mix dextrin.gen.schema`/`mix dextrin.gen.unicode`: the

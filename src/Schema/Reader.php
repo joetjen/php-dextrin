@@ -195,7 +195,7 @@ final class Reader
      */
     private static function strictly(Registry $registry, Compiled $reading, DXNStruct $struct, array $extra): void
     {
-        if ($registry->isStrict() && $reading->extras === 'open' && $extra !== []) {
+        if ($registry->isStrict() && $reading->extras == TypeExpr::openExtras() && $extra !== []) {
             $key = is_scalar($extra[0][0]) ? (string) $extra[0][0] : get_debug_type($extra[0][0]);
             throw new DXNError(
                 "struct \"{$struct->name}\" carries \"{$key}\", which its schema does not declare",

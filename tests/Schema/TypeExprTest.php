@@ -89,6 +89,29 @@ final class TypeExprTest extends TestCase
         self::assertFalse(TypeExpr::primitive('map')->matches([]));
     }
 
+    /**
+     * A map PHP cannot hold as an array -- the empty map `%{}`, or one keyed
+     * by a uuid -- decodes as a DXNMap, and is a map all the same.
+     */
+    public function testAMapDecodedAsADxnMapIsAMap(): void
+    {
+        foreach (['%{}', '%{@uuid "00000000-0000-0000-0000-000000000000" => 1}'] as $text) {
+            self::assertTrue(TypeExpr::primitive('map')->matches(Dextrin::decode($text)), $text);
+            self::assertFalse(TypeExpr::primitive('array')->matches(Dextrin::decode($text)), $text);
+        }
+    }
+
+    /**
+     * nil is a value a type may take: `{:not T}` refuses it when T takes it,
+     * as it refuses anything else T takes.
+     */
+    public function testNotRefusesNilWhenItsTypeTakesNil(): void
+    {
+        self::assertFalse(TypeExpr::not(TypeExpr::any())->matches(null));
+        self::assertFalse(TypeExpr::not(TypeExpr::nilable(TypeExpr::primitive('string')))->matches(null));
+        self::assertTrue(TypeExpr::not(TypeExpr::primitive('string'))->matches(null));
+    }
+
     public function testListOfChecksEveryElement(): void
     {
         $type = TypeExpr::listOf(TypeExpr::primitive('integer'));

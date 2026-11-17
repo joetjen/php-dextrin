@@ -178,7 +178,7 @@ final class Compat
      */
     private static function shape(Compiled $compiled): string
     {
-        $extras = is_array($compiled->extras) ? array_map(self::meaning(...), $compiled->extras) : $compiled->extras;
+        $extras = TypeExpr::mapExtras($compiled->extras, self::meaning(...));
         return implode("\0", array_map(
             static fn (Field $field) => $field->name . "\0" . self::fieldShape($field),
             $compiled->fields,

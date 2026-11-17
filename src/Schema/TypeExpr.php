@@ -63,6 +63,8 @@ use JOetjen\Dextrin\Value\Nanos;
  * representation (`{form: 'list-of', elem: ...}`) closely enough that
  * porting {@see Compiler} stays a mechanical
  * translation.
+ *
+ * @phpstan-type Extras array{entries: list<array{0: TypeExpr, 1: TypeExpr}>, closed: bool}
  */
 final class TypeExpr
 {
@@ -92,10 +94,8 @@ final class TypeExpr
      *        default, `null` for none; G2 of dextrin's design/typespec.md)
      * @param list<Particle>|null $particles list-items
      * @param array<string, mixed>|null $notes doc: its annotations by name
-     * @param 'open'|'closed'|array{0: self, 1: self}|null $extras shape: what it takes beyond its
-     *        fields (G1 of dextrin's design/typespec.md, DXNS.md §4c) -- any (`'open'`), none
-     *        (`'closed'`, `- *`), or those whose key and value match a type each
-     *        (`[K, V]`, `* K => V`)
+     * @param Extras|null $extras shape: what it takes beyond its fields (DXNS.md §4c) -- its
+     *        `* K => V` entries in order, and whether `- *` closes it
      * @param int|null $version reference: the one version of the schema it is pinned to
      *        (`Pet(1)`, G11 of dextrin's design/typespec.md, DXNS.md §5c), `null` for any
      */
@@ -116,7 +116,7 @@ final class TypeExpr
         public readonly ?array $params = null,
         public readonly ?array $particles = null,
         public readonly ?array $notes = null,
-        public readonly string|array|null $extras = null,
+        public readonly ?array $extras = null,
         public readonly ?int $version = null,
     ) {
     }
@@ -124,14 +124,57 @@ final class TypeExpr
     /**
      * `%shape{...}` (design/shapes-and-case.md): a plain map with these
      * fields, its missing defaults filled, taking `$extras` beyond them
-     * (DXNS.md §4c).
+     * (DXNS.md §4c); open when none are given.
      *
      * @param list<Field> $fields
-     * @param 'open'|'closed'|array{0: self, 1: self} $extras
+     * @param Extras|null $extras
      */
-    public static function shape(?string $name, array $fields, string|array $extras = 'open'): self
+    public static function shape(?string $name, array $fields, ?array $extras = null): self
     {
-        return new self('shape', name: $name, fields: $fields, extras: $extras);
+        return new self('shape', name: $name, fields: $fields, extras: $extras ?? self::openExtras());
+    }
+
+    /**
+     * Extras that say nothing (DXNS.md §4c): any extra is kept, and a
+     * strict decode refuses it.
+     *
+     * @return Extras
+     */
+    public static function openExtras(): array
+    {
+        return ['entries' => [], 'closed' => false];
+    }
+
+    /**
+     * Every type `$extras` hold, each entry's K then V, in order.
+     *
+     * @internal
+     * @param Extras|null $extras
+     * @return list<self>
+     */
+    public static function extrasTypes(?array $extras): array
+    {
+        return array_merge([], ...array_map(static fn (array $e): array => [$e[0], $e[1]], $extras['entries'] ?? []));
+    }
+
+    /**
+     * `$extras` with each type its entries hold replaced by what `$map`
+     * makes of it.
+     *
+     * @internal
+     * @param Extras|null $extras
+     * @param \Closure(self): self $map
+     * @return Extras|null
+     */
+    public static function mapExtras(?array $extras, \Closure $map): ?array
+    {
+        if ($extras === null) {
+            return null;
+        }
+        return [
+            'entries' => array_map(static fn (array $e): array => [$map($e[0]), $map($e[1])], $extras['entries']),
+            'closed' => $extras['closed'],
+        ];
     }
 
     /**
@@ -215,7 +258,7 @@ final class TypeExpr
             'branches' => $this->branches === null ? null : array_map(static fn (array $b): array => [$b[0], $map($b[1])], $this->branches),
             'particles' => $this->particles === null ? null : array_map(static fn (Particle $p): Particle => $p->map($map), $this->particles),
             'constraints' => $this->constraints === null ? null : self::withTypes($this->constraints, $map),
-            'extras' => is_array($this->extras) ? [$map($this->extras[0]), $map($this->extras[1])] : $this->extras,
+            'extras' => self::mapExtras($this->extras, $map),
             'params' => $this->params === null ? null : array_map(
                 static fn (string|array $p): string|array => is_string($p) ? $p : [$p[0], $map($p[1]), $p[2] === null ? null : $map($p[2])],
                 $this->params,
@@ -557,7 +600,8 @@ final class TypeExpr
                 }
                 return NoMatch::Instance;
             case 'not':
-                return ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance) === NoMatch::Instance ? $value : NoMatch::Instance;
+                // nil is a value: a conformed nil is a match, not "no type".
+                return ($this->elem === null || $this->elem->conform($value, $ctx) === NoMatch::Instance) ? $value : NoMatch::Instance;
             case 'all-of':
                 // Every variant, each taking what the one before it answered.
                 $current = $value;
@@ -569,9 +613,9 @@ final class TypeExpr
                 }
                 return $current;
             case 'nilable':
-                return $value === null ? null : ($this->elem?->conform($value, $ctx) ?? NoMatch::Instance);
+                return $value === null ? null : ($this->elem === null ? NoMatch::Instance : $this->elem->conform($value, $ctx));
             case 'refine':
-                $c = $this->base?->conform($value, $ctx) ?? NoMatch::Instance;
+                $c = $this->base === null ? NoMatch::Instance : $this->base->conform($value, $ctx);
                 return $c !== NoMatch::Instance && self::satisfiesConstraints($c, $this->constraints ?? [], $this->base, $ctx) ? $c : NoMatch::Instance;
             default:
                 return NoMatch::Instance;
@@ -847,7 +891,7 @@ final class TypeExpr
             }
         }
         $declared = array_map(static fn (Field $f): string => $f->name, $this->fields ?? []);
-        $extras = $this->extras ?? 'open';
+        $extras = $this->extras ?? self::openExtras();
         $out = [];
         foreach ($pairs as $i => $pair) {
             if (array_key_exists($i, $replaced)) {
@@ -857,17 +901,13 @@ final class TypeExpr
             $name = self::keyName($pair[0]);
             if ($name !== null && in_array($name, $declared, true)) {
                 $out[] = $pair;
-            } elseif ($extras === 'closed' || ($extras === 'open' && $ctx->registry !== null && $ctx->registry->isStrict())) {
-                return NoMatch::Instance;
-            } elseif (is_array($extras)) {
-                $value = $extras[0]->conform($pair[0], $ctx) === NoMatch::Instance ? NoMatch::Instance : $extras[1]->conform($pair[1], $ctx);
-                if ($value === NoMatch::Instance) {
-                    return NoMatch::Instance;
-                }
-                $out[] = [$pair[0], $value];
-            } else {
-                $out[] = $pair;
+                continue;
             }
+            [$outcome, $value] = self::extraConformed($extras, $pair[0], $pair[1], $ctx);
+            if ($outcome !== 'ok') {
+                return NoMatch::Instance;
+            }
+            $out[] = [$pair[0], $value];
         }
         $pairs = [...$out, ...$added];
         return $map instanceof DXNMap ? new DXNMap($pairs) : MapBuilder::build($pairs, static fn (string $m): \Throwable => new \LogicException($m));
@@ -1048,7 +1088,7 @@ final class TypeExpr
         if ($why !== null) {
             return $why;
         }
-        $refusal = self::extrasRefusal($shape->extras ?? 'open', self::undeclared($shape->fields ?? [], $pairs), $ctx);
+        $refusal = self::extrasRefusal($shape->extras ?? self::openExtras(), self::undeclared($shape->fields ?? [], $pairs), $ctx);
         return $refusal === null ? null : $refusal[0];
     }
 
@@ -1090,34 +1130,65 @@ final class TypeExpr
     }
 
     /**
+     * One extra, `$key => $value`, against `$extras` (DXNS.md §4c): its
+     * value must match the V of every entry whose K takes the key, in
+     * order. A key no entry takes is kept, unless the body is closed or
+     * the decode strict. Answers `['ok', conformed value]`,
+     * `['closed' | 'strict', null]` for a key nothing takes, or
+     * `['mismatch', V]` for the V it does not match.
+     *
+     * @param Extras $extras
+     * @return array{0: 'ok'|'closed'|'strict'|'mismatch', 1: mixed}
+     */
+    private static function extraConformed(array $extras, mixed $key, mixed $value, Context $ctx): array
+    {
+        $matched = array_values(array_filter(
+            $extras['entries'],
+            static fn (array $entry): bool => $entry[0]->conform($key, $ctx) !== NoMatch::Instance,
+        ));
+        if ($matched === []) {
+            return match (true) {
+                $extras['closed'] => ['closed', null],
+                $ctx->registry !== null && $ctx->registry->isStrict() => ['strict', null],
+                default => ['ok', $value],
+            };
+        }
+        foreach ($matched as [, $valueType]) {
+            $conformed = $valueType->conform($value, $ctx);
+            if ($conformed === NoMatch::Instance) {
+                return ['mismatch', $valueType];
+            }
+            $value = $conformed;
+        }
+        return ['ok', $value];
+    }
+
+    /**
      * Why `$extras` refuse `$pairs`, the `[key, value]`s a struct or map
-     * carries that no field declares (G1 of dextrin's design/typespec.md,
-     * DXNS.md §4c): `null` when they pass, otherwise `[message, category]`.
-     * Open extras take any (a strict decode refuses them elsewhere);
-     * closed ones none; typed ones each key matching K and its value V.
+     * carries that no field declares (DXNS.md §4c): `null` when they pass,
+     * otherwise `[message, category]`. A key some `* K => V` takes must
+     * match its V; one none takes is refused when the body is closed or
+     * the decode strict.
      *
      * @internal
-     * @param 'open'|'closed'|array{0: self, 1: self} $extras what the schema or shape takes
+     * @param Extras $extras what the schema or shape takes
      * @param list<array{0: mixed, 1: mixed}> $pairs the undeclared entries
      * @param Context $ctx the check's context
      * @return array{0: string, 1: string}|null
      */
-    public static function extrasRefusal(string|array $extras, array $pairs, Context $ctx): ?array
+    public static function extrasRefusal(array $extras, array $pairs, Context $ctx): ?array
     {
-        if ($extras === 'open' || $pairs === []) {
-            return null;
-        }
-        if ($extras === 'closed') {
-            return [self::shown($pairs[0][0]) . ' is no declared field, and the body is closed (- *)', 'schema/undeclared-field'];
-        }
-        [$keyType, $valueType] = $extras;
         foreach ($pairs as [$key, $value]) {
-            if ($keyType->conform($key, $ctx) === NoMatch::Instance) {
-                return ['extra key ' . self::shown($key) . ' does not match the key type of * K => V', 'schema/type-mismatch'];
-            }
-            if ($valueType->conform($value, $ctx) === NoMatch::Instance) {
-                $why = self::explain($valueType, $value, $ctx) ?? 'does not match the value type of * K => V';
-                return ['extra ' . self::shown($key) . ": {$why}", 'schema/type-mismatch'];
+            [$outcome, $detail] = self::extraConformed($extras, $key, $value, $ctx);
+            switch ($outcome) {
+                case 'closed':
+                    return [self::shown($key) . ' is no declared field, and the body is closed (- *)', 'schema/undeclared-field'];
+                case 'strict':
+                    return [self::shown($key) . ' is no declared field, and the decode is strict', 'schema/undeclared-field'];
+                case 'mismatch':
+                    /** @var self $detail */
+                    $why = self::explain($detail, $value, $ctx) ?? 'does not match the value type of * K => V';
+                    return ['extra ' . self::shown($key) . ": {$why}", 'schema/type-mismatch'];
             }
         }
         return null;
@@ -1278,7 +1349,7 @@ final class TypeExpr
                     static fn (Field $f): Field => new Field($f->name, $f->required, $f->type->substitute($bound), $f->default, $f->description),
                     $this->fields ?? [],
                 ),
-                'extras' => is_array($this->extras) ? [$this->extras[0]->substitute($bound), $this->extras[1]->substitute($bound)] : $this->extras,
+                'extras' => self::mapExtras($this->extras, static fn (self $t): self => $t->substitute($bound)),
             ]),
             'case' => $this->with([
                 'branches' => array_map(static fn (array $b): array => [$b[0], $b[1]->substitute($bound)], $this->branches ?? []),
@@ -1382,8 +1453,10 @@ final class TypeExpr
             // (see the project's collections decision); `array_is_list`
             // is the only structural signal separating them, same as
             // Equality::kindOf()'s own dispatch -- an empty array is
-            // indistinguishable and reads as `array`, not `map`.
-            'map' => is_array($value) && !array_is_list($value),
+            // indistinguishable and reads as `array`, not `map`. A map
+            // PHP cannot hold as an array -- `%{}` decoded, or one keyed by
+            // a uuid, a date, ... -- is a DXNMap, and a map all the same.
+            'map' => (is_array($value) && !array_is_list($value)) || $value instanceof DXNMap,
             'ordered-map' => $value instanceof DXNOrderedMap,
             'set' => $value instanceof DXNSet,
             'sorted-set' => $value instanceof DXNSortedSet,
@@ -1955,8 +2028,18 @@ final class TypeExpr
     /** A collection's item count, `null` for a value that is none. */
     private static function countOf(mixed $value): ?int
     {
-        $items = self::itemsOf($value);
-        return $items === null ? null : count($items);
+        // A map's, a shape's or a struct's count is its entries present,
+        // extras included (T674: JSON Schema's minProperties and
+        // maxProperties).
+        return match (true) {
+            $value instanceof Validated && $value->asRead !== null => self::countOf($value->asRead),
+            $value instanceof Validated => self::countOf($value->value),
+            $value instanceof DXNOrderedMap => count($value->pairs),
+            $value instanceof DXNMap => count($value),
+            $value instanceof DXNStruct => ($value->isKeyed() ? count($value->pairs()) : count($value->values())) + count($value->extra),
+            is_array($value) && ($value === [] || !array_is_list($value)) => count($value),
+            default => ($items = self::itemsOf($value)) === null ? null : count($items),
+        };
     }
 
     /**

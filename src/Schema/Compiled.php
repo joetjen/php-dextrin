@@ -25,9 +25,10 @@ namespace JOetjen\Dextrin\Schema;
  * with, a shape with `null`: what an `extends` makes it acceptable as.
  * `[]` for a schema written whole.
  *
- * `extras` are what it takes beyond its fields (G1 of dextrin's
- * design/typespec.md, DXNS.md §4c): `'open'`, `'closed'` (`- *`) or
- * `[K, V]` (`* K => V`).
+ * `extras` are what it takes beyond its fields (DXNS.md §4c): its
+ * `* K => V` entries in order, and whether `- *` closes it.
+ *
+ * @phpstan-import-type Extras from TypeExpr
  */
 final class Compiled
 {
@@ -35,7 +36,7 @@ final class Compiled
      * @param list<Field> $fields
      * @param array<string, mixed> $annotations
      * @param list<array{0: 'extends'|'includes', 1: string, 2: ?int}> $bases
-     * @param 'open'|'closed'|array{0: TypeExpr, 1: TypeExpr} $extras
+     * @param Extras $extras
      */
     public function __construct(
         public readonly ?string $name = null,
@@ -43,7 +44,7 @@ final class Compiled
         public readonly int $version = 1,
         public readonly array $annotations = [],
         public readonly array $bases = [],
-        public readonly string|array $extras = 'open',
+        public readonly array $extras = ['entries' => [], 'closed' => false],
     ) {
     }
 

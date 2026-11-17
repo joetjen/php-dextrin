@@ -192,7 +192,7 @@ final class Canonical
         if ($value->isKeyed()) {
             $written = array_map(static fn (array $pair): string => $entry($pair[0], $pair[1]), [...$value->pairs(), ...$value->extra]);
             // `* K => V` (§4c), always with the arrow.
-            $rest = $value->rest === null ? [] : ['* ' . self::text($value->rest[0]) . ' => ' . self::text($value->rest[1])];
+            $rest = array_map(static fn (array $entry): string => '* ' . self::text($entry[0]) . ' => ' . self::text($entry[1]), $value->rest);
             return $head . '{' . implode(' ', [...$value->dropEntries(), ...$rest, ...$written]) . '}';
         }
         $byKey = [];

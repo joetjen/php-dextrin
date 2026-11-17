@@ -94,8 +94,18 @@ final class RestTest extends TestCase
         $r = self::compiled(self::REST);
         self::assertTrue(self::takes($r, 'Tags', '%{name: "a", "x" => 1, "y" => 2}'));
         self::assertFalse(self::takes($r, 'Tags', '%{name: "a", "x" => "one"}'));
-        self::assertFalse(self::takes($r, 'Tags', '%{name: "a", :x => 1}'));
         self::assertTrue(self::takes($r, 'Tags', '%{name: "a"}'));
+    }
+
+    /**
+     * A key K does not take is no business of the entry (T674); `- *`
+     * beside it refuses such a key, as a lone `* K => V` did until then.
+     */
+    public function testAKeyKDoesNotTakeIsKeptUnlessClosedStandsBesideIt(): void
+    {
+        self::assertTrue(self::takes(self::compiled(self::REST), 'Tags', '%{name: "a", :x => 1}'));
+        $r = self::compiled('%{T: %shape{name: :string * :string => :integer - *}}');
+        self::assertFalse(self::takes($r, 'T', '%{name: "a", :x => 1}'));
     }
 
     public function testADeclaredFieldIsNoExtraWhateverTheRestSays(): void
@@ -140,9 +150,60 @@ final class RestTest extends TestCase
         self::assertSame('schema/undeclared-field', self::category(static fn () => Dextrin::decode('%Pin{at: %{x: 1, y: 2}, note: 1}', $r)));
     }
 
-    public function testClosedDoesNotGoWithTypedExtras(): void
+    /**
+     * Until T674 (2026-11-17) a body had one `* K => V` at most, and not
+     * beside `- *`. JSON Schema's patternProperties needs several, and
+     * additionalProperties: false beside them.
+     */
+    public function testBesideEntriesClosedRefusesOnlyWhatNoEntryTakes(): void
     {
-        self::assertStringContainsString('* K => V', self::compileError('%{P: %shape{x: :integer - * * :string => :any}}'));
+        $r = self::compiled('%{P: %shape{x: :integer * {:refine :string %{pattern: @regex "^x-"}} => :integer - *}}');
+        self::assertTrue(self::takes($r, 'P', '%{x: 1, "x-a" => 2}'));
+        self::assertFalse(self::takes($r, 'P', '%{x: 1, "x-a" => "two"}'));
+        self::assertFalse(self::takes($r, 'P', '%{x: 1, "y" => 2}'));
+    }
+
+    // ---- several * K => V ------------------------------------------------------------
+
+    private const SEVERAL = <<<'DXN'
+        %{
+          P: %shape{
+            * {:refine :string %{pattern: @regex "^a"}} => :integer
+            * {:refine :string %{pattern: @regex "b$"}} => {:refine :integer %{min: 10}}
+          }
+        }
+        DXN;
+
+    public function testAKeyMatchesTheVOfEveryEntryWhoseKTakesIt(): void
+    {
+        $r = self::compiled(self::SEVERAL);
+        self::assertTrue(self::takes($r, 'P', '%{"a" => 1, "b" => 10, "ab" => 12}'));
+        self::assertFalse(self::takes($r, 'P', '%{"ab" => 3}'));
+        self::assertFalse(self::takes($r, 'P', '%{"b" => 3}'));
+    }
+
+    public function testAKeyNoEntryTakesIsKeptUnlessTheBodyIsClosedOrTheDecodeStrict(): void
+    {
+        $r = self::compiled(self::SEVERAL);
+        self::assertTrue(self::takes($r, 'P', '%{"zzz" => "anything"}'));
+        $strict = $r->putStrict(true);
+        self::assertNotSame('ok', self::category(static fn () => Schema::check(Dextrin::decode('%{"zzz" => 1}'), $strict, 'P')));
+        self::assertSame('ok', self::category(static fn () => Schema::check(Dextrin::decode('%{"a" => 1}'), $strict, 'P')));
+    }
+
+    public function testAStructsExtrasFollowTheSameRule(): void
+    {
+        $r = self::compiled('%{C: %schema{n: :integer * {:refine :string %{pattern: @regex "^x"}} => :integer - *}}');
+        self::assertSame('ok', self::category(static fn () => Dextrin::decode('%C{n: 1, "xa" => 2}', $r)));
+        self::assertSame('schema/type-mismatch', self::category(static fn () => Dextrin::decode('%C{n: 1, "xa" => "s"}', $r)));
+        self::assertSame('schema/undeclared-field', self::category(static fn () => Dextrin::decode('%C{n: 1, "ya" => 2}', $r)));
+    }
+
+    public function testAStrictDecodeOfAStructRefusesAKeyNoEntryTakes(): void
+    {
+        $r = self::compiled('%{C: %schema{n: :integer * {:refine :string %{pattern: @regex "^x"}} => :integer}}');
+        self::assertSame('ok', self::category(static fn () => Dextrin::decode('%C{n: 1, "xa" => 2}', $r, strict: true)));
+        self::assertSame('schema/undeclared-field', self::category(static fn () => Dextrin::decode('%C{n: 1, "ya" => 2}', $r, strict: true)));
     }
 
     // ---- written and read back ------------------------------------------------------
@@ -181,9 +242,13 @@ final class RestTest extends TestCase
         self::assertStringContainsString('%Foo', self::message(static fn () => Dextrin::decode('%Foo{* :a => 1}')));
     }
 
-    public function testABodyTakesOneTypedExtrasAtMost(): void
+    public function testSeveralEntriesAreWrittenBackInTheirOrder(): void
     {
-        self::assertStringContainsString('once', self::message(static fn () => Dextrin::decode('%shape{* :string => :any * :keyword => :any}')));
+        $doc = Dextrin::decode('%{P: %shape{* :string => :any * :keyword => :integer - *}}');
+        foreach ([Dextrin::encode($doc), Dextrin::encode($doc, pretty: true), \JOetjen\Dextrin\Canonical::print($doc)] as $printed) {
+            self::assertMatchesRegularExpression('/\* :string => :any.*\* :keyword => :integer/s', $printed);
+            self::assertTrue(\JOetjen\Dextrin\Value\Equality::dxnEquals($doc, Dextrin::decode($printed)), $printed);
+        }
     }
 
     public function testClosedStandsOnceInABody(): void

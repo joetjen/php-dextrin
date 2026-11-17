@@ -325,7 +325,7 @@ final class Equality
         // of it; any other struct has none, and its key is unchanged.
         $built = $struct->hasBodyClauses()
             ? ':built:' . $struct->opening(null) . implode(' ', $struct->dropEntries())
-                . ($struct->rest === null ? '' : ':rest:' . self::canonicalKey($struct->rest[0]) . '=>' . self::canonicalKey($struct->rest[1]))
+                . implode('', array_map(static fn (array $e): string => ':rest:' . self::canonicalKey($e[0]) . '=>' . self::canonicalKey($e[1]), $struct->rest))
             : '';
         return "struct:{$struct->name}:keyed:{" . implode(',', $parts) . '}' . $built;
     }

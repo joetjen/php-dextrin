@@ -325,7 +325,7 @@ final class Tree
             // `%type(N)[T]` holds its type as an item (§5c).
             $value instanceof DXNStruct => array_merge(
                 array_map(static fn (array $b): string => $b[1], $value->bases),
-                $value->rest === null ? [] : $all($value->rest),
+                $all(array_merge([], ...$value->rest)),
                 $all($value->isKeyed() ? array_map(static fn (array $p): mixed => $p[1], $value->pairs()) : $value->values()),
             ),
             $value instanceof DXNMap => $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
@@ -418,8 +418,8 @@ final class Tree
                 array_push($out, ...self::typeReferences($field->type));
             }
             // What it takes beyond its fields (`* K => V`, DXNS.md §4c).
-            if (is_array($compiled->extras)) {
-                array_push($out, ...self::typeReferences($compiled->extras[0]), ...self::typeReferences($compiled->extras[1]));
+            foreach (TypeExpr::extrasTypes($compiled->extras) as $type) {
+                array_push($out, ...self::typeReferences($type));
             }
         }
         return $out;
@@ -436,7 +436,7 @@ final class Tree
             'reference' => [$type->name ?? ''],
             // A shape's fields, and the types of its extras (`* K => V`,
             // DXNS.md §4c).
-            'shape' => $all([...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []), ...(is_array($type->extras) ? $type->extras : [])]),
+            'shape' => $all([...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []), ...TypeExpr::extrasTypes($type->extras)]),
             'case' => $all([$type->otherwise, ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
             'generic' => self::typeReferences($type->base),
             // A refine's base, and the types its `contains`, `content`,

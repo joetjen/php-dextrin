@@ -301,7 +301,7 @@ final class Deprecations
             ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? []),
             ...array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? [])),
             ...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []),
-            ...(is_array($type->extras) ? $type->extras : []),
+            ...TypeExpr::extrasTypes($type->extras),
             ...TypeExpr::heldTypes($type->constraints ?? []),
             ...$bounds,
         ];
@@ -399,7 +399,7 @@ final class Deprecations
             $raw instanceof DXNStruct => [
                 ...array_map(static fn (array $base): array => [$base[1], $base[2]], $raw->bases),
                 ...self::usedNamesAll($raw->isKeyed() ? array_merge([], ...$raw->pairs()) : $raw->values()),
-                ...self::usedNamesAll($raw->rest ?? []),
+                ...self::usedNamesAll(array_merge([], ...$raw->rest)),
             ],
             // `Pet(1)`: the name at the version it pins (DXNS.md §5c).
             $raw instanceof DXNTuple && DXNTuple::pinned($raw) !== null => [DXNTuple::pinned($raw)],

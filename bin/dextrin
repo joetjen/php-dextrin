@@ -52,6 +52,8 @@ const USAGE = <<<'USAGE'
       check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]
                                                     Check a tree of .dxns schemas: syntax, compiling, layout and names
       docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
+      from-json-schema SCHEMA... [--out FILE] [--name N] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
+                                                    Convert JSON Schema (drafts 04 to 2020-12, MongoDB's $jsonSchema) to DXNS
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
@@ -70,6 +72,7 @@ function main(array $argv): int
         'compat' => run(static fn () => cmdCompat($rest)),
         'docs' => run(static fn () => cmdDocs($rest)),
         'check' => run(static fn () => cmdCheck($rest)),
+        'from-json-schema' => run(static fn () => cmdFromJsonSchema($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
@@ -137,6 +140,70 @@ function cmdCheck(array $argv): void
         fwrite(STDERR, "{$p['file']}:{$p['line']}: {$p['message']}\n");
     }
     throw new \RuntimeException(count($result['problems']) . ' problem(s)');
+}
+
+/**
+ * `dextrin from-json-schema SCHEMA... [options]`: JSON Schema to DXNS
+ * ({@see \JOetjen\Dextrin\Convert\JsonSchema}), as `mix
+ * dextrin.from_json_schema` converts it -- drafts 04, 06, 07, 2019-09 and
+ * 2020-12, and MongoDB's `$jsonSchema` with `bsonType`.
+ *
+ * The first file is the root. A `$ref` to another document is resolved
+ * among the files given and every `.json` file under `--schemas DIR`, by
+ * `$id` or by relative path; nothing is fetched. `--out FILE` writes the
+ * DXNS there instead of to standard output; `--name` names the root
+ * (otherwise its `title`, otherwise `Root`); `--draft` reads a schema with
+ * no `$schema` (default 2020-12); `--mongo` reads it as MongoDB's (also
+ * when `bsonType` appears); `--structs` writes named object schemas as
+ * `%schema`; `--assert-formats` checks `format` and the content keywords
+ * in 2019-09 and 2020-12 too. Whatever is not exact is printed to
+ * standard error as `inexact: PATH: why`; `--strict` fails on it.
+ *
+ * @param list<string> $argv
+ */
+function cmdFromJsonSchema(array $argv): void
+{
+    ['positional' => $files, 'flags' => $flags, 'options' => $options] = parseArgs(
+        $argv,
+        ['mongo', 'structs', 'assert-formats', 'strict'],
+        ['out', 'name', 'draft', 'schemas'],
+    );
+    if ($files === []) {
+        throw new \RuntimeException('usage: dextrin from-json-schema SCHEMA... [--out FILE] [options]');
+    }
+    $paths = $files;
+    if (isset($options['schemas'])) {
+        $under = [];
+        $walk = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($options['schemas'], \FilesystemIterator::SKIP_DOTS));
+        foreach ($walk as $file) {
+            if ($file instanceof \SplFileInfo && $file->isFile() && str_ends_with($file->getFilename(), '.json')) {
+                $under[] = rtrim($options['schemas'], '/') . '/' . substr($file->getPathname(), strlen(rtrim($options['schemas'], '/')) + 1);
+            }
+        }
+        sort($under, SORT_STRING);
+        $paths = [...$paths, ...array_values(array_filter($under, static fn (string $p): bool => !in_array($p, $files, true)))];
+    }
+    $sources = array_map(static fn (string $path): array => [$path, readFileContents($path)], $paths);
+    ['document' => $document, 'inexact' => $inexact] = \JOetjen\Dextrin\Convert\JsonSchema::toDxns($sources, array_filter([
+        'name' => $options['name'] ?? null,
+        'draft' => $options['draft'] ?? null,
+        'mongo' => $flags['mongo'] ?? false,
+        'structs' => $flags['structs'] ?? false,
+        'assertFormats' => $flags['assert-formats'] ?? false,
+    ], static fn (mixed $v): bool => $v !== null));
+    foreach ($inexact as $place) {
+        fwrite(STDERR, "inexact: {$place['path']}: {$place['why']}\n");
+    }
+    if (($flags['strict'] ?? false) && $inexact !== []) {
+        throw new \RuntimeException(count($inexact) . ' place(s) not exact, and --strict');
+    }
+    $text = Dextrin::encode($document, pretty: true) . "\n";
+    if (isset($options['out'])) {
+        file_put_contents($options['out'], $text);
+        fwrite(STDOUT, "wrote {$options['out']}\n");
+    } else {
+        fwrite(STDOUT, $text);
+    }
 }
 
 /**

@@ -29,10 +29,20 @@ What DXNS lacked to say every TypeSpec type exactly, as in dextrin
   default computed in UTC when the field is filled, for date and time
   types (`Schema\Computed`, `Field::defaultValue()`).
 - **Sized sugar `:int8`, `:int16`, `:uint8`, `:uint16`** (DXNS.md §1).
-- **Typed and closed extras** (DXNS.md §4c): `* :string => :integer` in
-  a `%schema` or `%shape` body types every extra key and value; `- *`
-  refuses every extra, strict decode or not. Both are inherited from
-  bases.
+- **Typed and closed extras** (DXNS.md §4c): `* K => V` in a `%schema`
+  or `%shape` body types the extras whose key K takes, several entries
+  allowed; `- *` refuses anything beyond the fields and the entries,
+  strict decode or not. Both are inherited from bases.
+- **`min-count` and `max-count` on maps, shapes and structs** (DXNS.md
+  §2): the entries present.
+- **`dextrin from-json-schema`** and `Convert\JsonSchema::toDxns()`:
+  JSON Schema to DXNS, drafts 04, 06, 07, 2019-09 and 2020-12, and
+  MongoDB's `$jsonSchema` with `bsonType` (dextrin's
+  design/json-schema.md). It passes the official JSON-Schema-Test-Suite
+  (23.1.0) but for 113 of 4,650 required tests, each listed with its
+  reason; what it can't say exactly is reported, and `--strict` refuses
+  it. `Convert\JsonSchema::decodeJson()` reads JSON keeping each object's
+  key order and `{}` apart from `[]`.
 - **Deprecation warnings** (DXNS.md §1b): `deprecated:` on a schema, one
   version of it, a named type, a field's type, a variant or an enum
   value now warns -- when a schema that uses it compiles
@@ -65,6 +75,11 @@ What DXNS lacked to say every TypeSpec type exactly, as in dextrin
   version.
 
 ### Fixed
+
+- **`:map` takes a map PHP cannot hold as an array**: `%{}` decoded, or
+  a map keyed by a uuid or a date, is a `DXNMap`, and `:map` refused it.
+- **`{:not T}` refuses nil when T takes nil**: a conformed nil was read
+  as no match, so `{:not :any}` took nil.
 
 - **A schema tree loads a file after the base it is built from**: `dextrin check` and `Tree::load`
   ordered the files by the names their fields use, not by the bases a

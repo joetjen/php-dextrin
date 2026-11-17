@@ -57,7 +57,7 @@ use JOetjen\Dextrin\Value\Equality;
  * JS port's own `entryName()`/`normalizeKeywords()` helpers, neither
  * is needed here.
  *
- * @phpstan-type Extras 'open'|'closed'|array{0: TypeExpr, 1: TypeExpr}
+ * @phpstan-import-type Extras from TypeExpr
  * @phpstan-type Built array{fields: list<Field>, bases: list<array{0: 'extends'|'includes', 1: string, 2: ?int}>, extras: Extras}
  * @phpstan-type Body array{0: list<Field>, 1: Extras}
  * @phpstan-type Lookup array{document: array<string, mixed>, compiled: array<string, TypeExpr>, scope: array<string, TypeExpr>, registry: Registry}
@@ -241,7 +241,7 @@ final class Compiler
             version: $raw instanceof DXNStruct ? ($raw->version ?? 1) : 1,
             annotations: $annotations,
             bases: $built['bases'],
-            extras: is_array($extras) ? [self::resolved($extras[0], $known, []), self::resolved($extras[1], $known, [])] : $extras,
+            extras: TypeExpr::mapExtras($extras, static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, [])) ?? TypeExpr::openExtras(),
         );
     }
 
@@ -376,7 +376,7 @@ final class Compiler
             ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? []),
             ...array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? [])),
             ...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []),
-            ...(is_array($type->extras) ? $type->extras : []),
+            ...TypeExpr::extrasTypes($type->extras),
             ...$bounds,
         ];
         return array_merge($own, ...array_map(self::discriminated(...), $children));
@@ -524,33 +524,32 @@ final class Compiler
     }
 
     /**
-     * What a body says it takes beyond its fields (G1 of dextrin's
-     * design/typespec.md, DXNS.md §4c): `'closed'` for `- *`, `[K, V]` for
-     * `* K => V` compiled in `$scope`, `null` when it says nothing. Both
-     * at once is refused.
+     * What a body says it takes beyond its fields (DXNS.md §4c): its
+     * `* K => V` entries, each compiled in `$scope`, and whether `- *`
+     * closes it; `null` when it says nothing.
      *
      * @param array<string, TypeExpr> $scope
-     * @return 'closed'|array{0: TypeExpr, 1: TypeExpr}|null
+     * @return Extras|null
      */
-    private static function ownExtras(DXNStruct $raw, array $scope): string|array|null
+    private static function ownExtras(DXNStruct $raw, array $scope): ?array
     {
-        if ($raw->isClosed() && $raw->rest !== null) {
-            throw new SchemaCompileError('a body is closed (- *) or types its extras (* K => V), not both');
-        }
-        if ($raw->isClosed()) {
-            return 'closed';
-        }
-        if ($raw->rest === null) {
+        if ($raw->rest === [] && !$raw->isClosed()) {
             return null;
         }
-        return [self::compileTypeExpr($raw->rest[0], $scope), self::compileTypeExpr($raw->rest[1], $scope)];
+        return [
+            'entries' => array_map(
+                static fn (array $e): array => [self::compileTypeExpr($e[0], $scope), self::compileTypeExpr($e[1], $scope)],
+                $raw->rest,
+            ),
+            'closed' => $raw->isClosed(),
+        ];
     }
 
     /**
-     * A built body's extras (G1): its own when it says; otherwise what its
-     * bases say, which must agree -- a base that says nothing is open and
-     * agrees with any. What `extends` a closed base can pass as it only
-     * when it stays closed and adds no field.
+     * A built body's extras (DXNS.md §4c): its own when it says; otherwise
+     * what its bases say, which must agree -- a base that says nothing is
+     * open and agrees with any. What `extends` a closed base can pass as
+     * it only when it says what the base says and adds no field.
      *
      * @param list<array{kind: 'extends'|'includes', name: string, fields: list<Field>, extras: Extras, version: ?int}> $found
      * @param list<Field> $own
@@ -558,25 +557,23 @@ final class Compiler
      * @param array<string, TypeExpr> $known
      * @return Extras
      */
-    private static function mergedExtras(string $name, array $found, array $own, string|array|null $ownExtras, array $known): string|array
+    private static function mergedExtras(string $name, array $found, array $own, ?array $ownExtras, array $known): array
     {
         $said = [];
         foreach ($found as $base) {
-            if ($base['extras'] === 'open') {
+            if ($base['extras'] == TypeExpr::openExtras()) {
                 continue;
             }
-            $key = is_array($base['extras'])
-                ? serialize([self::inPlace($base['extras'][0], $known, []), self::inPlace($base['extras'][1], $known, [])])
-                : $base['extras'];
+            $key = serialize(TypeExpr::mapExtras($base['extras'], static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, [])));
             $said[$key] ??= $base['extras'];
         }
         foreach ($found as $base) {
-            if ($base['kind'] !== 'extends' || $base['extras'] !== 'closed') {
+            if ($base['kind'] !== 'extends' || !$base['extras']['closed']) {
                 continue;
             }
             $baseNames = array_map(static fn (Field $f): string => $f->name, $base['fields']);
             $added = array_filter($own, static fn (Field $f): bool => !in_array($f->name, $baseNames, true));
-            if ($added !== [] || ($ownExtras !== null && $ownExtras !== 'closed')) {
+            if ($added !== [] || ($ownExtras !== null && serialize($ownExtras) !== serialize($base['extras']))) {
                 throw new SchemaCompileError(
                     "\"{$name}\" extends {$base['name']}, which is closed (- *): "
                     . "it adds no field and no extras, or includes {$base['name']} instead",
@@ -590,7 +587,7 @@ final class Compiler
         if (count($said) > 1) {
             throw new SchemaCompileError("\"{$name}\": its bases differ in their extras (- * or * K => V); say which in its body");
         }
-        return $said === [] ? 'open' : array_values($said)[0];
+        return $said === [] ? TypeExpr::openExtras() : array_values($said)[0];
     }
 
     /**
@@ -630,7 +627,7 @@ final class Compiler
             'elems' => $many($type->elems),
             'variants' => $many($type->variants),
             'fields' => $type->fields === null ? null : array_map(static fn (Field $f): Field => self::comparable($f, $known), $type->fields),
-            'extras' => is_array($type->extras) ? [self::inPlace($type->extras[0], $known, $path), self::inPlace($type->extras[1], $known, $path)] : $type->extras,
+            'extras' => TypeExpr::mapExtras($type->extras, static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, $path)),
             'branches' => $type->branches === null ? null : array_map(static fn (array $b): array => [$b[0], self::inPlace($b[1], $known, $path)], $type->branches),
             'particles' => $type->particles === null ? null : array_map(
                 static fn (Particle $p): Particle => $p->map(static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, $path)),
@@ -831,7 +828,7 @@ final class Compiler
             return self::atVersion($base, $raw, $version, [$built[$base]['fields'], $built[$base]['extras']], $lookup['registry']);
         }
         if ($raw->name === 'shape') {
-            return [self::shapeBody($lookup['compiled'][$base]) ?? [[], 'open'], null];
+            return [self::shapeBody($lookup['compiled'][$base]) ?? [[], TypeExpr::openExtras()], null];
         }
         try {
             $compiled = self::compileEntry($raw, $lookup['scope']);
@@ -893,7 +890,7 @@ final class Compiler
     private static function shapeBody(?TypeExpr $type): ?array
     {
         return match ($type?->form) {
-            'shape' => [$type->fields ?? [], $type->extras ?? 'open'],
+            'shape' => [$type->fields ?? [], $type->extras ?? TypeExpr::openExtras()],
             'doc' => self::shapeBody($type->elem),
             default => null,
         };
@@ -1035,9 +1032,7 @@ final class Compiler
                         static fn (Field $f): Field => new Field($f->name, $f->required, self::resolved($f->type, $known, $path), $f->default, $f->description),
                         $type->fields ?? [],
                     ),
-                    'extras' => is_array($type->extras)
-                        ? [self::resolved($type->extras[0], $known, $path), self::resolved($type->extras[1], $known, $path)]
-                        : $type->extras,
+                    'extras' => TypeExpr::mapExtras($type->extras, static fn (TypeExpr $t): TypeExpr => self::resolved($t, $known, $path)),
                 ]);
             case 'case':
                 return $type->with([
@@ -1472,7 +1467,7 @@ final class Compiler
             $fields[] = $field;
         }
         self::casesNameFields($entry->pairs(), $fields);
-        return new Compiled(fields: $fields, version: $entry->version ?? 1, extras: self::ownExtras($entry, $aliases) ?? 'open');
+        return new Compiled(fields: $fields, version: $entry->version ?? 1, extras: self::ownExtras($entry, $aliases) ?? TypeExpr::openExtras());
     }
 
     /**
@@ -1704,7 +1699,7 @@ final class Compiler
                 $fields[] = $field;
             }
             self::casesNameFields($value->pairs(), $fields);
-            return TypeExpr::shape(null, $fields, self::ownExtras($value, $aliases) ?? 'open');
+            return TypeExpr::shape(null, $fields, self::ownExtras($value, $aliases));
         }
 
         if ($value instanceof DXNTuple) {

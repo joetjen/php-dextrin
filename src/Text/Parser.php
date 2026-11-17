@@ -499,9 +499,6 @@ final class Parser
             // Entries keyed by a name are the struct's fields; any other
             // map key (DXN.md §1.6) is an extra field's (§4.7).
             [$entries, $drops, $rests] = $this->parseEntries(true, true);
-            if (count($rests) > 1) {
-                throw new ParseError('a body types its extras (* K => V) once at most', $start);
-            }
             if (count(array_keys($drops, '*', true)) > 1) {
                 throw new ParseError('a body is closed (- *) once at most', $start);
             }
@@ -511,7 +508,6 @@ final class Parser
             if ($rests !== [] && !self::isBuildable($name)) {
                 throw new ParseError("only a %schema or a %shape types its extras (* K => V); %{$name} does not", $start);
             }
-            $rest = $rests[0] ?? null;
             MapKey::checkPairs($entries);
             $pairs = [];
             $extra = [];
@@ -524,8 +520,8 @@ final class Parser
                 }
             }
             $struct = DXNStruct::keyed($name, $pairs, $version, $extra);
-            if ($bases !== [] || $drops !== [] || $rest !== null) {
-                return $struct->withBases($bases, $drops, $rest);
+            if ($bases !== [] || $drops !== [] || $rests !== []) {
+                return $struct->withBases($bases, $drops, $rests);
             }
             return $this->materializeStruct($name, $struct, $start);
         }

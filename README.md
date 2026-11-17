@@ -230,7 +230,7 @@ In PHP, a datetime and a local date-time range only from 1677 to 2262
 
 JSON Schema's `additionalProperties: false`, Ion Schema's `closed` and
 CDDL's maps refuse a field the schema does not list. DXNS can too --
-`- *` in a body closes it, and `* K => V` types every extra instead
+`- *` in a body closes it, and `* K => V` types the extras K takes
 (DXNS.md §4c) -- but a type is open unless it says so, for two reasons:
 
 - **Closing is mostly the reader's choice, not the type's.** A config loader
@@ -456,7 +456,14 @@ vendor/bin/dextrin encode data.dxn --out data.dxnb
 vendor/bin/dextrin format data.dxn --mode pretty|condense [--in-place]
 vendor/bin/dextrin validate data.dxn [--format text|binary] [--schema s.dxns --as Name]
 vendor/bin/dextrin compat old-schemas/ schemas/   # changed schemas need new versions
+vendor/bin/dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
+vendor/bin/dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
 ```
+
+`from-json-schema` converts JSON Schema -- drafts 04, 06, 07, 2019-09
+and 2020-12, and MongoDB's `$jsonSchema` -- to DXNS; the library call is
+`JOetjen\Dextrin\Convert\JsonSchema::toDxns()`. What it can't say
+exactly is printed as `inexact: PATH: why`.
 
 ## Documentation
 

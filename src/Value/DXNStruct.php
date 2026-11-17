@@ -30,8 +30,8 @@ namespace JOetjen\Dextrin\Value;
  * `[kind, name, version]` in the order written -- kind `'extends'` or
  * `'includes'`, version `null` when none is named -- and `drops` the
  * body's `- field` names, `'*'` for `- *` (a closed body). `rest` is the
- * body's `* K => V`, `[K, V]`, the type of its extras, or `null`. Every
- * other struct has none.
+ * body's `* K => V` entries, `[K, V]` each in the order written: what its
+ * extras must be (DXNS.md §4c). Every other struct has none.
  *
  * @phpstan-type Pair array{0: string, 1: mixed}
  * @phpstan-type Base array{0: 'extends'|'includes', 1: string, 2: ?int}
@@ -53,8 +53,8 @@ final class DXNStruct implements DXNValueInterface
     public readonly array $bases;
     /** @var list<string> */
     public readonly array $drops;
-    /** @var array{0: mixed, 1: mixed}|null */
-    public readonly ?array $rest;
+    /** @var list<array{0: mixed, 1: mixed}> */
+    public readonly array $rest;
 
     /**
      * @param list<Pair> $pairs
@@ -62,7 +62,7 @@ final class DXNStruct implements DXNValueInterface
      * @param list<array{0: mixed, 1: mixed}> $extra
      * @param list<Base> $bases
      * @param list<string> $drops
-     * @param array{0: mixed, 1: mixed}|null $rest
+     * @param list<array{0: mixed, 1: mixed}> $rest
      */
     private function __construct(
         string $name,
@@ -73,7 +73,7 @@ final class DXNStruct implements DXNValueInterface
         array $extra,
         array $bases = [],
         array $drops = [],
-        ?array $rest = null,
+        array $rest = [],
     ) {
         $this->name = $name;
         $this->kind = $kind;
@@ -167,9 +167,9 @@ final class DXNStruct implements DXNValueInterface
      *
      * @param list<Base> $bases
      * @param list<string> $drops
-     * @param array{0: mixed, 1: mixed}|null $rest
+     * @param list<array{0: mixed, 1: mixed}> $rest
      */
-    public function withBases(array $bases, array $drops = [], ?array $rest = null): self
+    public function withBases(array $bases, array $drops = [], array $rest = []): self
     {
         return new self($this->name, $this->kind, $this->pairs, $this->values, $this->version, $this->extra, $bases, $drops, $rest);
     }
@@ -191,7 +191,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function hasBodyClauses(): bool
     {
-        return $this->bases !== [] || $this->drops !== [] || $this->rest !== null;
+        return $this->bases !== [] || $this->drops !== [] || $this->rest !== [];
     }
 
     /**
@@ -314,9 +314,7 @@ final class DXNStruct implements DXNValueInterface
             || $this->version !== $other->version
             || $this->bases !== $other->bases
             || $this->drops !== $other->drops
-            || ($this->rest === null) !== ($other->rest === null)
-            || ($this->rest !== null && $other->rest !== null
-                && (!Equality::dxnEquals($this->rest[0], $other->rest[0]) || !Equality::dxnEquals($this->rest[1], $other->rest[1])))
+            || !self::sameRest($this->rest, $other->rest)
             || count($this->extra) !== count($other->extra)
         ) {
             return false;
@@ -353,6 +351,25 @@ final class DXNStruct implements DXNValueInterface
         }
         foreach ($ownByKey as $key => $value) {
             if (!array_key_exists($key, $otherByKey) || !Equality::dxnEquals($value, $otherByKey[$key])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether two bodies' `* K => V` entries are the same, in order.
+     *
+     * @param list<array{0: mixed, 1: mixed}> $a
+     * @param list<array{0: mixed, 1: mixed}> $b
+     */
+    private static function sameRest(array $a, array $b): bool
+    {
+        if (count($a) !== count($b)) {
+            return false;
+        }
+        foreach ($a as $i => [$key, $value]) {
+            if (!Equality::dxnEquals($key, $b[$i][0]) || !Equality::dxnEquals($value, $b[$i][1])) {
                 return false;
             }
         }

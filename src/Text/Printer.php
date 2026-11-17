@@ -287,8 +287,8 @@ final class Printer
             // `* K => V`, the type of its extras, always with the arrow
             // (§4c).
             $parts = $struct->dropEntries();
-            if ($struct->rest !== null) {
-                $parts[] = '* ' . self::print($struct->rest[0], $registry) . ' => ' . self::print($struct->rest[1], $registry);
+            foreach ($struct->rest as [$key, $value]) {
+                $parts[] = '* ' . self::print($key, $registry) . ' => ' . self::print($value, $registry);
             }
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
