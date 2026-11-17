@@ -38,11 +38,26 @@ final class Dextrin
      * for any name it knows -- a `struct`/tag with no matching registry
      * entry falls back to an opaque `DXNStruct`/`DXNCustomTag`, never a
      * hard failure.
+     *
+     * `$strict` refuses the extra fields of a schema-backed struct whose
+     * schema does not type them (DXNS.md §7). `$deprecations` says how
+     * often data going through something deprecated warns -- `'once'`
+     * per registry and deprecated thing (the default), `'every'`,
+     * `'off'`, or `'error'`, which refuses it as `schema/deprecated`
+     * (DXNS.md §1b) -- and `$onDeprecated` receives each warning in place
+     * of `trigger_error($text, E_USER_DEPRECATED)`; each is passed on to
+     * the registry ({@see Registry::putDeprecations()},
+     * {@see Registry::putOnDeprecated()}).
      */
-    public static function decode(string $text, ?Registry $registry = null, ?bool $strict = null): mixed
-    {
+    public static function decode(
+        string $text,
+        ?Registry $registry = null,
+        ?bool $strict = null,
+        ?string $deprecations = null,
+        ?callable $onDeprecated = null,
+    ): mixed {
         try {
-            return Parser::parse($text, self::strictly($registry, $strict));
+            return Parser::parse($text, self::withOptions($registry, $strict, $deprecations, $onDeprecated));
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'parse');
         }
@@ -74,6 +89,10 @@ final class Dextrin
      * schema or not, so a `float` for a `:rational` field is refused
      * rather than turned into a `DXNRational`. Use the `DXN*` classes to
      * say which type a value is.
+     *
+     * `$deprecations` and `$onDeprecated` are as {@see self::decode()}
+     * takes them: a checked struct, type, variant or enum value that is
+     * deprecated warns on the way out as on the way in.
      */
     public static function encode(
         mixed $value,
@@ -83,8 +102,11 @@ final class Dextrin
         bool $validate = true,
         ?string $schema = null,
         int $width = 80,
+        ?string $deprecations = null,
+        ?callable $onDeprecated = null,
     ): string {
         try {
+            $registry = self::withOptions($registry, null, $deprecations, $onDeprecated);
             $validated = self::maybeValidateEncode($value, $registry, $validate, $schema);
             return $pretty
                 ? Formatter::pretty($validated, $indent, $registry, $width)
@@ -98,12 +120,19 @@ final class Dextrin
      * Decodes a `.dxnb` binary string into a value -- the same value
      * shapes as {@see self::decode()}. Same `$registry` effect. Throws
      * {@see DXNError} on malformed input, including a missing/invalid
-     * envelope (`DX` + version byte) or a schema violation.
+     * envelope (`DX` + version byte) or a schema violation. `$strict`,
+     * `$deprecations` and `$onDeprecated` as {@see self::decode()} takes
+     * them.
      */
-    public static function decodeBinary(string $bytes, ?Registry $registry = null, ?bool $strict = null): mixed
-    {
+    public static function decodeBinary(
+        string $bytes,
+        ?Registry $registry = null,
+        ?bool $strict = null,
+        ?string $deprecations = null,
+        ?callable $onDeprecated = null,
+    ): mixed {
         try {
-            return Decoder::decode($bytes, self::strictly($registry, $strict));
+            return Decoder::decode($bytes, self::withOptions($registry, $strict, $deprecations, $onDeprecated));
         } catch (\Throwable $err) {
             throw DXNError::wrap($err, 'binary');
         }
@@ -112,7 +141,8 @@ final class Dextrin
     /**
      * Encodes a value to `.dxnb` binary, returning a raw binary
      * string. Same `$registry`/`$validate`/`$schema`
-     * parameters as {@see self::encode()}. Throws {@see DXNError} for
+     * parameters as {@see self::encode()}, and its `$deprecations` and
+     * `$onDeprecated`. Throws {@see DXNError} for
      * a value with no DXN representation, or that fails schema
      * validation.
      */
@@ -121,8 +151,11 @@ final class Dextrin
         ?Registry $registry = null,
         bool $validate = true,
         ?string $schema = null,
+        ?string $deprecations = null,
+        ?callable $onDeprecated = null,
     ): string {
         try {
+            $registry = self::withOptions($registry, null, $deprecations, $onDeprecated);
             $validated = self::maybeValidateEncode($value, $registry, $validate, $schema);
             return Encoder::encode($validated, $registry);
         } catch (\Throwable $err) {
@@ -157,10 +190,21 @@ final class Dextrin
 
     /**
      * `$registry` marked strict when `$strict` is given -- a strict decode
-     * refuses extra fields on schema-backed structs (DXNS.md §7).
+     * refuses extra fields on schema-backed structs (DXNS.md §7) -- and
+     * reporting deprecations as `$deprecations` and `$onDeprecated` say,
+     * when they are given (DXNS.md §1b).
      */
-    private static function strictly(?Registry $registry, ?bool $strict): ?Registry
+    private static function withOptions(?Registry $registry, ?bool $strict, ?string $deprecations, ?callable $onDeprecated): ?Registry
     {
-        return $strict === null ? $registry : ($registry ?? new Registry())->putStrict($strict);
+        if ($strict !== null) {
+            $registry = ($registry ?? new Registry())->putStrict($strict);
+        }
+        if ($deprecations !== null) {
+            $registry = ($registry ?? new Registry())->putDeprecations($deprecations);
+        }
+        if ($onDeprecated !== null) {
+            $registry = ($registry ?? new Registry())->putOnDeprecated($onDeprecated);
+        }
+        return $registry;
     }
 }

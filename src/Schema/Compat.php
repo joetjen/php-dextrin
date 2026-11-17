@@ -21,10 +21,17 @@ use JOetjen\Dextrin\Registry;
  *    beside the latest, with the fields the latest added, removed and
  *    changed since -- a checklist for the materializer's branches.
  *
- * There are no compatibility modes and no append-only rule. A field's
- * description is documentation, not content.
+ * Named types with versions (`%type(N)`, DXNS.md §5c) follow the same two
+ * rules, reported under `type` instead of `schema`; a named type has no
+ * materializer, so no upgrade checklist.
  *
- * @phpstan-type Problem array{schema: string, version: int, problem: 'changed-without-new-version'}|array{schema: string, problem: 'version-went-down', from: int, to: int}
+ * There are no compatibility modes and no append-only rule. A field's
+ * description is documentation, not content, and so is every annotation
+ * (`{:doc}`, DXNS.md §1b): documenting or deprecating a version that
+ * shipped is no change. A schema's extras (`- *`, `* K => V`, §4c) are
+ * content.
+ *
+ * @phpstan-type Problem array{schema: string, version: int, problem: 'changed-without-new-version'}|array{schema: string, problem: 'version-went-down', from: int, to: int}|array{type: string, version: int, problem: 'changed-without-new-version'}|array{type: string, problem: 'version-went-down', from: int, to: int}
  * @phpstan-type Upgrade array{schema: string, from: int, to: int, added: list<string>, removed: list<string>, changed: list<string>}
  */
 final class Compat
@@ -42,7 +49,10 @@ final class Compat
     public static function check(Registry $old, Registry $new): array
     {
         return [
-            'problems' => self::problems($old->structSchemas(), $new->structSchemas()),
+            'problems' => [
+                ...self::problems($old->structSchemas(), $new->structSchemas()),
+                ...self::typeProblems($old->typeVersions(), $new->typeVersions()),
+            ],
             'upgrades' => self::upgrades($new->structSchemas()),
         ];
     }
@@ -69,6 +79,36 @@ final class Compat
             $to = max(array_keys($versions));
             if ($to < $from) {
                 $found[] = ['schema' => $name, 'problem' => 'version-went-down', 'from' => $from, 'to' => $to];
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * The same two rules for named types with versions (Way B, DXNS.md
+     * §5c), each problem under `type`.
+     *
+     * @param array<string, non-empty-array<int, TypeExpr>> $before
+     * @param array<string, non-empty-array<int, TypeExpr>> $now
+     * @return list<Problem>
+     */
+    private static function typeProblems(array $before, array $now): array
+    {
+        $found = [];
+        foreach (self::sorted($now) as $name => $versions) {
+            if (!isset($before[$name])) {
+                continue;
+            }
+            foreach (self::sorted($versions) as $version => $type) {
+                $was = $before[$name][$version] ?? null;
+                if ($was !== null && serialize(self::meaning($was)) !== serialize(self::meaning($type))) {
+                    $found[] = ['type' => $name, 'version' => $version, 'problem' => 'changed-without-new-version'];
+                }
+            }
+            $from = max(array_keys($before[$name]));
+            $to = max(array_keys($versions));
+            if ($to < $from) {
+                $found[] = ['type' => $name, 'problem' => 'version-went-down', 'from' => $from, 'to' => $to];
             }
         }
         return $found;
@@ -132,13 +172,35 @@ final class Compat
         return $map;
     }
 
-    /** What a schema's content is, for this check: its fields in order. */
+    /**
+     * What a schema's content is, for this check: its fields in order, and
+     * what it takes beyond them (DXNS.md §4c).
+     */
     private static function shape(Compiled $compiled): string
     {
+        $extras = is_array($compiled->extras) ? array_map(self::meaning(...), $compiled->extras) : $compiled->extras;
         return implode("\0", array_map(
             static fn (Field $field) => $field->name . "\0" . self::fieldShape($field),
             $compiled->fields,
-        ));
+        )) . "\0\0" . serialize($extras);
+    }
+
+    /**
+     * What a type takes, without its annotations: they check nothing, so
+     * documenting or deprecating a version that shipped (G10) is no
+     * change.
+     */
+    private static function meaning(TypeExpr $type): TypeExpr
+    {
+        if ($type->form === 'doc') {
+            return self::meaning($type->elem ?? TypeExpr::any());
+        }
+        $meant = $type->mapTypes(self::meaning(...));
+        // A field's description is documentation too.
+        return $meant->fields === null ? $meant : $meant->with(['fields' => array_map(
+            static fn (Field $f): Field => new Field($f->name, $f->required, $f->type, $f->default),
+            $meant->fields,
+        )]);
     }
 
     /**
@@ -149,6 +211,6 @@ final class Compat
      */
     private static function fieldShape(Field $field): string
     {
-        return serialize([$field->required, $field->type, $field->default]);
+        return serialize([$field->required, self::meaning($field->type), $field->default]);
     }
 }

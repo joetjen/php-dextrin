@@ -123,7 +123,7 @@ final class Decoder
         $value = $decoder->decodeItem();
         // The true top of decoding -- see Text\Parser::parse()'s
         // identical stripping and its own doc for why.
-        return [Validated::strip($value), $decoder->pos];
+        return [Validated::unwrap($value), $decoder->pos];
     }
 
     private function readByte(): int

@@ -320,10 +320,13 @@ final class Tree
             $value instanceof DXNSymbol => [$value->name],
             $value instanceof DXNTuple, $value instanceof DXNList => $all($value->items),
             // A schema or shape built from others needs its bases too
-            // (DXNS.md §4b), named in its head rather than in its fields.
+            // (DXNS.md §4b), named in its head rather than in its fields,
+            // and a body's `* K => V` names types as well (§4c). A
+            // `%type(N)[T]` holds its type as an item (§5c).
             $value instanceof DXNStruct => array_merge(
                 array_map(static fn (array $b): string => $b[1], $value->bases),
-                $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
+                $value->rest === null ? [] : $all($value->rest),
+                $all($value->isKeyed() ? array_map(static fn (array $p): mixed => $p[1], $value->pairs()) : $value->values()),
             ),
             $value instanceof DXNMap => $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
             is_array($value) => $all($value),
@@ -414,6 +417,10 @@ final class Tree
             foreach ($compiled->fields as $field) {
                 array_push($out, ...self::typeReferences($field->type));
             }
+            // What it takes beyond its fields (`* K => V`, DXNS.md §4c).
+            if (is_array($compiled->extras)) {
+                array_push($out, ...self::typeReferences($compiled->extras[0]), ...self::typeReferences($compiled->extras[1]));
+            }
         }
         return $out;
     }
@@ -427,7 +434,9 @@ final class Tree
         $all = static fn (?array $ts): array => array_merge([], ...array_map(self::typeReferences(...), $ts ?? []));
         return match ($type->form) {
             'reference' => [$type->name ?? ''],
-            'shape' => $all(array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? [])),
+            // A shape's fields, and the types of its extras (`* K => V`,
+            // DXNS.md §4c).
+            'shape' => $all([...array_map(static fn (Field $f): TypeExpr => $f->type, $type->fields ?? []), ...(is_array($type->extras) ? $type->extras : [])]),
             'case' => $all([$type->otherwise, ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? [])]),
             'generic' => self::typeReferences($type->base),
             // A refine's base, and the types its `contains`, `content`,

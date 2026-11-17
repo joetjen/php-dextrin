@@ -29,7 +29,9 @@ namespace JOetjen\Dextrin\Value;
  * (DXNS.md §4b): `bases` the head's `extends` and `includes` names, as
  * `[kind, name, version]` in the order written -- kind `'extends'` or
  * `'includes'`, version `null` when none is named -- and `drops` the
- * body's `- field` names. Every other struct has none.
+ * body's `- field` names, `'*'` for `- *` (a closed body). `rest` is the
+ * body's `* K => V`, `[K, V]`, the type of its extras, or `null`. Every
+ * other struct has none.
  *
  * @phpstan-type Pair array{0: string, 1: mixed}
  * @phpstan-type Base array{0: 'extends'|'includes', 1: string, 2: ?int}
@@ -51,6 +53,8 @@ final class DXNStruct implements DXNValueInterface
     public readonly array $bases;
     /** @var list<string> */
     public readonly array $drops;
+    /** @var array{0: mixed, 1: mixed}|null */
+    public readonly ?array $rest;
 
     /**
      * @param list<Pair> $pairs
@@ -58,6 +62,7 @@ final class DXNStruct implements DXNValueInterface
      * @param list<array{0: mixed, 1: mixed}> $extra
      * @param list<Base> $bases
      * @param list<string> $drops
+     * @param array{0: mixed, 1: mixed}|null $rest
      */
     private function __construct(
         string $name,
@@ -68,6 +73,7 @@ final class DXNStruct implements DXNValueInterface
         array $extra,
         array $bases = [],
         array $drops = [],
+        ?array $rest = null,
     ) {
         $this->name = $name;
         $this->kind = $kind;
@@ -77,6 +83,7 @@ final class DXNStruct implements DXNValueInterface
         $this->extra = $extra;
         $this->bases = $bases;
         $this->drops = $drops;
+        $this->rest = $rest;
     }
 
     /**
@@ -149,26 +156,59 @@ final class DXNStruct implements DXNValueInterface
     /** This struct carrying `$version` instead, and otherwise unchanged. */
     public function withVersion(?int $version): self
     {
-        return new self($this->name, $this->kind, $this->pairs, $this->values, $version, $this->extra, $this->bases, $this->drops);
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $version, $this->extra, $this->bases, $this->drops, $this->rest);
     }
 
     /**
      * This struct built from `$bases`, leaving out `$drops` (DXNS.md §4b),
-     * and otherwise unchanged -- what the parser makes of a `%schema` or
-     * `%shape` head's clauses and its body's `- field`s.
+     * its extras typed by `$rest` (`* K => V`, §4c), and otherwise
+     * unchanged -- what the parser makes of a `%schema` or `%shape` head's
+     * clauses and its body's `- field`s, `- *` and `* K => V`.
      *
      * @param list<Base> $bases
      * @param list<string> $drops
+     * @param array{0: mixed, 1: mixed}|null $rest
      */
-    public function withBases(array $bases, array $drops = []): self
+    public function withBases(array $bases, array $drops = [], ?array $rest = null): self
     {
-        return new self($this->name, $this->kind, $this->pairs, $this->values, $this->version, $this->extra, $bases, $drops);
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $this->version, $this->extra, $bases, $drops, $rest);
     }
 
-    /** Whether this is a `%schema` or `%shape` built from others (DXNS.md §4b). */
+    /**
+     * Whether this is a `%schema` or `%shape` built from others (DXNS.md
+     * §4b): it names a base, or leaves an inherited field out. `- *` and
+     * `* K => V` (§4c) do not make it built.
+     */
     public function isBuilt(): bool
     {
-        return $this->bases !== [] || $this->drops !== [];
+        return $this->bases !== [] || $this->fieldDrops() !== [];
+    }
+
+    /**
+     * Whether this struct carries anything only a `%schema` or `%shape`
+     * body written as text can say: bases, `- field`s, `- *` or
+     * `* K => V` (DXNS.md §4b, §4c). `.dxnb` has no form for any of them.
+     */
+    public function hasBodyClauses(): bool
+    {
+        return $this->bases !== [] || $this->drops !== [] || $this->rest !== null;
+    }
+
+    /**
+     * The `- field` names of the body, without the `'*'` of a closed body
+     * (`- *`, DXNS.md §4c).
+     *
+     * @return list<string>
+     */
+    public function fieldDrops(): array
+    {
+        return array_values(array_filter($this->drops, static fn (string $drop): bool => $drop !== '*'));
+    }
+
+    /** Whether the body is closed, `- *` (DXNS.md §4c): it takes no extra at all. */
+    public function isClosed(): bool
+    {
+        return in_array('*', $this->drops, true);
     }
 
     /**
@@ -218,7 +258,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withPairs(array $pairs): self
     {
-        return new self($this->name, 'keyed', array_values($pairs), [], $this->version, $this->extra, $this->bases, $this->drops);
+        return new self($this->name, 'keyed', array_values($pairs), [], $this->version, $this->extra, $this->bases, $this->drops, $this->rest);
     }
 
     /**
@@ -229,7 +269,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withValues(array $values): self
     {
-        return new self($this->name, 'positional', [], array_values($values), $this->version, $this->extra, $this->bases, $this->drops);
+        return new self($this->name, 'positional', [], array_values($values), $this->version, $this->extra, $this->bases, $this->drops, $this->rest);
     }
 
     public function isKeyed(): bool
@@ -274,6 +314,9 @@ final class DXNStruct implements DXNValueInterface
             || $this->version !== $other->version
             || $this->bases !== $other->bases
             || $this->drops !== $other->drops
+            || ($this->rest === null) !== ($other->rest === null)
+            || ($this->rest !== null && $other->rest !== null
+                && (!Equality::dxnEquals($this->rest[0], $other->rest[0]) || !Equality::dxnEquals($this->rest[1], $other->rest[1])))
             || count($this->extra) !== count($other->extra)
         ) {
             return false;

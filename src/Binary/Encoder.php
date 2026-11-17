@@ -207,7 +207,7 @@ final class Encoder
      */
     private static function encodeStruct(DXNStruct $struct, ?Registry $registry): string
     {
-        if ($struct->isBuilt()) {
+        if ($struct->hasBodyClauses()) {
             throw \JOetjen\Dextrin\UnsupportedValue::builtStruct($struct->name);
         }
         $written = $registry?->asWritten($struct) ?? $struct;
@@ -225,7 +225,8 @@ final class Encoder
 
     /**
      * A struct's field values in the order the wire wants them. A keyed
-     * struct is put in its schema's field order, because a position is
+     * struct is put in the field order of the schema version it is written
+     * at, because a position is
      * what the wire has; with no schema there is no order to consult, and
      * the pairs' own order is all there is.
      *
@@ -236,7 +237,9 @@ final class Encoder
         if ($struct->isPositional()) {
             return $struct->values();
         }
-        $found = $registry?->fetchStructSchema($struct->name);
+        // The schema of the version it is written at (`Registry::asWritten()`,
+        // DXNS.md §8): positions are that version's.
+        $found = $registry?->fetchStructSchema($struct->name, $registry->asWritten($struct)->version);
         if ($found === null) {
             return array_map(static fn (array $p): mixed => $p[1], $struct->pairs());
         }

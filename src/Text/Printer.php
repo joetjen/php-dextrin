@@ -83,6 +83,8 @@ final class Printer
                 static fn (mixed $v): string => self::print($v, $registry),
                 $value->items,
             )) . ']',
+            // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+            $value instanceof DXNTuple && DXNTuple::pinned($value) !== null => DXNTuple::pinnedText(...DXNTuple::pinned($value)),
             $value instanceof DXNTuple => '{' . implode(' ', array_map(
                 static fn (mixed $v): string => self::print($v, $registry),
                 $value->items,
@@ -281,8 +283,13 @@ final class Printer
         );
         if ($struct->isKeyed()) {
             // A `%schema` or `%shape` built from others leaves its
-            // inherited fields out first: `- password` (DXNS.md §4b).
+            // inherited fields out first: `- password` (DXNS.md §4b); then
+            // `* K => V`, the type of its extras, always with the arrow
+            // (§4c).
             $parts = $struct->dropEntries();
+            if ($struct->rest !== null) {
+                $parts[] = '* ' . self::print($struct->rest[0], $registry) . ' => ' . self::print($struct->rest[1], $registry);
+            }
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }

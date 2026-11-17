@@ -90,6 +90,8 @@ final class Canonical
             $value instanceof DXNBytes => '@bytes ' . self::quoted(base64_encode($value->data)),
             $value instanceof DXNBits => '@bits {' . self::quoted(base64_encode($value->data)) . ' ' . $value->bitLength . '}',
             $value instanceof DXNList => '[' . self::items($value->items) . ']',
+            // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+            $value instanceof DXNTuple && DXNTuple::pinned($value) !== null => DXNTuple::pinnedText(...DXNTuple::pinned($value)),
             $value instanceof DXNTuple => '{' . self::items($value->items) . '}',
             $value instanceof DXNSet => '@{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',
             $value instanceof DXNSortedSet => '@sorted-set @{' . implode(' ', self::sorted(array_map(self::text(...), $value->items))) . '}',
@@ -189,7 +191,9 @@ final class Canonical
         $head = $value->opening($value->version);
         if ($value->isKeyed()) {
             $written = array_map(static fn (array $pair): string => $entry($pair[0], $pair[1]), [...$value->pairs(), ...$value->extra]);
-            return $head . '{' . implode(' ', [...$value->dropEntries(), ...$written]) . '}';
+            // `* K => V` (§4c), always with the arrow.
+            $rest = $value->rest === null ? [] : ['* ' . self::text($value->rest[0]) . ' => ' . self::text($value->rest[1])];
+            return $head . '{' . implode(' ', [...$value->dropEntries(), ...$rest, ...$written]) . '}';
         }
         $byKey = [];
         foreach ($value->extra as [$key, $field]) {

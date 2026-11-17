@@ -65,6 +65,24 @@ final class Validator
     }
 
     /**
+     * `$extra`, the fields a struct of `$compiled` carries beyond its
+     * declared ones, checked against its extras (G1 of dextrin's
+     * design/typespec.md, DXNS.md §4c): any when open, none when closed
+     * (`- *`, `schema/undeclared-field`), each key and value matching
+     * `* K => V` (`schema/type-mismatch`).
+     *
+     * @param list<array{0: mixed, 1: mixed}> $extra
+     * @throws SchemaValidationError when they are refused
+     */
+    public static function extras(Compiled $compiled, array $extra, Registry $registry): void
+    {
+        $refusal = TypeExpr::extrasRefusal($compiled->extras, $extra, new Context($registry));
+        if ($refusal !== null) {
+            throw new SchemaValidationError($refusal[0], $refusal[1]);
+        }
+    }
+
+    /**
      * The schemas a struct of `$compiled` passes as besides its own
      * (DXNS.md §4b): each one `$compiled` extends, at the version it was
      * built with, that `$struct`'s fields are a valid one of -- and in
@@ -201,8 +219,14 @@ final class Validator
             // about to be handed to *this* struct's own materializer
             // (decode) or stored as a checked field value (encode) --
             // neither should ever see an internal `Validated` wrapper
-            // once it's done its one job.
-            return Validated::strip($conformed);
+            // once it's done its one job. A struct inside that no pinned
+            // field took, and that could not be upgraded, is refused now
+            // (DXNS.md §5c).
+            return Validated::unwrap($conformed);
+        }
+        // A struct that could not be upgraded, refused for that reason.
+        if ($value instanceof Validated && $value->refused !== null) {
+            throw $value->refused;
         }
 
 
@@ -266,10 +290,13 @@ final class Validator
                 }
             }
         }
+        // Its extras are what its schema takes beyond its fields (DXNS.md
+        // §4c).
+        self::extras($compiled, $value instanceof DXNStruct ? $value->extra : [], $registry);
         $given = self::toNameMapForEncode($compiled, $value);
         $wrappedGiven = self::wrapGiven($given, $registry);
         $resolved = self::resolveFields($compiled, $wrappedGiven, $registry);
-        return new Validated($compiled->name ?? '', self::rebuildChecked($value, $compiled, $resolved));
+        return new Validated($compiled->name ?? '', self::rebuildChecked($value, $compiled, $resolved), version: $compiled->version);
     }
 
     /**
@@ -386,11 +413,19 @@ final class Validator
             [$name, $compiled] = $found;
             try {
                 $checked = self::checkCompiled($compiled, $value, $registry);
-                return new Validated($checked->name, $checked->value, self::encodesAs($compiled, $value, $registry));
+                // Deprecation is the struct's own version's, as a decode
+                // reports it (DXNS.md §1b): the bases it passes as are
+                // checked, not used.
+                Deprecations::structUsed($registry, $name, $compiled->version);
+                return new Validated($checked->name, $checked->value, self::encodesAs($compiled, $value, $registry), $compiled->version);
             } catch (\Throwable $err) {
                 throw new SchemaValidationError(
                     "struct \"{$name}\" violates its schema: " . $err->getMessage(),
-                    $err instanceof SchemaValidationError ? $err->category() : null,
+                    match (true) {
+                        $err instanceof SchemaValidationError => $err->category(),
+                        $err instanceof \JOetjen\Dextrin\DXNError => $err->category,
+                        default => null,
+                    },
                     $err,
                 );
             }
@@ -431,8 +466,11 @@ final class Validator
     /** @return array{0: string, 1: Compiled}|null */
     private static function schemaNameFor(mixed $value, Registry $registry): ?array
     {
+        // The version a struct is written at ({@see Registry::asWritten()}):
+        // its own when loaded, otherwise the latest.
         if ($value instanceof DXNStruct) {
-            $found = $registry->fetchStructSchema($value->name);
+            $written = $registry->asWritten($value);
+            $found = $registry->fetchStructSchema($value->name, $written->version);
             return $found !== null ? [$value->name, $found->compiled] : null;
         }
         if (is_object($value) && !$value instanceof \Closure && !$value instanceof DXNValueInterface) {

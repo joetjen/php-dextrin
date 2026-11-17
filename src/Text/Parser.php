@@ -103,7 +103,7 @@ final class Parser
     {
         $tokens = Lexer::tokenize($text);
         $parser = new self($tokens, $registry, true);
-        $value = Validated::strip($parser->parseDocument());
+        $value = Validated::unwrap($parser->parseDocument());
         /** @var list<SyntaxNode> $recording */
         $recording = $parser->recording;
         return [$value, $recording[0], $tokens];
@@ -173,8 +173,10 @@ final class Parser
         // decoded anywhere in the document (including the document's
         // own top-level value) carries a `Validated` wrapper until
         // whatever consumes it strips it; nothing else does that for
-        // the top-level result, so `parse()` itself must.
-        return Validated::strip($parser->parseDocument());
+        // the top-level result, so `parse()` itself must. A struct no
+        // pinned field took, and that no materializer could upgrade, is
+        // refused here (DXNS.md §5c).
+        return Validated::unwrap($parser->parseDocument());
     }
 
     private function peek(): Token
@@ -302,7 +304,7 @@ final class Parser
             'STRING' => Escapes::decodeString($this->advance()->value),
             'CHAR' => $this->parseCharToken(),
             'KEYWORD' => $this->parseKeywordToken(),
-            'IDENTIFIER' => new DXNSymbol($this->advance()->value),
+            'IDENTIFIER' => $this->parseSymbol(),
             'LBRACKET' => $this->parseList(),
             'LBRACE' => $this->parseTuple(),
             'PERCENT' => $this->parsePercent(),
@@ -311,7 +313,19 @@ final class Parser
         };
     }
 
-    private function advance(): Token
+    /**
+     * A symbol, or `Name(N)`: a name pinned to a version (DXNS.md §5c),
+     * read as the tuple `{:at Name N}`. "(" begins nothing else in a
+     * value, as in `%Name(3)`.
+     */
+    private function parseSymbol(): DXNSymbol|DXNTuple
+    {
+        $name = $this->advance()->value;
+        $version = $this->parseStructVersion();
+        return $version === null ? new DXNSymbol($name) : DXNTuple::pin($name, $version);
+    }
+
+        private function advance(): Token
     {
         return $this->tokens[$this->pos++];
     }
@@ -464,8 +478,10 @@ final class Parser
      *
      * A `%schema` or `%shape` may name what it is built from (DXNS.md
      * §4b) -- `extends User(3) Staff includes Audit` in its head, `- field`
-     * in its body -- and then stays as it is written, a {@see DXNStruct}
-     * carrying its bases and drops, for the schema compiler to read.
+     * in its body -- and what it takes beyond its fields (§4c), `- *` or
+     * `* K => V` in its body; it then stays as it is written, a
+     * {@see DXNStruct} carrying its bases, drops and rest, for the schema
+     * compiler to read.
      */
     private function parseStructBody(int $start): mixed
     {
@@ -482,10 +498,20 @@ final class Parser
         if ($this->at('LBRACE')) {
             // Entries keyed by a name are the struct's fields; any other
             // map key (DXN.md §1.6) is an extra field's (§4.7).
-            [$entries, $drops] = $this->parseEntries(true, true);
+            [$entries, $drops, $rests] = $this->parseEntries(true, true);
+            if (count($rests) > 1) {
+                throw new ParseError('a body types its extras (* K => V) once at most', $start);
+            }
+            if (count(array_keys($drops, '*', true)) > 1) {
+                throw new ParseError('a body is closed (- *) once at most', $start);
+            }
             if ($drops !== [] && !self::isBuildable($name)) {
                 throw new ParseError("only a %schema or a %shape drops a field (- name); %{$name} does not", $start);
             }
+            if ($rests !== [] && !self::isBuildable($name)) {
+                throw new ParseError("only a %schema or a %shape types its extras (* K => V); %{$name} does not", $start);
+            }
+            $rest = $rests[0] ?? null;
             MapKey::checkPairs($entries);
             $pairs = [];
             $extra = [];
@@ -498,8 +524,8 @@ final class Parser
                 }
             }
             $struct = DXNStruct::keyed($name, $pairs, $version, $extra);
-            if ($bases !== [] || $drops !== []) {
-                return $struct->withBases($bases, $drops);
+            if ($bases !== [] || $drops !== [] || $rest !== null) {
+                return $struct->withBases($bases, $drops, $rest);
             }
             return $this->materializeStruct($name, $struct, $start);
         }
@@ -667,6 +693,13 @@ final class Parser
             return $struct;
         }
         [$value, $this->registry] = $read;
+        // A refusal that travels with the struct (DXNS.md §5c) is placed at
+        // its `%`, where it stands if no pinned field takes the struct.
+        if ($value instanceof Validated && $value->refused !== null && $value->refused->offset === null) {
+            $refused = $value->refused;
+            $placed = new DXNError($refused->getMessage(), $refused->stage, $start, $refused, $refused->category);
+            return new Validated($value->name, $value->value, $value->also, $value->version, $value->asRead, $placed);
+        }
         return $value;
     }
 
@@ -695,14 +728,17 @@ final class Parser
      * shape they actually need.
      *
      * A struct's body (`$withDrops`) may also hold `- field` entries
-     * (DXNS.md §4b), answered beside the pairs by name; whether its struct
-     * may carry them is the caller's to say.
+     * (DXNS.md §4b), answered beside the pairs by name, `- *` as the drop
+     * `'*'`, which no field name can be, and `* K => V` entries (§4c),
+     * answered as `[K, V]`; whether its struct may carry them is the
+     * caller's to say.
      *
-     * @return array{0: list<array{0: mixed, 1: mixed}>, 1: list<string>}
+     * @return array{0: list<array{0: mixed, 1: mixed}>, 1: list<string>, 2: list<array{0: mixed, 1: mixed}>}
      */
     private function parseEntries(bool $ownNode, bool $withDrops = false): array
     {
         $drops = [];
+        $rests = [];
         if ($ownNode) {
             $this->begin('keyed');
         }
@@ -713,8 +749,20 @@ final class Parser
             if ($withDrops && $this->at('MINUS')) {
                 $this->begin('drop');
                 $this->next('MINUS');
-                $drops[] = $this->nextName();
+                $drops[] = $this->at('STAR') ? (string) $this->next('STAR')->value : $this->nextName();
                 $this->mark('name');
+                $this->end();
+                continue;
+            }
+            if ($withDrops && $this->at('STAR')) {
+                // `* K => V`: the type every extra key and its value match.
+                $this->begin('rest');
+                $this->next('STAR');
+                $this->mark('open');
+                $key = $this->parseValue();
+                $this->next('ARROW');
+                $this->mark('arrow');
+                $rests[] = [$key, $this->parseValue()];
                 $this->end();
                 continue;
             }
@@ -737,7 +785,7 @@ final class Parser
         if ($ownNode) {
             $this->end();
         }
-        return [$pairs, $drops];
+        return [$pairs, $drops, $rests];
     }
 
     /**

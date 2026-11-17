@@ -323,7 +323,10 @@ final class Equality
         sort($parts);
         // What a `%schema` or `%shape` is built from (DXNS.md §4b) is part
         // of it; any other struct has none, and its key is unchanged.
-        $built = $struct->isBuilt() ? ':built:' . $struct->opening(null) . implode(' ', $struct->dropEntries()) : '';
+        $built = $struct->hasBodyClauses()
+            ? ':built:' . $struct->opening(null) . implode(' ', $struct->dropEntries())
+                . ($struct->rest === null ? '' : ':rest:' . self::canonicalKey($struct->rest[0]) . '=>' . self::canonicalKey($struct->rest[1]))
+            : '';
         return "struct:{$struct->name}:keyed:{" . implode(',', $parts) . '}' . $built;
     }
 

@@ -24,7 +24,10 @@ use JOetjen\Dextrin\Value\DXNStruct;
  * - **Older and loaded:** read with that version's own schema and handed
  *   to the materializer, which upgrades it. Without one it is refused,
  *   `schema/no-materializer`: reading old data as if it were the latest
- *   would be a guess.
+ *   would be a guess. A field pinned to that version (DXNS.md §5c) is the
+ *   exception: the refusal travels with the struct as that version reads
+ *   it ({@see Validated::$refused}), and stands unless such a field takes
+ *   it.
  * - **Older and not loaded:** refused, `schema/unknown-version`, even
  *   with a materializer, which would receive no field names.
  *
@@ -55,6 +58,23 @@ final class Reader
      */
     public static function read(Registry $registry, DXNStruct $struct): ?array
     {
+        $read = self::byVersion($registry, $struct);
+        if ($read !== null) {
+            // What it was written with, or its whole schema, may be
+            // deprecated (DXNS.md §1b).
+            Deprecations::structUsed($read[1], $struct->name, $struct->version);
+        }
+        return $read;
+    }
+
+    /**
+     * {@see self::read()}, but for the warnings: the schema version the
+     * struct is read with, chosen by the version it was written with.
+     *
+     * @return array{0: mixed, 1: Registry}|null
+     */
+    private static function byVersion(Registry $registry, DXNStruct $struct): ?array
+    {
         $found = $registry->fetchStructSchema($struct->name);
         if ($found === null) {
             return null;
@@ -79,14 +99,38 @@ final class Reader
             );
         }
         if ($current->fetchMaterializer($struct->name) === null) {
-            throw new DXNError(
-                "struct \"{$struct->name}\" was written with the older version {$version}, "
-                . 'and no materializer is registered to upgrade it',
-                stage: 'schema',
-                category: 'schema/no-materializer',
-            );
+            return [self::asReadOnly($current, $older->compiled, $struct), $current];
         }
         return self::materialized($current, $older->compiled, $latest, $struct);
+    }
+
+    /**
+     * An older version with no materializer to upgrade it: refused, unless
+     * a field pinned to that version takes it as read (DXNS.md §5c) -- so
+     * the refusal travels with the struct as that version reads it, and
+     * stands otherwise. A struct not even readable as written is refused
+     * at once, with the refusal it would have met first.
+     *
+     * @throws DXNError `schema/no-materializer`
+     */
+    private static function asReadOnly(Registry $registry, Compiled $older, DXNStruct $struct): Validated
+    {
+        $refused = new DXNError(
+            "struct \"{$struct->name}\" was written with the older version {$older->version}, "
+            . 'and no materializer is registered to upgrade it',
+            stage: 'schema',
+            category: 'schema/no-materializer',
+        );
+        try {
+            [$fields, $extra] = self::separated($older, $struct);
+            self::strictly($registry, $older, $fields, $extra);
+            Validator::extras($older, $extra, $registry);
+            $pairs = Validator::resolve($older, $fields, $registry);
+        } catch (\Throwable) {
+            throw $refused;
+        }
+        $asRead = DXNStruct::keyed($struct->name, $pairs, $older->version, $extra);
+        return new Validated($struct->name, null, version: $older->version, asRead: $asRead, refused: $refused);
     }
 
     /**
@@ -122,7 +166,36 @@ final class Reader
     private static function materialized(Registry $registry, Compiled $reading, Compiled $latest, DXNStruct $struct): array
     {
         [$struct, $extra] = self::separated($reading, $struct);
-        if ($registry->isStrict() && $extra !== []) {
+        self::strictly($registry, $reading, $struct, $extra);
+        Validator::extras($reading, $extra, $registry);
+        $pairs = Validator::resolve($reading, $struct, $registry);
+        $materializer = $registry->fetchMaterializer($struct->name);
+        $value = $materializer === null
+            ? DXNStruct::keyed($struct->name, $pairs, $latest->version, $extra)
+            : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs, $extra);
+        return [
+            new Validated(
+                $struct->name,
+                $value,
+                Validator::alsoValidAs($reading, $struct, $registry),
+                $reading->version,
+                DXNStruct::keyed($struct->name, $pairs, $reading->version, $extra),
+            ),
+            $registry,
+        ];
+    }
+
+    /**
+     * A strict decode refuses the extras of a schema whose extras are
+     * open; closed or typed ones say themselves which they take (G1,
+     * DXNS.md §4c).
+     *
+     * @param list<array{0: mixed, 1: mixed}> $extra
+     * @throws DXNError `schema/undeclared-field`
+     */
+    private static function strictly(Registry $registry, Compiled $reading, DXNStruct $struct, array $extra): void
+    {
+        if ($registry->isStrict() && $reading->extras === 'open' && $extra !== []) {
             $key = is_scalar($extra[0][0]) ? (string) $extra[0][0] : get_debug_type($extra[0][0]);
             throw new DXNError(
                 "struct \"{$struct->name}\" carries \"{$key}\", which its schema does not declare",
@@ -130,12 +203,6 @@ final class Reader
                 category: 'schema/undeclared-field',
             );
         }
-        $pairs = Validator::resolve($reading, $struct, $registry);
-        $materializer = $registry->fetchMaterializer($struct->name);
-        $value = $materializer === null
-            ? DXNStruct::keyed($struct->name, $pairs, $latest->version, $extra)
-            : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs, $extra);
-        return [new Validated($struct->name, $value, Validator::alsoValidAs($reading, $struct, $registry)), $registry];
     }
 
     /**

@@ -21,8 +21,8 @@ final class VersionedPoint
 /**
  * Every struct written against a schema carries the version it was
  * written with -- `%Point(2){...}` in text and the type name `"Point(2)"`
- * in binary -- and that version is always the latest one loaded
- * (DXNS.md §8).
+ * in binary -- and that version is the latest one loaded, unless the
+ * struct says a loaded version of its own (DXNS.md §8, §5c).
  */
 final class VersionsInDocumentsTest extends TestCase
 {
@@ -77,12 +77,18 @@ final class VersionsInDocumentsTest extends TestCase
         self::assertSame(2, $back->version);
     }
 
-    public function testItIsWrittenAsTheLatestEvenWhenItSaysAnOlderOne(): void
+    /**
+     * Until G11 (2026-11-17) every struct was written as the latest,
+     * whatever version it said: there was no way to write an older one. A
+     * field pinned to a version (`Pet(1)`) needs that way, so a struct
+     * saying a loaded version keeps it; one saying none, or one not
+     * loaded, is written as the latest as before.
+     */
+    public function testItIsWrittenWithTheVersionItSaysWhenThatOneIsLoadedElseTheLatest(): void
     {
-        self::assertSame(
-            '%Point(2){x:1}',
-            Dextrin::encode(DXNStruct::keyed('Point', [['x', 1]], 1), registry: self::loaded(self::V1, self::V2)),
-        );
+        $registry = self::loaded(self::V1, self::V2);
+        self::assertSame('%Point(1){x:1}', Dextrin::encode(DXNStruct::keyed('Point', [['x', 1]], 1), registry: $registry));
+        self::assertSame('%Point(2){x:1}', Dextrin::encode(DXNStruct::keyed('Point', [['x', 1]], 7), registry: $registry));
     }
 
     public function testItGoesToBinaryInTheSchemasFieldOrderWhateverOrderItsKeysCameIn(): void
@@ -121,8 +127,17 @@ final class VersionsInDocumentsTest extends TestCase
         self::assertTrue(DXNStruct::keyed('Point', [['x', 1], ['y', 2]], 2)->equals(Dextrin::decode('%Point{x: 1, y: 2}', $registry)));
     }
 
-    public function testAVersionInATypeExpressionIsASyntaxError(): void
+    /**
+     * Until G11 (2026-11-17) a struct reference named no version and
+     * `User(2)` was a syntax error. Now `User(2)` reads as `{:at User 2}`,
+     * a reference pinned to version 2 (DXNS.md §5c, PinTest).
+     */
+    public function testAStructReferenceMayNameAVersionUser2PinsVersion2(): void
     {
-        self::assertSame('syntax', self::categoryOf(fn () => Dextrin::decode('%{P: %schema{u: User(2)}}')));
+        $doc = Dextrin::decode('%{P: %schema{u: User(2)}}');
+        self::assertIsArray($doc);
+        $schema = $doc['P'];
+        self::assertInstanceOf(DXNStruct::class, $schema);
+        self::assertSame(['User', 2], \JOetjen\Dextrin\Value\DXNTuple::pinned($schema->pairs()[0][1]));
     }
 }

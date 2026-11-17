@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace JOetjen\Dextrin\Schema;
 
+use JOetjen\Dextrin\DXNError;
 use JOetjen\Dextrin\Value\DXNCustomTag;
 use JOetjen\Dextrin\Value\DXNList;
+use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Value\DXNOrderedMap;
 use JOetjen\Dextrin\Value\DXNSet;
 use JOetjen\Dextrin\Value\DXNSortedSet;
@@ -29,6 +31,12 @@ use JOetjen\Dextrin\Value\DXNTuple;
  *
  * `also` names the schemas the value passes as besides its own: those its
  * schema extends, and that it is a valid one of (DXNS.md §4b).
+ *
+ * `version` is the version it was read or checked with, and `asRead` the
+ * struct as that version reads it, before any materializer: what a field
+ * pinned to that version takes instead (DXNS.md §5c). `refused` is why it
+ * has no value -- an older version with no materializer to upgrade it --
+ * which stands unless a pinned field takes `asRead`.
  */
 final class Validated
 {
@@ -37,7 +45,59 @@ final class Validated
         public readonly string $name,
         public readonly mixed $value,
         public readonly array $also = [],
+        public readonly ?int $version = null,
+        public readonly ?DXNStruct $asRead = null,
+        public readonly ?DXNError $refused = null,
     ) {
+    }
+
+    /** This wrapper holding `$value` instead, and otherwise unchanged. */
+    public function withValue(mixed $value): self
+    {
+        return new self($this->name, $value, $this->also, $this->version, $this->asRead, $this->refused);
+    }
+
+    /**
+     * `$value` with every wrapper removed, as {@see strip()} does -- or
+     * the first refusal one still holds is thrown: a struct no field took
+     * as read, and that could not be upgraded.
+     *
+     * @throws DXNError the refusal
+     */
+    public static function unwrap(mixed $value): mixed
+    {
+        $refused = self::refusal($value);
+        if ($refused !== null) {
+            throw $refused;
+        }
+        return self::strip($value);
+    }
+
+    /** The first refusal a wrapper in `$value` holds, however deep. */
+    private static function refusal(mixed $value): ?DXNError
+    {
+        if ($value instanceof self) {
+            return $value->refused ?? self::refusal($value->value);
+        }
+        $children = match (true) {
+            is_array($value) => [...array_keys($value), ...array_values($value)],
+            $value instanceof DXNList, $value instanceof DXNTuple, $value instanceof DXNSet, $value instanceof DXNSortedSet => $value->items,
+            $value instanceof DXNOrderedMap => array_merge([], ...$value->pairs),
+            $value instanceof DXNMap => array_merge([], ...$value->pairs()),
+            $value instanceof DXNStruct => [
+                ...($value->isKeyed() ? array_map(static fn (array $p): mixed => $p[1], $value->pairs()) : $value->values()),
+                ...array_merge([], ...$value->extra),
+            ],
+            $value instanceof DXNCustomTag => [$value->value],
+            default => [],
+        };
+        foreach ($children as $child) {
+            $found = self::refusal($child);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+        return null;
     }
 
     /** Recursively removes every `Validated` wrapper from a decoded value tree. */

@@ -99,10 +99,14 @@ final class Schema
             );
         }
         // Read exactly as a decode would read it, version and
-        // materializer included ({@see Reader}).
-        if (Reader::read($registry, $value) === null) {
+        // materializer included ({@see Reader}). An older version with no
+        // materializer, checked on its own, has no pinned field to take it
+        // as read (DXNS.md §5c): its refusal stands.
+        $read = Reader::read($registry, $value);
+        if ($read === null) {
             throw new SchemaValidationError("no compiled schema registered for \"{$schemaName}\"");
         }
+        Schema\Validated::unwrap($read[0]);
         return true;
     }
 
@@ -130,12 +134,26 @@ final class Schema
      * Schema::annotations($registry, 'Port'); // ['description' => 'A TCP port']
      * ```
      *
+     * With `$version`, what the `{:doc}` around that one version of the
+     * schema `$name` says about it -- `deprecated:` on version 1
+     * deprecates version 1 only (G10 of dextrin's design/typespec.md) --
+     * or `null` when that version is not loaded.
+     *
+     * ```php
+     * $registry = Schema::compile(Dextrin::decode('%{Pet: {:doc %schema(1){name: :string} %{deprecated: "use Pet(2)"}}}'), new Registry());
+     * Schema::annotations($registry, 'Pet', 1); // ['deprecated' => 'use Pet(2)']
+     * ```
+     *
      * @param Registry $registry the compiled schemas and named types
      * @param string $name the schema's or named type's name
+     * @param int|null $version one version of the schema `$name`
      * @return array<string, mixed>|null
      */
-    public static function annotations(Registry $registry, string $name): ?array
+    public static function annotations(Registry $registry, string $name, ?int $version = null): ?array
     {
+        if ($version !== null) {
+            return $registry->fetchStructSchema($name, $version)?->compiled->annotations;
+        }
         $type = $registry->fetchTypeAlias($name);
         if ($type !== null) {
             $doc = $type->form === 'generic' ? $type->base : $type;

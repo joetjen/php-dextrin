@@ -116,6 +116,9 @@ final class Lexer
             // `%shape` body (DXNS.md §4b), and refused by the parser
             // anywhere else.
             $c === '-' => $this->single('MINUS'),
+            // "*" begins nothing but a `%schema` or `%shape` body's `- *` and
+            // `* K => V` (DXNS.md §4c), so it stands alone.
+            $c === '*' => $this->single('STAR'),
             $this->isIdStart($c) => $this->readIdentifierOrKeywordLike($start),
             default => throw new LexError("unexpected character '{$c}' at offset {$start}", $start),
         };

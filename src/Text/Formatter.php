@@ -76,6 +76,8 @@ final class Formatter
         }
         return match (true) {
             $value instanceof DXNList && $value->items !== [] => self::bracketed('[', $value->items, ']', $depth, $l),
+            // `{:at Pet 1}` is written `Pet(1)` (DXNS.md §5c).
+            $value instanceof DXNTuple && DXNTuple::pinned($value) !== null => DXNTuple::pinnedText(...DXNTuple::pinned($value)),
             $value instanceof DXNTuple && $value->items !== [] => self::bracketed('{', $value->items, '}', $depth, $l),
             $value instanceof DXNSet => $value->items === [] ? '@{}' : self::bracketed('@{', $value->items, '}', $depth, $l),
             $value instanceof DXNSortedSet => $value->items === []
@@ -94,7 +96,7 @@ final class Formatter
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
             is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $l),
-            $value instanceof DXNStruct && $value->isKeyed() && ($value->pairs() !== [] || $value->extra !== [] || $value->drops !== [])
+            $value instanceof DXNStruct && $value->isKeyed() && ($value->pairs() !== [] || $value->extra !== [] || $value->drops !== [] || $value->rest !== null)
                 => Printer::writtenHead($value, $l->registry) . self::keyedBody($value, $depth, $l),
             // A positional struct's items, then its extra fields as
             // entries, one per line like the items (DXN.md §1.2).
@@ -235,14 +237,22 @@ final class Formatter
 
     /**
      * A keyed struct's body: the `- field`s of a `%schema` or `%shape`
-     * built from others first (DXNS.md §4b), then its fields, then its
-     * extra fields, one per line.
+     * built from others first (DXNS.md §4b), then its `* K => V` (§4c),
+     * always with the arrow, then its fields, then its extra fields, one
+     * per line.
      */
     private static function keyedBody(DXNStruct $value, int $depth, Layout $l): string
     {
         $innerDepth = $depth + 1;
+        $rest = [];
+        if ($value->rest !== null) {
+            $prefix = '* ' . Printer::print($value->rest[0], $l->registry) . ' => ';
+            $used = mb_strlen(self::indentStr($innerDepth, $l) . $prefix);
+            $rest[] = $prefix . self::render($value->rest[1], $innerDepth, $l->withRoom($used));
+        }
         $lines = [
             ...$value->dropEntries(),
+            ...$rest,
             ...array_map(
                 static fn (array $pair): string => self::renderEntry($pair[0], $pair[1], $innerDepth, $l),
                 [...self::keywordPairs($value->pairs()), ...self::extraPairs($value)],

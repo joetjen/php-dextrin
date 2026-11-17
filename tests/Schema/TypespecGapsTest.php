@@ -27,7 +27,8 @@ use PHPUnit\Framework\TestCase;
  * - G8: a field computed when it is filled (`computed: :now`);
  * - G9: the sized sugar `:int8`, `:int16`, `:uint8` and `:uint16`.
  *
- * G1 (`:rest`, `:closed`) is not here: its design is still open.
+ * G1 (typed and closed extras) is in RestTest, G10 (deprecation
+ * warnings) in DeprecationTest.
  */
 final class TypespecGapsTest extends TestCase
 {
@@ -84,6 +85,26 @@ final class TypespecGapsTest extends TestCase
             return $err->getMessage();
         }
         self::fail("{$name} should refuse the value");
+    }
+
+    // ---- G3: a discriminated union over schemas -------------------------------
+
+    public function testG3ADiscriminatedUnionOverSchemasExplainsByTheChosenSchema(): void
+    {
+        $r = self::compiled(<<<'DXN'
+            %{
+              Cat: %schema{kind: {:const "cat"}, meows: :boolean}
+              Dog: %schema{kind: {:const "dog"}, barks: :boolean}
+              Cow: %schema{kind: :string}
+              Home: %schema{pet: {:doc {:one-of Cat Dog} %{discriminator: :kind}}}
+            }
+            DXN);
+        try {
+            Dextrin::decode('%Home{pet: %Cow{kind: "cat"}}', $r);
+            self::fail('expected a refusal');
+        } catch (DXNError $err) {
+            self::assertStringContainsString('kind "cat" chooses Cat', $err->getMessage());
+        }
     }
 
     // ---- G2: generic parameters ------------------------------------------------

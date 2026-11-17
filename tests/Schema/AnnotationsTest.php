@@ -89,6 +89,7 @@ final class AnnotationsTest extends TestCase
         }
     }
 
+    #[\PHPUnit\Framework\Attributes\IgnoreDeprecations]
     public function testAnAnnotatedTypeTakesWhatTheTypeTakesNothingMoreAndNothingLess(): void
     {
         $r = self::registry();
@@ -96,6 +97,9 @@ final class AnnotationsTest extends TestCase
         self::assertFalse(self::takes(0, $r, 'Port'));
         self::assertTrue(self::decodes('%Order(2){id: 1, email: "a@b"}', $r));
         self::assertFalse(self::decodes('%Order(2){id: 1, email: 5}', $r));
+        // `legacy` is deprecated: the value passing through it warns, and
+        // is taken (DXNS.md §1b).
+        $this->expectUserDeprecationMessage('a deprecated type or value is deprecated: use email');
         self::assertTrue(self::decodes('%Order(2){id: 1, email: "a@b", legacy: "x"}', $r));
     }
 

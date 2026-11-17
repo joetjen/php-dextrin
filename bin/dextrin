@@ -49,7 +49,8 @@ const USAGE = <<<'USAGE'
       validate PATH [--format text|binary] [--schema PATH --as NAME]
                                                     Validate a .dxn/.dxnb file, optionally against a schema
       compat OLD NEW                               Check that changed schemas have new versions (each a .dxns file or directory)
-      check SCHEMAS... [--extern NAMESPACE]...     Check a tree of .dxns schemas: syntax, compiling, layout and names
+      check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]
+                                                    Check a tree of .dxns schemas: syntax, compiling, layout and names
       docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
@@ -93,9 +94,13 @@ function cmdDocs(array $argv): void
 }
 
 /**
- * `dextrin check SCHEMAS... [--extern NAMESPACE]...`: a tree of `.dxns`
- * schemas checked as `mix dextrin.check` checks it -- every problem
- * printed as `file:line: message`, and a non-zero exit.
+ * `dextrin check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]`:
+ * a tree of `.dxns` schemas checked as `mix dextrin.check` checks it --
+ * every problem printed as `file:line: message`, and a non-zero exit.
+ *
+ * A schema that uses something deprecated (DXNS.md §1b) is a warning,
+ * printed as `warning: ...`; the check still passes, unless
+ * `--warnings-as-errors` is given.
  *
  * @param list<string> $argv
  */
@@ -103,18 +108,28 @@ function cmdCheck(array $argv): void
 {
     $roots = [];
     $extern = [];
+    $warningsAsErrors = false;
     for ($i = 0; $i < count($argv); $i++) {
         if ($argv[$i] === '--extern') {
             $extern[] = $argv[++$i] ?? '';
+        } elseif ($argv[$i] === '--warnings-as-errors') {
+            $warningsAsErrors = true;
         } else {
             $roots[] = $argv[$i];
         }
     }
     if ($roots === []) {
-        throw new \RuntimeException('usage: dextrin check SCHEMAS... [--extern NAMESPACE]...');
+        throw new \RuntimeException('usage: dextrin check SCHEMAS... [--extern NAMESPACE]... [--warnings-as-errors]');
     }
     $result = \JOetjen\Dextrin\Schema\Tree::load($roots, $extern);
     if ($result['ok']) {
+        $warnings = $result['registry']->warnings();
+        foreach ($warnings as $warning) {
+            fwrite(STDOUT, 'warning: ' . \JOetjen\Dextrin\Schema\Deprecations::text($warning) . "\n");
+        }
+        if ($warningsAsErrors && $warnings !== []) {
+            throw new \RuntimeException(count($warnings) . ' warning(s), and --warnings-as-errors');
+        }
         fwrite(STDOUT, "OK: {$result['summary']['files']} files, {$result['summary']['definitions']} definitions\n");
         return;
     }
@@ -129,7 +144,8 @@ function cmdCheck(array $argv): void
  * (`Schema::compat`, DXNS.md §8), for CI against the previous release's
  * schema files. Lists what the latest versions' materializers have to
  * upgrade; a version whose content changed without a new version, or a
- * version that went down, is reported and exits non-zero.
+ * version that went down, is reported and exits non-zero -- of a schema
+ * or of a named type with versions (`%type(N)`, DXNS.md §5c).
  *
  * @param list<string> $args
  */
@@ -150,10 +166,14 @@ function cmdCompat(array $args): void
         fwrite(STDOUT, "{$upgrade['schema']} {$upgrade['from']} -> {$upgrade['to']}: {$listed}\n");
     }
     if ($problems !== []) {
+        // A named type's versions (`%type(N)`, DXNS.md §5c) under `type`.
         throw new \RuntimeException(implode("\n", array_map(
-            static fn (array $p) => $p['problem'] === 'version-went-down'
-                ? "{$p['schema']} went down from version {$p['from']} to {$p['to']}"
-                : "{$p['schema']} version {$p['version']} changed without a new version",
+            static function (array $p): string {
+                $what = isset($p['type']) ? "named type {$p['type']}" : $p['schema'];
+                return $p['problem'] === 'version-went-down'
+                    ? "{$what} went down from version {$p['from']} to {$p['to']}"
+                    : "{$what} version {$p['version']} changed without a new version";
+            },
             $problems,
         )));
     }

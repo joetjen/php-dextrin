@@ -132,6 +132,22 @@ final class TreeTest extends TestCase
         self::assertTrue(Tree::load([$root], ['other'])['ok']);
     }
 
+    public function testANameThatResolvesToNothingInASchemasTypedExtrasToo(): void
+    {
+        $messages = self::messages(Tree::load([self::tree(['a.dxns' => '%{A: %schema{n: :integer, * :string => Nowhere}}'])]));
+        self::assertNotEmpty(array_filter($messages, static fn (string $m): bool => str_contains($m, 'Nowhere')));
+    }
+
+    public function testAFileWhoseTypedExtrasNameAnothersTypeLoadsAfterIt(): void
+    {
+        $result = Tree::load([self::tree([
+            's/zz.dxns' => '%{Count: {:refine :integer %{min: 0}}}',
+            's/aa.dxns' => '%{T: %shape{a: :integer, * :string => s.zz/Count}}',
+        ])]);
+        self::assertTrue($result['ok'], json_encode($result['problems'] ?? []) ?: '');
+        self::assertTrue(\JOetjen\Dextrin\Schema::check(Dextrin::decode('%{a: 1, "x" => 2}'), $result['registry'], 's.aa/T'));
+    }
+
     public function testAVersionedFileHoldingAnotherVersionAndOneVersionInTwoFiles(): void
     {
         self::assertStringContainsString('version', self::messages(Tree::load([self::tree(['Customer-v2.dxns' => '%{Customer: %schema(3){name: :string}}'])]))[0]);

@@ -394,8 +394,10 @@ $v1 = '%{Point: %schema{x: :integer, y: :integer}}';
 $v2 = '%{Point: %schema(2){x: :integer, y: :integer, label?: :string}}';
 ```
 
-**Every struct is written with the latest version loaded**, so a
-reader always knows which shape it is looking at:
+**Every struct is written with the latest version loaded** -- unless it
+says a loaded version of its own, as a struct for a field pinned to one
+(`Point(1)`, DXNS.md §5c) does -- so a reader always knows which shape
+it is looking at:
 
 ```php
 $point = Dextrin::decode('%Point{x: 1, y: 2, label: "origin"}', $load([$v2]));

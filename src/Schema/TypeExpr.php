@@ -92,6 +92,12 @@ final class TypeExpr
      *        default, `null` for none; G2 of dextrin's design/typespec.md)
      * @param list<Particle>|null $particles list-items
      * @param array<string, mixed>|null $notes doc: its annotations by name
+     * @param 'open'|'closed'|array{0: self, 1: self}|null $extras shape: what it takes beyond its
+     *        fields (G1 of dextrin's design/typespec.md, DXNS.md §4c) -- any (`'open'`), none
+     *        (`'closed'`, `- *`), or those whose key and value match a type each
+     *        (`[K, V]`, `* K => V`)
+     * @param int|null $version reference: the one version of the schema it is pinned to
+     *        (`Pet(1)`, G11 of dextrin's design/typespec.md, DXNS.md §5c), `null` for any
      */
     private function __construct(
         public readonly string $form,
@@ -110,18 +116,22 @@ final class TypeExpr
         public readonly ?array $params = null,
         public readonly ?array $particles = null,
         public readonly ?array $notes = null,
+        public readonly string|array|null $extras = null,
+        public readonly ?int $version = null,
     ) {
     }
 
     /**
      * `%shape{...}` (design/shapes-and-case.md): a plain map with these
-     * fields, its missing defaults filled.
+     * fields, its missing defaults filled, taking `$extras` beyond them
+     * (DXNS.md §4c).
      *
      * @param list<Field> $fields
+     * @param 'open'|'closed'|array{0: self, 1: self} $extras
      */
-    public static function shape(?string $name, array $fields): self
+    public static function shape(?string $name, array $fields, string|array $extras = 'open'): self
     {
-        return new self('shape', name: $name, fields: $fields);
+        return new self('shape', name: $name, fields: $fields, extras: $extras);
     }
 
     /**
@@ -176,6 +186,43 @@ final class TypeExpr
         return new self(...$all);
     }
 
+    /**
+     * This type with every type it holds -- however it holds it: an
+     * element, a base, a field's type, a variant, a branch, a particle, a
+     * refine's type-valued constraint, a shape's extras, a parameter's
+     * bound and default -- replaced by what `$map` makes of it. Not deep:
+     * `$map` decides whether to go further.
+     *
+     * @internal
+     * @param \Closure(self): self $map
+     */
+    public function mapTypes(\Closure $map): self
+    {
+        $one = static fn (?self $t): ?self => $t === null ? null : $map($t);
+        $many = static fn (?array $ts): ?array => $ts === null ? null : array_map($map, $ts);
+        return $this->with([
+            'elem' => $one($this->elem),
+            'base' => $one($this->base),
+            'key' => $one($this->key),
+            'value' => $one($this->value),
+            'otherwise' => $one($this->otherwise),
+            'elems' => $many($this->elems),
+            'variants' => $many($this->variants),
+            'fields' => $this->fields === null ? null : array_map(
+                static fn (Field $f): Field => new Field($f->name, $f->required, $map($f->type), $f->default, $f->description),
+                $this->fields,
+            ),
+            'branches' => $this->branches === null ? null : array_map(static fn (array $b): array => [$b[0], $map($b[1])], $this->branches),
+            'particles' => $this->particles === null ? null : array_map(static fn (Particle $p): Particle => $p->map($map), $this->particles),
+            'constraints' => $this->constraints === null ? null : self::withTypes($this->constraints, $map),
+            'extras' => is_array($this->extras) ? [$map($this->extras[0]), $map($this->extras[1])] : $this->extras,
+            'params' => $this->params === null ? null : array_map(
+                static fn (string|array $p): string|array => is_string($p) ? $p : [$p[0], $map($p[1]), $p[2] === null ? null : $map($p[2])],
+                $this->params,
+            ),
+        ]);
+    }
+
     public static function any(): self
     {
         return new self('any');
@@ -191,9 +238,14 @@ final class TypeExpr
         return new self('primitive', name: $name);
     }
 
-    public static function reference(string $name): self
+    /**
+     * A struct of the schema `$name`, any loaded version -- or, pinned to
+     * `$version` (`Pet(1)`, DXNS.md §5c), only one read or checked at that
+     * version, taken as that version reads it.
+     */
+    public static function reference(string $name, ?int $version = null): self
     {
-        return new self('reference', name: $name);
+        return new self('reference', name: $name, version: $version);
     }
 
     public static function listOf(self $elem): self
@@ -363,6 +415,19 @@ final class TypeExpr
             case 'param':
             case 'generic':
                 return NoMatch::Instance;
+        }
+        // A reference pinned to one version (G11, DXNS.md §5c).
+        if ($this->form === 'reference' && $this->version !== null) {
+            return self::conformPinned($this->name ?? '', $this->version, $value);
+        }
+
+        // A struct that could not be upgraded is no value of any other
+        // type (DXNS.md §5c).
+        if ($value instanceof Validated && $value->refused !== null) {
+            return NoMatch::Instance;
+        }
+
+        switch ($this->form) {
             case 'reference':
                 return self::matchesReference($this->name ?? '', $value, $ctx->registry) ? $value : NoMatch::Instance;
             case 'case':
@@ -387,8 +452,15 @@ final class TypeExpr
                 $body = $generic->base;
                 return self::instantiate($generic->params ?? [], $body, $args)->conform($value, $ctx);
             case 'doc':
-                // Annotations change nothing a type takes.
-                return ($this->elem ?? self::any())->conform($value, $ctx);
+                // Annotations change nothing a type takes. Passing through
+                // something deprecated is reported (G10, DXNS.md §1b), once
+                // the value is accepted: a variant tried and refused never
+                // warns.
+                $conformed = ($this->elem ?? self::any())->conform($value, $ctx);
+                if ($conformed === NoMatch::Instance || $this->notes === null || $this->notes === []) {
+                    return $conformed;
+                }
+                return Deprecations::nodeUsed($ctx->registry, $this, $value) ? $conformed : NoMatch::Instance;
             case 'if':
                 // A value that is a test is checked as a then, any other as
                 // an else -- what the test would fill in is not kept.
@@ -399,7 +471,7 @@ final class TypeExpr
 
         if ($value instanceof Validated) {
             $inner = $this->conform($value->value, $ctx);
-            return $inner === NoMatch::Instance ? NoMatch::Instance : new Validated($value->name, $inner, $value->also);
+            return $inner === NoMatch::Instance ? NoMatch::Instance : $value->withValue($inner);
         }
 
         switch ($this->form) {
@@ -731,8 +803,11 @@ final class TypeExpr
      * A map against a shape's fields: each declared field matched by name,
      * whatever spelling its key has (`name:`, `"name" =>`, `:"name" =>`)
      * and refused given twice; a missing field takes its default, under a
-     * keyword key; an extra key is kept, and refused by a strict decode --
-     * as a struct's fields are (design/shapes-and-case.md).
+     * keyword key. What it does with an extra key, one no field declares,
+     * its extras say (G1, DXNS.md §4c): open ones are kept, and refused by
+     * a strict decode -- as a struct's fields are
+     * (design/shapes-and-case.md); closed ones (`- *`) are refused; typed
+     * ones (`* K => V`) are each conformed, key and value.
      *
      * @param array<int|string, mixed>|DXNMap $map
      */
@@ -771,21 +846,48 @@ final class TypeExpr
                 return NoMatch::Instance;
             }
         }
+        $declared = array_map(static fn (Field $f): string => $f->name, $this->fields ?? []);
+        $extras = $this->extras ?? 'open';
         $out = [];
         foreach ($pairs as $i => $pair) {
-            $out[] = [$pair[0], array_key_exists($i, $replaced) ? $replaced[$i] : $pair[1]];
-        }
-        $pairs = [...$out, ...$added];
-        if ($ctx->registry !== null && $ctx->registry->isStrict()) {
-            $declared = array_map(static fn (Field $f): string => $f->name, $this->fields ?? []);
-            foreach ($pairs as [$key]) {
-                $name = self::keyName($key);
-                if ($name === null || !in_array($name, $declared, true)) {
+            if (array_key_exists($i, $replaced)) {
+                $out[] = [$pair[0], $replaced[$i]];
+                continue;
+            }
+            $name = self::keyName($pair[0]);
+            if ($name !== null && in_array($name, $declared, true)) {
+                $out[] = $pair;
+            } elseif ($extras === 'closed' || ($extras === 'open' && $ctx->registry !== null && $ctx->registry->isStrict())) {
+                return NoMatch::Instance;
+            } elseif (is_array($extras)) {
+                $value = $extras[0]->conform($pair[0], $ctx) === NoMatch::Instance ? NoMatch::Instance : $extras[1]->conform($pair[1], $ctx);
+                if ($value === NoMatch::Instance) {
                     return NoMatch::Instance;
                 }
+                $out[] = [$pair[0], $value];
+            } else {
+                $out[] = $pair;
             }
         }
+        $pairs = [...$out, ...$added];
         return $map instanceof DXNMap ? new DXNMap($pairs) : MapBuilder::build($pairs, static fn (string $m): \Throwable => new \LogicException($m));
+    }
+
+    /**
+     * A reference pinned to one version (G11, DXNS.md §5c): a struct read
+     * or checked with that version, and nothing else. What it takes is the
+     * struct as that version reads it -- no materializer upgrades it, and
+     * a refusal for want of one no longer stands.
+     */
+    private static function conformPinned(string $name, int $version, mixed $value): mixed
+    {
+        if ($value instanceof Validated && $value->name === $name && $value->version === $version) {
+            return $value->asRead === null ? $value : new Validated($name, $value->asRead, $value->also, $version, $value->asRead);
+        }
+        if ($value instanceof DXNStruct && $value->name === $name && $value->version === $version) {
+            return $value;
+        }
+        return NoMatch::Instance;
     }
 
     /** The name a map key gives a field, or `null`. */
@@ -851,6 +953,18 @@ final class TypeExpr
                     : self::explain(self::instantiate($generic->params ?? [], $generic->base ?? self::any(), $type->elems ?? []), $value, $ctx);
             case 'shape':
                 return is_array($value) || $value instanceof DXNMap ? self::shapeRefusal($type, $value, $ctx) : null;
+            case 'reference':
+                if ($type->version === null) {
+                    return null;
+                }
+                $got = match (true) {
+                    $value instanceof Validated && $value->version !== null => DXNTuple::pinnedText($value->name, $value->version),
+                    $value instanceof Validated => $value->name,
+                    $value instanceof DXNStruct && $value->version !== null => DXNTuple::pinnedText($value->name, $value->version),
+                    $value instanceof DXNStruct => $value->name,
+                    default => 'no struct',
+                };
+                return 'expected ' . DXNTuple::pinnedText($type->name ?? '', $type->version) . ", got {$got}";
             default:
                 return null;
         }
@@ -912,7 +1026,8 @@ final class TypeExpr
     }
 
     /**
-     * The first of a shape's fields that is missing or refused, and why.
+     * The first of a shape's fields that is missing or refused, or else
+     * the first extra its extras refuse (DXNS.md §4c), and why.
      *
      * @param array<int|string, mixed>|DXNMap $map
      */
@@ -929,6 +1044,21 @@ final class TypeExpr
             }
         }
         $inner = new Context($ctx->registry, $siblings);
+        $why = self::fieldRefusal($shape, $map, $inner);
+        if ($why !== null) {
+            return $why;
+        }
+        $refusal = self::extrasRefusal($shape->extras ?? 'open', self::undeclared($shape->fields ?? [], $pairs), $ctx);
+        return $refusal === null ? null : $refusal[0];
+    }
+
+    /**
+     * The first of a shape's fields that is missing or refused, and why.
+     *
+     * @param array<int|string, mixed>|DXNMap $map
+     */
+    private static function fieldRefusal(self $shape, array|DXNMap $map, Context $inner): ?string
+    {
         foreach ($shape->fields ?? [] as $field) {
             $found = self::fieldOf($map, $field->name);
             if ($found !== []) {
@@ -938,6 +1068,56 @@ final class TypeExpr
                 }
             } elseif ($field->required && $field->default === Field::NO_DEFAULT) {
                 return "field \"{$field->name}\" is missing";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The `[key, value]`s of `$pairs` no field of `$fields` declares.
+     *
+     * @param list<Field> $fields
+     * @param list<array{0: mixed, 1: mixed}> $pairs
+     * @return list<array{0: mixed, 1: mixed}>
+     */
+    private static function undeclared(array $fields, array $pairs): array
+    {
+        $declared = array_map(static fn (Field $f): string => $f->name, $fields);
+        return array_values(array_filter($pairs, static function (array $pair) use ($declared): bool {
+            $name = self::keyName($pair[0]);
+            return $name === null || !in_array($name, $declared, true);
+        }));
+    }
+
+    /**
+     * Why `$extras` refuse `$pairs`, the `[key, value]`s a struct or map
+     * carries that no field declares (G1 of dextrin's design/typespec.md,
+     * DXNS.md §4c): `null` when they pass, otherwise `[message, category]`.
+     * Open extras take any (a strict decode refuses them elsewhere);
+     * closed ones none; typed ones each key matching K and its value V.
+     *
+     * @internal
+     * @param 'open'|'closed'|array{0: self, 1: self} $extras what the schema or shape takes
+     * @param list<array{0: mixed, 1: mixed}> $pairs the undeclared entries
+     * @param Context $ctx the check's context
+     * @return array{0: string, 1: string}|null
+     */
+    public static function extrasRefusal(string|array $extras, array $pairs, Context $ctx): ?array
+    {
+        if ($extras === 'open' || $pairs === []) {
+            return null;
+        }
+        if ($extras === 'closed') {
+            return [self::shown($pairs[0][0]) . ' is no declared field, and the body is closed (- *)', 'schema/undeclared-field'];
+        }
+        [$keyType, $valueType] = $extras;
+        foreach ($pairs as [$key, $value]) {
+            if ($keyType->conform($key, $ctx) === NoMatch::Instance) {
+                return ['extra key ' . self::shown($key) . ' does not match the key type of * K => V', 'schema/type-mismatch'];
+            }
+            if ($valueType->conform($value, $ctx) === NoMatch::Instance) {
+                $why = self::explain($valueType, $value, $ctx) ?? 'does not match the value type of * K => V';
+                return ['extra ' . self::shown($key) . ": {$why}", 'schema/type-mismatch'];
             }
         }
         return null;
@@ -981,7 +1161,11 @@ final class TypeExpr
         return "{$field} " . self::shown($chosen) . ' names no variant';
     }
 
-    /** The type a variant gives its field `$name`, looked up through names. */
+    /**
+     * The type a variant gives its field `$name`, looked up through names:
+     * a shape's, or a schema's (its latest version, or the one it is pinned
+     * to).
+     */
     private static function variantField(self $type, string $name, Context $ctx): ?self
     {
         switch ($type->form) {
@@ -991,21 +1175,43 @@ final class TypeExpr
                 $named = $ctx->registry?->fetchTypeAlias($type->name ?? '');
                 return $named === null ? null : self::variantField($named, $name, $ctx);
             case 'shape':
-                foreach ($type->fields ?? [] as $field) {
-                    if ($field->name === $name) {
-                        return $field->type;
-                    }
+                return self::fieldType($type->fields ?? [], $name);
+            case 'reference':
+                // A schema variant: its field in the latest compiled
+                // version, or in the version it is pinned to (G11).
+                try {
+                    $found = $ctx->registry?->fetchStructSchema($type->name ?? '', $type->version);
+                } catch (\Throwable) {
+                    // A resolver's refusal surfaces where the struct is read.
+                    return null;
                 }
-                return null;
+                return $found === null ? null : self::fieldType($found->compiled->fields, $name);
             default:
                 return null;
         }
+    }
+
+    /**
+     * The type of the field named `$name` among `$fields`, or `null`.
+     *
+     * @param list<Field> $fields
+     */
+    private static function fieldType(array $fields, string $name): ?self
+    {
+        foreach ($fields as $field) {
+            if ($field->name === $name) {
+                return $field->type;
+            }
+        }
+        return null;
     }
 
     private static function variantName(self $type): string
     {
         return match (true) {
             $type->form === 'doc' => self::variantName($type->elem ?? self::any()),
+            // A pinned variant is named by its pin (G11): `Pet(1)`.
+            $type->form === 'reference' && $type->version !== null => DXNTuple::pinnedText((string) $type->name, $type->version),
             $type->form === 'named', $type->form === 'reference' => (string) $type->name,
             $type->form === 'shape' && $type->name !== null => $type->name,
             default => 'a variant',
@@ -1067,10 +1273,13 @@ final class TypeExpr
         return match ($this->form) {
             'param' => $bound[$this->name ?? ''] ?? $this,
             'apply', 'tuple-of' => $this->with(['elems' => $subAll($this->elems)]),
-            'shape' => $this->with(['fields' => array_map(
-                static fn (Field $f): Field => new Field($f->name, $f->required, $f->type->substitute($bound), $f->default, $f->description),
-                $this->fields ?? [],
-            )]),
+            'shape' => $this->with([
+                'fields' => array_map(
+                    static fn (Field $f): Field => new Field($f->name, $f->required, $f->type->substitute($bound), $f->default, $f->description),
+                    $this->fields ?? [],
+                ),
+                'extras' => is_array($this->extras) ? [$this->extras[0]->substitute($bound), $this->extras[1]->substitute($bound)] : $this->extras,
+            ]),
             'case' => $this->with([
                 'branches' => array_map(static fn (array $b): array => [$b[0], $b[1]->substitute($bound)], $this->branches ?? []),
                 'otherwise' => $sub($this->otherwise),

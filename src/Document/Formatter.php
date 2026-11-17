@@ -325,16 +325,19 @@ final class Formatter
 
     private function item(SyntaxNode $node, string $indent, int $room, bool $flat): string
     {
-        // `- password`: an inherited field left out (DXNS.md §4b).
+        // `- password`: an inherited field left out (DXNS.md §4b); `- *`, a
+        // closed body (§4c).
         if ($node->kind === 'drop') {
             return '- ' . $this->tokensText($node->last, $node->last);
         }
-        if ($node->kind !== 'entry') {
+        if ($node->kind !== 'entry' && $node->kind !== 'rest') {
             return $this->valueText($node, $indent, $room, $flat);
         }
         $values = Document::items($node);
         $value = $values[count($values) - 1];
         $render = fn (string $deeper, int $left): string => $this->valueText($value, $deeper, $left, $flat);
+        // `* K => V`: the type of a body's extras (DXNS.md §4c).
+        $star = $node->kind === 'rest' ? '* ' : '';
         if ($node->key !== null) {
             $keyEnd = $this->doc->tokens[$node->key]->end;
             $gap = substr($this->doc->source, $keyEnd, $this->start($value) - $keyEnd);
@@ -342,7 +345,7 @@ final class Formatter
         }
         $key = $values[0];
         $gap = substr($this->doc->source, $this->end($key), $this->start($value) - $this->end($key));
-        $prefix = $this->valueText($key, $indent, $room, $flat) . ' =>';
+        $prefix = $star . $this->valueText($key, $indent, $room, $flat) . ' =>';
         return $this->between($prefix, self::commentsIn($gap), $render, $indent, $room);
     }
 

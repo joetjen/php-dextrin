@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace JOetjen\Dextrin;
 
 use JOetjen\Dextrin\Schema\Compiled;
+use JOetjen\Dextrin\Schema\Deprecations;
+use JOetjen\Dextrin\Schema\DeprecationsSeen;
 use JOetjen\Dextrin\Schema\FetchedSchema;
 use JOetjen\Dextrin\Schema\TypeExpr;
 use JOetjen\Dextrin\Value\DXNStruct;
@@ -37,6 +39,8 @@ use JOetjen\Dextrin\Value\DXNStruct;
  * no atom table or global symbol registry whose exhaustion untrusted
  * input could threaten in the first place (see `DXNKeyword`'s own
  * doc).
+ *
+ * @phpstan-import-type Warning from Deprecations
  */
 final class Registry
 {
@@ -57,6 +61,12 @@ final class Registry
 
     /** @var array<string, TypeExpr> named type -> compiled type expression. */
     private array $typeAliases = [];
+
+    /**
+     * @var array<string, non-empty-array<int, TypeExpr>> named type -> version -> definition
+     *      (Way B of dextrin's design/typespec.md); `typeAliases` holds the latest of each.
+     */
+    private array $typeVersions = [];
 
     /** @var array<string, class-string> struct name -> PHP class. */
     private array $structModules = [];
@@ -87,6 +97,143 @@ final class Registry
     public function isStrict(): bool
     {
         return $this->strict;
+    }
+
+    // ---- deprecations (G10 of dextrin's design/typespec.md) -------------------
+
+    /** How often data going through something deprecated warns ({@see putDeprecations()}). */
+    private string $deprecations = 'once';
+
+    /** @var (\Closure(Warning): mixed)|null who hears a deprecation warning */
+    private ?\Closure $onDeprecated = null;
+
+    /** @var array<string, true> the deprecated things "once" is kept for */
+    private array $deprecationKeys = [];
+
+    /** Which of them have warned: shared by every copy of this registry. */
+    private ?DeprecationsSeen $deprecationsSeen = null;
+
+    /** @var list<Warning> what compiling into this registry found deprecated */
+    private array $warnings = [];
+
+    /**
+     * How often data going through something deprecated warns (DXNS.md
+     * §1b, {@see Deprecations}): `'once'` per registry and deprecated
+     * thing, the default; `'every'` time; `'off'`; or `'error'`, which
+     * refuses the data (`schema/deprecated`). {@see Dextrin::decode()}
+     * and `encode()` take it as `deprecations:`.
+     *
+     * @param string $how one of `once`, `every`, `off`, `error`
+     * @return self a copy that warns so
+     * @throws \InvalidArgumentException for any other
+     */
+    public function putDeprecations(string $how): self
+    {
+        if (!in_array($how, Deprecations::MODES, true)) {
+            throw new \InvalidArgumentException("deprecations is one of once, every, off or error, not \"{$how}\"");
+        }
+        $copy = $this->clone();
+        $copy->deprecations = $how;
+        return $copy;
+    }
+
+    /** How often data going through something deprecated warns ({@see putDeprecations()}). */
+    public function deprecations(): string
+    {
+        return $this->deprecations;
+    }
+
+    /**
+     * Who hears a deprecation warning, in place of
+     * `trigger_error($text, E_USER_DEPRECATED)`: a callable taking one
+     * warning -- `['name' => ..., 'version' => ..., 'message' => ...,
+     * 'category' => 'schema/deprecated', 'at' => ...]` -- or `null` for
+     * `trigger_error()`. {@see Dextrin::decode()} and `encode()` take it
+     * as `onDeprecated:`.
+     *
+     * @param callable|null $hear what receives each warning
+     * @return self a copy that reports to it
+     */
+    public function putOnDeprecated(?callable $hear): self
+    {
+        $copy = $this->clone();
+        $copy->onDeprecated = $hear === null ? null : \Closure::fromCallable($hear);
+        return $copy;
+    }
+
+    /**
+     * Who hears a deprecation warning ({@see putOnDeprecated()}), `null`
+     * for `trigger_error()`.
+     *
+     * @return (\Closure(Warning): mixed)|null
+     */
+    public function onDeprecated(): ?\Closure
+    {
+        return $this->onDeprecated;
+    }
+
+    /**
+     * What compiling into this registry found deprecated (DXNS.md §1b):
+     * each schema or named type that uses something deprecated, as a
+     * warning naming what and where (`at`), in the order they were
+     * compiled. `dextrin check` prints them.
+     *
+     * @return list<Warning>
+     */
+    public function warnings(): array
+    {
+        return $this->warnings;
+    }
+
+    /**
+     * This registry with `$warnings` added to what compiling found -- the
+     * compiler's, once a document is compiled.
+     *
+     * @internal
+     * @param list<Warning> $warnings
+     */
+    public function withWarnings(array $warnings): self
+    {
+        if ($warnings === []) {
+            return $this;
+        }
+        $copy = $this->clone();
+        $copy->warnings = [...$this->warnings, ...$warnings];
+        return $copy;
+    }
+
+    /**
+     * Whether this is the first use of the deprecated thing `$key` seen by
+     * this registry and its copies -- what `'once'` asks. A thing with no
+     * key here (a generic's use, filled in when it is checked) warns each
+     * time rather than never.
+     *
+     * @internal
+     */
+    public function firstDeprecatedUse(string $key): bool
+    {
+        if (!isset($this->deprecationKeys[$key]) || $this->deprecationsSeen === null) {
+            return true;
+        }
+        return $this->deprecationsSeen->firstUse($key);
+    }
+
+    /**
+     * Keeps "once" for every deprecated thing `$item` holds, as it is put
+     * under `$name` in this copy: when there are new ones, this copy takes
+     * its own record of what has warned, carrying what it had seen -- so
+     * what a registry has seen is never changed by one that loaded more.
+     */
+    private function withDeprecationKeys(Compiled|TypeExpr $item, string $name): void
+    {
+        $new = array_filter(Deprecations::keys($item, $name), fn (string $key): bool => !isset($this->deprecationKeys[$key]));
+        if ($new === []) {
+            return;
+        }
+        foreach ($new as $key) {
+            $this->deprecationKeys[$key] = true;
+        }
+        $this->deprecationsSeen = $this->deprecationsSeen === null ? new DeprecationsSeen() : clone $this->deprecationsSeen;
     }
 
     /**
@@ -142,6 +289,7 @@ final class Registry
     {
         $copy = $this->clone();
         $copy->structs[$name][$compiled->version] = $compiled;
+        $copy->withDeprecationKeys($compiled, $name);
         return $copy;
     }
 
@@ -276,18 +424,23 @@ final class Registry
     }
 
     /**
-     * `$struct` as it is written here: carrying the latest loaded version
-     * of its schema (DXNS.md §8), whatever version it says itself. A
-     * struct whose name has no schema keeps its own version, or none.
-     * Every writer goes through this -- text, the formatter and binary --
-     * so encoding never writes a version other than the latest, and never
-     * writes one no schema stands behind.
+     * `$struct` as it is written here: carrying the version it says itself
+     * when that version is loaded -- what a field pinned to it needs
+     * (DXNS.md §5c) -- and otherwise the latest loaded version of its
+     * schema (DXNS.md §8). A struct whose name has no schema keeps its own
+     * version, or none. Every writer goes through this -- text, the
+     * formatter and binary -- so encoding writes the latest unless the
+     * struct carries a loaded version of its own, and never writes one no
+     * schema stands behind.
      */
     public function asWritten(DXNStruct $struct): DXNStruct
     {
         // No schema to stand behind a version: the struct keeps its own. A
         // resolver's refusal surfaces where the struct is read or checked.
         try {
+            if ($struct->version !== null && $this->fetchStructSchema($struct->name, $struct->version) !== null) {
+                return $struct;
+            }
             $found = $this->fetchStructSchema($struct->name);
         } catch (Schema\SchemaCompileError) {
             $found = null;
@@ -305,12 +458,64 @@ final class Registry
     {
         $copy = $this->clone();
         $copy->typeAliases[$name] = $typeExpr;
+        $copy->withDeprecationKeys($typeExpr, $name);
         return $copy;
     }
 
     public function fetchTypeAlias(string $name): ?TypeExpr
     {
         return $this->typeAliases[$name] ?? null;
+    }
+
+    /**
+     * Loads `$typeExpr` as version `$version` of the named type `$name`
+     * (DXNS.md §5c): `$name` then means the latest version loaded, and
+     * {@see fetchTypeVersion()} finds each. Loading a version already
+     * loaded with another definition is refused as
+     * `schema/duplicate-version`; the same definition again changes
+     * nothing.
+     *
+     * @param string $name the named type's name
+     * @param int $version its version, a positive integer
+     * @param TypeExpr $typeExpr that version's definition
+     * @return self a copy holding it
+     * @throws DXNError `schema/duplicate-version`
+     */
+    public function putTypeVersion(string $name, int $version, TypeExpr $typeExpr): self
+    {
+        $loaded = $this->typeVersions[$name][$version] ?? null;
+        if ($loaded !== null) {
+            if (serialize($loaded) === serialize($typeExpr)) {
+                return $this;
+            }
+            throw new DXNError(
+                "named type \"{$name}\" version {$version} is already loaded, defined otherwise",
+                stage: 'schema',
+                category: 'schema/duplicate-version',
+            );
+        }
+        $copy = $this->clone();
+        $copy->typeVersions[$name][$version] = $typeExpr;
+        $copy->withDeprecationKeys($typeExpr, $name);
+        $versions = $copy->typeVersions[$name];
+        return $copy->putTypeAlias($name, $versions[max(array_keys($versions))]);
+    }
+
+    /** Version `$version` of the named type `$name`, or `null` when it is not loaded (DXNS.md §5c). */
+    public function fetchTypeVersion(string $name, int $version): ?TypeExpr
+    {
+        return $this->typeVersions[$name][$version] ?? null;
+    }
+
+    /**
+     * Every loaded version of every named type that has one, by name and
+     * version -- what the version discipline check compares.
+     *
+     * @return array<string, non-empty-array<int, TypeExpr>>
+     */
+    public function typeVersions(): array
+    {
+        return $this->typeVersions;
     }
 
     /**

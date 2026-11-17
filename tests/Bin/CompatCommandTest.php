@@ -68,6 +68,16 @@ final class CompatCommandTest extends TestCase
         self::assertStringContainsString('User version 1 changed without a new version', $out);
     }
 
+    public function testReportsANamedTypeVersionWhoseDefinitionChangedOrThatWentDown(): void
+    {
+        $old = $this->schemas('old', ['color.dxns' => '%{Color: {:enum :red :green}}', 'color-2.dxns' => '%{Color: %type(2)[{:enum :red :green :blue}]}']);
+        $new = $this->schemas('new', ['color.dxns' => '%{Color: {:enum :red}}']);
+        [$status, $out] = self::compat($old, $new);
+        self::assertSame(1, $status, $out);
+        self::assertStringContainsString('named type Color version 1 changed without a new version', $out);
+        self::assertStringContainsString('named type Color went down from version 2 to 1', $out);
+    }
+
     public function testTakesASingleFileAsWellAsADirectory(): void
     {
         file_put_contents("{$this->dir}/old.dxns", '%{User: %schema(2){name: :string}}');

@@ -24,6 +24,10 @@ namespace JOetjen\Dextrin\Schema;
  * version]` in head order -- each schema at the version it was built
  * with, a shape with `null`: what an `extends` makes it acceptable as.
  * `[]` for a schema written whole.
+ *
+ * `extras` are what it takes beyond its fields (G1 of dextrin's
+ * design/typespec.md, DXNS.md §4c): `'open'`, `'closed'` (`- *`) or
+ * `[K, V]` (`* K => V`).
  */
 final class Compiled
 {
@@ -31,6 +35,7 @@ final class Compiled
      * @param list<Field> $fields
      * @param array<string, mixed> $annotations
      * @param list<array{0: 'extends'|'includes', 1: string, 2: ?int}> $bases
+     * @param 'open'|'closed'|array{0: TypeExpr, 1: TypeExpr} $extras
      */
     public function __construct(
         public readonly ?string $name = null,
@@ -38,13 +43,14 @@ final class Compiled
         public readonly int $version = 1,
         public readonly array $annotations = [],
         public readonly array $bases = [],
+        public readonly string|array $extras = 'open',
     ) {
     }
 
     /** A schema's `name` is only known once {@see Compiler} finishes compiling its enclosing document -- returns a copy with it set. */
     public function withName(string $name): self
     {
-        return new self($name, $this->fields, $this->version, $this->annotations, $this->bases);
+        return new self($name, $this->fields, $this->version, $this->annotations, $this->bases, $this->extras);
     }
 
     /**
@@ -54,7 +60,7 @@ final class Compiled
      */
     public function withAnnotations(array $annotations): self
     {
-        return new self($this->name, $this->fields, $this->version, $annotations, $this->bases);
+        return new self($this->name, $this->fields, $this->version, $annotations, $this->bases, $this->extras);
     }
 
     /** @return list<string> */

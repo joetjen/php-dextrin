@@ -8,7 +8,13 @@ lookups.
 ## Decode / encode
 
 ```php
-Dextrin::decode(string $text, ?Registry $registry = null, ?bool $strict = null): mixed
+Dextrin::decode(
+    string $text,
+    ?Registry $registry = null,
+    ?bool $strict = null,
+    ?string $deprecations = null,
+    ?callable $onDeprecated = null,
+): mixed
 Dextrin::encode(
     mixed $value,
     bool $pretty = false,
@@ -16,13 +22,24 @@ Dextrin::encode(
     ?Registry $registry = null,
     bool $validate = true,
     ?string $schema = null,
+    int $width = 80,
+    ?string $deprecations = null,
+    ?callable $onDeprecated = null,
 ): string
-Dextrin::decodeBinary(string $bytes, ?Registry $registry = null, ?bool $strict = null): mixed
+Dextrin::decodeBinary(
+    string $bytes,
+    ?Registry $registry = null,
+    ?bool $strict = null,
+    ?string $deprecations = null,
+    ?callable $onDeprecated = null,
+): mixed
 Dextrin::encodeBinary(
     mixed $value,
     ?Registry $registry = null,
     bool $validate = true,
     ?string $schema = null,
+    ?string $deprecations = null,
+    ?callable $onDeprecated = null,
 ): string
 ```
 
@@ -36,7 +53,14 @@ schema's name rather than its own PHP class name.
 named schema. `$validate` (encode only, default `true`): set `false`
 to skip the automatic whole-tree schema check; nothing is ever
 converted to match a field's type (DXNS.md §7). `$strict` (decode
-only): refuse extra fields on schema-backed structs. `$pretty`/`$indent`
+only): refuse extra fields on schema-backed structs, unless the schema
+types them (`* K => V`, DXNS.md §4c). `$deprecations` (both directions):
+how often data going through something deprecated warns (DXNS.md §1b)
+-- `'once'` per registry (the default), `'every'`, `'off'`, or
+`'error'`, which refuses it as `schema/deprecated`; `$onDeprecated`
+receives each warning, `['name' => ..., 'version' => ..., 'message' =>
+..., 'category' => 'schema/deprecated', 'at' => ...]`, in place of
+`trigger_error(..., E_USER_DEPRECATED)`. `$pretty`/`$indent`
 (encode only): multi-line, indented output instead of single-line/
 compact, and spaces per nesting level when `$pretty` is `true`
 (default 2).
@@ -212,7 +236,8 @@ say which version it was written with: `%Name(2){...}`.
 ## Versions and extra fields
 
 ```text
-%Point(2){x: 1, y: 2}            written with version 2; encoding always writes the latest
+%Point(2){x: 1, y: 2}            written with version 2; encoding writes the latest, or a loaded version the value says
+Point(2)                         in a .dxns: a field pinned to version 2, {:at Point 2} (DXNS.md §5c)
 %Point{x: 1, y: 2}               no version: read as the latest
 %Point[1 2 label: "a"]           extra fields after a positional struct's items
 %Point{x: 1, y: 2, label: "a"}   an undeclared name is an extra field

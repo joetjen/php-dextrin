@@ -86,6 +86,46 @@ final class CompatTest extends TestCase
         );
     }
 
+    // ---- named types with versions (Way B, DXNS.md §5c) --------------------------
+
+    private const C1 = '%{Color: {:enum :red :green}}';
+    private const C2 = '%{Color: %type(2)[{:enum :red :green :blue}]}';
+
+    public function testANewVersionOfANamedTypePassesAVersionWhoseDefinitionChangedIsAProblem(): void
+    {
+        self::assertSame([], Schema::compat(self::loaded([self::C1]), self::loaded([self::C1, self::C2]))['problems']);
+        self::assertSame(
+            [['type' => 'Color', 'version' => 1, 'problem' => 'changed-without-new-version']],
+            Schema::compat(self::loaded([self::C1]), self::loaded(['%{Color: {:enum :red}}']))['problems'],
+        );
+    }
+
+    public function testANamedTypeVersionThatWentDownIsAProblem(): void
+    {
+        self::assertSame(
+            [['type' => 'Color', 'problem' => 'version-went-down', 'from' => 2, 'to' => 1]],
+            Schema::compat(self::loaded([self::C1, self::C2]), self::loaded([self::C1]))['problems'],
+        );
+    }
+
+    public function testAnnotationsAreNoChangeDeprecatingAVersionThatShippedPasses(): void
+    {
+        $deprecated = '%{User: {:doc %schema{name: {:doc :string %{deprecated: "use full_name"}}} %{deprecated: true}}}';
+        self::assertSame([], Schema::compat(self::loaded([self::V1]), self::loaded([$deprecated]))['problems']);
+        $color = '%{Color: {:doc {:enum :red :green} %{deprecated: true}}}';
+        self::assertSame([], Schema::compat(self::loaded(['%{Color: {:enum :red :green}}']), self::loaded([$color]))['problems']);
+    }
+
+    public function testClosingAVersionOrTypingItsExtrasOtherwiseIsAChange(): void
+    {
+        $base = '%{User: %schema{name: :string}}';
+        foreach (['%{User: %schema{name: :string - *}}', '%{User: %schema{name: :string * :string => :integer}}'] as $changed) {
+            $problems = Schema::compat(self::loaded([$base]), self::loaded([$changed]))['problems'];
+            self::assertCount(1, $problems, $changed);
+            self::assertSame('changed-without-new-version', $problems[0]['problem']);
+        }
+    }
+
     public function testANewSchemaIsNotAProblem(): void
     {
         self::assertSame(
