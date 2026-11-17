@@ -319,7 +319,12 @@ final class Tree
         return match (true) {
             $value instanceof DXNSymbol => [$value->name],
             $value instanceof DXNTuple, $value instanceof DXNList => $all($value->items),
-            $value instanceof DXNStruct => $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
+            // A schema or shape built from others needs its bases too
+            // (DXNS.md §4b), named in its head rather than in its fields.
+            $value instanceof DXNStruct => array_merge(
+                array_map(static fn (array $b): string => $b[1], $value->bases),
+                $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
+            ),
             $value instanceof DXNMap => $all(array_map(static fn (array $p): mixed => $p[1], $value->pairs())),
             is_array($value) => $all($value),
             default => [],

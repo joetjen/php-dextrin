@@ -66,6 +66,19 @@ final class TreeTest extends TestCase
         return array_map(static fn (array $p): string => $p['message'], $problems);
     }
 
+    // A base in another file, its only reference to it (DXNS.md §4b): "z"
+    // sorts after "a", so only the base orders the files.
+    public function testASchemaBuiltFromAnotherFilesLoadsAfterItsBase(): void
+    {
+        $result = Tree::load([self::tree([
+            'a.dxns' => '%{Amateur: %shape extends z/Amateur {x: :integer}}',
+            'z.dxns' => '%{Amateur: %shape{id: :string}}',
+            'b.dxns' => '%{Admin: %schema includes z/Amateur {- id}}',
+        ])]);
+        self::assertTrue($result['ok']);
+        self::assertNotNull($result['registry']->fetchTypeAlias('a/Amateur'));
+    }
+
     public function testATreeInOrderLoadsEveryEntryUnderItsFullName(): void
     {
         $result = Tree::load([self::tree(self::GOOD)]);
