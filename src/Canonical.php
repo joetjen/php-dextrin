@@ -184,10 +184,12 @@ final class Canonical
         $entry = static fn (mixed $key, mixed $field): string => !is_string($key)
             ? self::text($key) . ' => ' . self::text($field)
             : (Printer::isBareIdentifier($key) ? "{$key}: " . self::text($field) : self::quoted($key) . ' => ' . self::text($field));
-        $head = DXNStruct::head($value->name, $value->version);
+        // A `%schema` or `%shape` built from others (DXNS.md §4b) opens
+        // with its clauses, and its `- field`s come first in its body.
+        $head = $value->opening($value->version);
         if ($value->isKeyed()) {
             $written = array_map(static fn (array $pair): string => $entry($pair[0], $pair[1]), [...$value->pairs(), ...$value->extra]);
-            return $head . '{' . implode(' ', $written) . '}';
+            return $head . '{' . implode(' ', [...$value->dropEntries(), ...$written]) . '}';
         }
         $byKey = [];
         foreach ($value->extra as [$key, $field]) {

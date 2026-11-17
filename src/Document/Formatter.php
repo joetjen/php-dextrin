@@ -212,9 +212,19 @@ final class Formatter
             return $this->collection($inner, '', $indent, $room, $flat);
         }
         if ($inner->kind === 'struct') {
+            // A struct's head -- `%Name(3)`, and the `extends` and
+            // `includes` words a `%schema` or `%shape` may carry (DXNS.md
+            // §4b), one space apart -- then its body.
+            $words = [];
             foreach ($inner->children as $part) {
-                if ($part->kind === 'keyed' || $part->kind === 'positional') {
-                    return $this->collection($part, $this->tokensText($inner->first, $part->first - 1), $indent, $room, $flat);
+                if ($part->kind === 'head_word') {
+                    $words[] = $part;
+                } elseif ($part->kind === 'keyed' || $part->kind === 'positional') {
+                    $head = $this->tokensText($inner->first, ($words[0] ?? $part)->first - 1);
+                    foreach ($words as $word) {
+                        $head .= ' ' . $this->tokensText($word->first, $word->last);
+                    }
+                    return $this->collection($part, $words === [] ? $head : "{$head} ", $indent, $room, $flat);
                 }
             }
         }
@@ -315,6 +325,10 @@ final class Formatter
 
     private function item(SyntaxNode $node, string $indent, int $room, bool $flat): string
     {
+        // `- password`: an inherited field left out (DXNS.md §4b).
+        if ($node->kind === 'drop') {
+            return '- ' . $this->tokensText($node->last, $node->last);
+        }
         if ($node->kind !== 'entry') {
             return $this->valueText($node, $indent, $room, $flat);
         }

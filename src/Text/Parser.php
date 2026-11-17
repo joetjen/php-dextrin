@@ -195,6 +195,12 @@ final class Parser
         return $this->peek()->type === $type;
     }
 
+    /** An identifier's name, read off the next token. */
+    private function nextName(): string
+    {
+        return $this->next('IDENTIFIER')->value;
+    }
+
     private function next(string $type): Token
     {
         $tok = $this->peek();
@@ -439,7 +445,7 @@ final class Parser
         $this->next('PERCENT');
         if ($this->at('LBRACE')) {
             $this->begin('map', $at);
-            $pairs = $this->parseEntries(false);
+            [$pairs] = $this->parseEntries(false);
             $this->end();
             return $this->buildMap($pairs);
         }
@@ -452,18 +458,34 @@ final class Parser
     }
 
     /**
-     * The rest of a struct after its `%`: its name, its version, and its
-     * keyed or positional body. `$start` is where its `%` is, for its
-     * errors.
+     * The rest of a struct after its `%`: its name, its version, the
+     * words of its head, and its keyed or positional body. `$start` is
+     * where its `%` is, for its errors.
+     *
+     * A `%schema` or `%shape` may name what it is built from (DXNS.md
+     * §4b) -- `extends User(3) Staff includes Audit` in its head, `- field`
+     * in its body -- and then stays as it is written, a {@see DXNStruct}
+     * carrying its bases and drops, for the schema compiler to read.
      */
     private function parseStructBody(int $start): mixed
     {
         $name = $this->next('IDENTIFIER')->value;
         $version = $this->parseStructVersion();
+        $words = [];
+        while ($this->at('IDENTIFIER')) {
+            $this->begin('head_word');
+            $word = $this->nextName();
+            $words[] = [$word, $this->parseStructVersion()];
+            $this->end();
+        }
+        $bases = self::structBases($name, $words, $start);
         if ($this->at('LBRACE')) {
             // Entries keyed by a name are the struct's fields; any other
             // map key (DXN.md §1.6) is an extra field's (§4.7).
-            $entries = $this->parseEntries(true);
+            [$entries, $drops] = $this->parseEntries(true, true);
+            if ($drops !== [] && !self::isBuildable($name)) {
+                throw new ParseError("only a %schema or a %shape drops a field (- name); %{$name} does not", $start);
+            }
             MapKey::checkPairs($entries);
             $pairs = [];
             $extra = [];
@@ -475,10 +497,78 @@ final class Parser
                     $extra[] = [$key, $value];
                 }
             }
-            return $this->materializeStruct($name, DXNStruct::keyed($name, $pairs, $version, $extra), $start);
+            $struct = DXNStruct::keyed($name, $pairs, $version, $extra);
+            if ($bases !== [] || $drops !== []) {
+                return $struct->withBases($bases, $drops);
+            }
+            return $this->materializeStruct($name, $struct, $start);
         }
         [$values, $extra] = $this->parsePositionalBody();
-        return $this->materializeStruct($name, DXNStruct::positional($name, $values, $version, $extra), $start);
+        $struct = DXNStruct::positional($name, $values, $version, $extra);
+        return $bases !== [] ? $struct->withBases($bases) : $this->materializeStruct($name, $struct, $start);
+    }
+
+    /** Whether a struct named `$name` may be built from others (DXNS.md §4b). */
+    private static function isBuildable(string $name): bool
+    {
+        return $name === 'schema' || $name === 'shape';
+    }
+
+    /**
+     * The words of a struct's head read as `extends` and `includes`
+     * clauses (DXNS.md §4b): each at most once, each naming one base or
+     * more, only on a `%schema` or a `%shape`. The bases come back as
+     * `[kind, name, version]`, in the order written.
+     *
+     * @param list<array{0: string, 1: ?int}> $words
+     * @return list<array{0: 'extends'|'includes', 1: string, 2: ?int}>
+     */
+    private static function structBases(string $name, array $words, int $start): array
+    {
+        if ($words === []) {
+            return [];
+        }
+        if (!self::isBuildable($name)) {
+            throw new ParseError("only a %schema or a %shape names bases in its head; %{$name} does not", $start);
+        }
+        if ($words[0][0] !== 'extends' && $words[0][0] !== 'includes') {
+            throw new ParseError("a head clause begins with extends or includes, got {$words[0][0]}", $start);
+        }
+        $bases = [];
+        // How many bases each clause given so far names.
+        $clauses = [];
+        $including = false;
+        foreach ($words as [$word, $version]) {
+            if ($word === 'extends' || $word === 'includes') {
+                if ($version !== null) {
+                    throw new ParseError('extends and includes each name one base or more: extends User(3)', $start);
+                }
+                if (isset($clauses[$word])) {
+                    throw new ParseError('extends and includes stand at most once each in a head', $start);
+                }
+                $clauses[$word] = 0;
+                $including = $word === 'includes';
+                continue;
+            }
+            $base = self::base($including, $word, $version);
+            $clauses[$base[0]] = ($clauses[$base[0]] ?? 0) + 1;
+            $bases[] = $base;
+        }
+        if (in_array(0, $clauses, true)) {
+            throw new ParseError('extends and includes each name one base or more: extends User(3)', $start);
+        }
+        return $bases;
+    }
+
+    /**
+     * One base of a head: under `includes` when `$including`, otherwise
+     * under `extends`.
+     *
+     * @return array{0: 'extends'|'includes', 1: string, 2: ?int}
+     */
+    private static function base(bool $including, string $name, ?int $version): array
+    {
+        return [$including ? 'includes' : 'extends', $name, $version];
     }
 
     /**
@@ -604,10 +694,15 @@ final class Parser
      * -- callers (map vs struct) each reduce that down to whatever
      * shape they actually need.
      *
-     * @return list<array{0: mixed, 1: mixed}>
+     * A struct's body (`$withDrops`) may also hold `- field` entries
+     * (DXNS.md §4b), answered beside the pairs by name; whether its struct
+     * may carry them is the caller's to say.
+     *
+     * @return array{0: list<array{0: mixed, 1: mixed}>, 1: list<string>}
      */
-    private function parseEntries(bool $ownNode): array
+    private function parseEntries(bool $ownNode, bool $withDrops = false): array
     {
+        $drops = [];
         if ($ownNode) {
             $this->begin('keyed');
         }
@@ -615,6 +710,14 @@ final class Parser
         $this->mark('open');
         $pairs = [];
         while (!$this->at('RBRACE')) {
+            if ($withDrops && $this->at('MINUS')) {
+                $this->begin('drop');
+                $this->next('MINUS');
+                $drops[] = $this->nextName();
+                $this->mark('name');
+                $this->end();
+                continue;
+            }
             $this->begin('entry');
             if ($this->at('MAP_KEY')) {
                 $key = new DXNKeyword($this->next('MAP_KEY')->value);
@@ -634,7 +737,7 @@ final class Parser
         if ($ownNode) {
             $this->end();
         }
-        return $pairs;
+        return [$pairs, $drops];
     }
 
     /**
@@ -733,7 +836,7 @@ final class Parser
         if (!$this->at('LBRACE')) {
             throw new ParseError('@ordered requires a map literal argument', $offset);
         }
-        $pairs = $this->parseEntries(false);
+        [$pairs] = $this->parseEntries(false);
         $this->end();
         $this->end();
         $this->end();

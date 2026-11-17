@@ -64,6 +64,69 @@ final class Validator
         return $pairs;
     }
 
+    /**
+     * The schemas a struct of `$compiled` passes as besides its own
+     * (DXNS.md §4b): each one `$compiled` extends, at the version it was
+     * built with, that `$struct`'s fields are a valid one of -- and in
+     * turn what that one extends. `includes` bases, and shapes, are none.
+     *
+     * @return list<string>
+     */
+    public static function alsoValidAs(Compiled $compiled, DXNStruct $struct, Registry $registry): array
+    {
+        if ($compiled->bases === []) {
+            return [];
+        }
+        try {
+            $given = self::toNameMap($compiled, $struct);
+        } catch (SchemaValidationError) {
+            return [];
+        }
+        $pairs = [];
+        foreach ($given as $name => $value) {
+            $pairs[] = [(string) $name, $value];
+        }
+        return self::passesAs(
+            $compiled,
+            static fn (Compiled $base): bool => self::passes(static fn () => self::resolve($base, DXNStruct::keyed($struct->name, $pairs), $registry)),
+            $registry,
+        );
+    }
+
+    /**
+     * The names of the schemas `$compiled` extends, transitively through
+     * `extends` alone, that `$valid` says the value is a valid one of.
+     *
+     * @param \Closure(Compiled): bool $valid
+     * @return list<string>
+     */
+    private static function passesAs(Compiled $compiled, \Closure $valid, Registry $registry): array
+    {
+        $names = [];
+        foreach ($compiled->bases as [$kind, $base, $version]) {
+            if ($kind !== 'extends' || $version === null) {
+                continue;
+            }
+            $found = $registry->fetchStructSchema($base, $version);
+            if ($found === null || !$valid($found->compiled)) {
+                continue;
+            }
+            $names = [...$names, $base, ...self::passesAs($found->compiled, $valid, $registry)];
+        }
+        return array_values(array_unique($names));
+    }
+
+    /** Whether `$check` runs without a schema violation. */
+    private static function passes(\Closure $check): bool
+    {
+        try {
+            $check();
+        } catch (\Throwable) {
+            return false;
+        }
+        return true;
+    }
+
     /** @return array<string, mixed> */
     private static function toNameMap(Compiled $compiled, DXNStruct $struct): array
     {
@@ -316,7 +379,8 @@ final class Validator
         if ($found !== null) {
             [$name, $compiled] = $found;
             try {
-                return self::checkCompiled($compiled, $value, $registry);
+                $checked = self::checkCompiled($compiled, $value, $registry);
+                return new Validated($checked->name, $checked->value, self::encodesAs($compiled, $value, $registry));
             } catch (\Throwable $err) {
                 throw new SchemaValidationError(
                     "struct \"{$name}\" violates its schema: " . $err->getMessage(),
@@ -326,6 +390,36 @@ final class Validator
             }
         }
         return self::wrapChildren($value, $registry);
+    }
+
+    /**
+     * {@see self::alsoValidAs()} for a value on its way out: each schema
+     * `$compiled` extends that `$value` passes as well. A positional
+     * struct's items are named by its own schema first.
+     *
+     * @return list<string>
+     */
+    private static function encodesAs(Compiled $compiled, mixed $value, Registry $registry): array
+    {
+        if ($compiled->bases === []) {
+            return [];
+        }
+        if ($value instanceof DXNStruct && $value->isPositional()) {
+            $names = $compiled->fieldNames();
+            if (count($names) !== count($value->values())) {
+                return [];
+            }
+            $pairs = [];
+            foreach ($value->values() as $i => $item) {
+                $pairs[] = [$names[$i], $item];
+            }
+            $value = DXNStruct::keyed($value->name, $pairs, $value->version, $value->extra);
+        }
+        return self::passesAs(
+            $compiled,
+            static fn (Compiled $base): bool => self::passes(static fn () => self::checkCompiled($base, $value, $registry)),
+            $registry,
+        );
     }
 
     /** @return array{0: string, 1: Compiled}|null */

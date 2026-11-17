@@ -26,6 +26,15 @@ final class UnsupportedValue extends \InvalidArgumentException implements HasCat
         return new self('a symbol named ' . json_encode($name) . ' has no text form: its name is not an identifier');
     }
 
+    /**
+     * A `%schema` or `%shape` built from others (DXNS.md §4b) is text
+     * only: `.dxnb` has no place for its head's clauses or its `- field`s.
+     */
+    public static function builtStruct(string $name): self
+    {
+        return new self("a %{$name} built from others (extends, includes, - field) has no .dxnb form");
+    }
+
     public function category(): string
     {
         return 'encode/unsupported';

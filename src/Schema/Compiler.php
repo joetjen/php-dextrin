@@ -21,10 +21,16 @@ use JOetjen\Dextrin\Value\Equality;
 
 /**
  * Compiles a parsed `.dxns` document (an ordinary decoded DXN value --
- * a `.dxns` file is valid `.dxn`, no new grammar; what makes it a
- * *schema* document is purely the shape of the value it parses to: a
- * `map` from name to type expression -- a bare PHP array in this port)
+ * a `.dxns` file is valid `.dxn`, whose one piece of grammar for schemas
+ * is what a `%schema` or `%shape` is built from, DXNS.md §4b; what makes
+ * it a *schema* document is purely the shape of the value it parses to:
+ * a `map` from name to type expression -- a bare PHP array in this port)
  * into {@see Compiled} entries.
+ *
+ * A schema or shape built from others -- `%schema(2) extends User
+ * includes Audit {- nick, role: :string}` -- is flattened here into an
+ * ordinary one under its own name ({@see Bases} merges the fields); a
+ * compiled schema records its bases with the version each was taken at.
  *
  * `%schema{}`/`%field{}` are recognized here directly, as {@see
  * DXNStruct} instances named `"schema"`/`"field"` straight out of
@@ -50,6 +56,9 @@ use JOetjen\Dextrin\Value\Equality;
  * were already coerced to PHP array keys by `MapBuilder` -- unlike the
  * JS port's own `entryName()`/`normalizeKeywords()` helpers, neither
  * is needed here.
+ *
+ * @phpstan-type Built array{fields: list<Field>, bases: list<array{0: 'extends'|'includes', 1: string, 2: ?int}>}
+ * @phpstan-type Lookup array{document: array<string, mixed>, compiled: array<string, TypeExpr>, scope: array<string, TypeExpr>, registry: Registry}
  */
 final class Compiler
 {
@@ -120,10 +129,12 @@ final class Compiler
             }
         }
 
-        $registry = self::compileAliases($aliasEntries, $baseRegistry);
+        [$registry, $built] = self::compileAliases($aliasEntries, $baseRegistry, $schemaEntries);
         foreach ($schemaEntries as [$name, $entry]) {
             try {
-                $compiled = self::compileEntry($entry, $registry->typeAliases())->withName($name);
+                $compiled = isset($built[$name])
+                    ? self::builtSchema($entry, $built[$name], $registry->typeAliases())->withName($name)
+                    : self::compileEntry($entry, $registry->typeAliases())->withName($name);
             } catch (SchemaCompileError $err) {
                 throw new SchemaCompileError("schema \"{$name}\": {$err->getMessage()}");
             }
@@ -133,26 +144,82 @@ final class Compiler
     }
 
     /**
+     * A schema built from others (DXNS.md §4b): the fields `$built` holds
+     * for it, each now resolved, at the version its header gives, with the
+     * annotations a `{:doc ...}` around it says.
+     *
+     * @param Built $built
+     * @param array<string, TypeExpr> $known
+     */
+    private static function builtSchema(mixed $entry, array $built, array $known): Compiled
+    {
+        $raw = self::undoc($entry);
+        $annotations = $entry instanceof DXNTuple && self::isForm($entry, 'doc') && count($entry->items) === 3
+            ? self::annotations($entry->items[2], null)
+            : [];
+        $fields = array_map(
+            static fn (Field $f): Field => new Field($f->name, $f->required, self::resolved($f->type, $known, []), $f->default, $f->description),
+            $built['fields'],
+        );
+        return new Compiled(
+            fields: $fields,
+            version: $raw instanceof DXNStruct ? ($raw->version ?? 1) : 1,
+            annotations: $annotations,
+            bases: $built['bases'],
+        );
+    }
+
+    /**
      * Every named type in a document sees every other (design/
      * shapes-and-case.md): each is compiled with its siblings standing as
      * `named`, and those are put in place once all are read -- so the
      * order of a map's entries, which DXN does not give, never matters.
      *
+     * A schema or shape built from others (DXNS.md §4b) is built here too,
+     * once the plain named types are compiled and before any is resolved:
+     * its bases may be any schema or shape of the document, or one already
+     * loaded. A built shape joins the named types; what was built for a
+     * schema comes back beside the registry, by name.
+     *
      * @param list<array{0: string, 1: mixed}> $aliasEntries
+     * @param list<array{0: string, 1: mixed}> $schemaEntries
+     * @return array{0: Registry, 1: array<string, Built>}
      */
-    private static function compileAliases(array $aliasEntries, Registry $registry): Registry
+    private static function compileAliases(array $aliasEntries, Registry $registry, array $schemaEntries): array
     {
         $scope = $registry->typeAliases();
         foreach ($aliasEntries as [$name]) {
             $scope[$name] = TypeExpr::named($name);
         }
         $compiled = [];
+        $extending = [];
         foreach ($aliasEntries as [$name, $rawValue]) {
+            if (self::isBuiltFrom($rawValue)) {
+                $extending[] = [$name, $rawValue];
+                continue;
+            }
             try {
                 $compiled[$name] = self::compileNamed($name, $rawValue, $scope);
             } catch (SchemaCompileError $err) {
                 throw new SchemaCompileError("named type \"{$name}\": {$err->getMessage()}");
             }
+        }
+        $document = [];
+        foreach ([...$aliasEntries, ...$schemaEntries] as [$name, $rawValue]) {
+            $document[$name] = $rawValue;
+        }
+        $lookup = ['document' => $document, 'compiled' => $compiled, 'scope' => $scope, 'registry' => $registry];
+        $built = [];
+        foreach ([...$extending, ...$schemaEntries] as [$name, $rawValue]) {
+            if (self::isBuiltFrom($rawValue)) {
+                self::build($name, [], $lookup, $built);
+            }
+        }
+        foreach ($extending as [$name, $rawValue]) {
+            $shape = TypeExpr::shape($name, $built[$name]['fields']);
+            $compiled[$name] = $rawValue instanceof DXNTuple && self::isForm($rawValue, 'doc') && count($rawValue->items) === 3
+                ? TypeExpr::doc($shape, self::annotations($rawValue->items[2], $shape))
+                : $shape;
         }
         self::guarded($compiled);
         $known = array_merge($registry->typeAliases(), $compiled);
@@ -168,7 +235,313 @@ final class Compiler
             }
             $result = $result->putTypeAlias($name, $typeExpr);
         }
-        return $result;
+        return [$result, $built];
+    }
+
+    // ---- built from others (DXNS.md §4b) ------------------------------------
+
+    /** Whether a document's entry is a `%schema` or `%shape` built from others. */
+    private static function isBuiltFrom(mixed $entry): bool
+    {
+        $raw = self::undoc($entry);
+        return $raw instanceof DXNStruct && ($raw->name === 'schema' || $raw->name === 'shape') && $raw->isBuilt();
+    }
+
+    /**
+     * The fields of the document's entry `$name`, built from its bases,
+     * kept in `$built` with the bases as {@see Compiled} records them.
+     * `$path` holds the entries being built, so one that reaches itself is
+     * seen.
+     *
+     * @param list<string> $path
+     * @param Lookup $lookup
+     * @param array<string, Built> $built
+     */
+    private static function build(string $name, array $path, array $lookup, array &$built): void
+    {
+        if (isset($built[$name])) {
+            return;
+        }
+        if (in_array($name, $path, true)) {
+            throw new SchemaCompileError("\"{$name}\" is built from itself");
+        }
+        $raw = self::undoc($lookup['document'][$name]);
+        if (!$raw instanceof DXNStruct) {
+            throw new \LogicException('only a struct is built from others');
+        }
+        if ($raw->bases === []) {
+            throw new SchemaCompileError("\"{$name}\" drops a field, but names no base to drop it from");
+        }
+        if ($raw->name === 'shape' && $raw->version !== null) {
+            throw new SchemaCompileError('a shape has no version: %shape extends Base {field: type, ...}');
+        }
+        if (!$raw->isKeyed()) {
+            throw new SchemaCompileError("a {$raw->name} lists its fields by name: %{$raw->name}(N){field: type, ...}");
+        }
+        self::distinctBases($name, $raw->bases);
+        $own = self::ownFields($name, $raw, $lookup['scope']);
+        $found = self::foundBases($name, $raw->bases, [$name, ...$path], $lookup, $built);
+        // A base of this document still names its sibling types, one
+        // already loaded has them in place: two fields compare with theirs
+        // in place.
+        $known = array_merge($lookup['registry']->typeAliases(), $lookup['compiled']);
+        $same = static fn (Field $a, Field $b): bool => self::comparable($a, $known) == self::comparable($b, $known);
+        try {
+            $fields = Bases::merge(
+                array_map(static fn (array $b): array => ['kind' => $b['kind'], 'name' => $b['name'], 'fields' => $b['fields']], $found),
+                $own,
+                $raw->drops,
+                $same,
+            );
+        } catch (SchemaCompileError $err) {
+            throw new SchemaCompileError("\"{$name}\": {$err->getMessage()}");
+        }
+        self::builtCases($name, $fields);
+        $built[$name] = [
+            'fields' => $fields,
+            'bases' => array_map(static fn (array $b): array => [$b['kind'], $b['name'], $b['version']], $found),
+        ];
+    }
+
+    /**
+     * `$field` as it compares with the same field found another way: its
+     * type with every named type `$known` has in place.
+     *
+     * @param array<string, TypeExpr> $known
+     */
+    private static function comparable(Field $field, array $known): Field
+    {
+        return new Field($field->name, $field->required, self::inPlace($field->type, $known, []), $field->default, $field->description);
+    }
+
+    /**
+     * `$type` with each `named` replaced by its definition in `$known`;
+     * one being replaced already (`$path`), or one `$known` lacks, stays
+     * a reference by name.
+     *
+     * @param array<string, TypeExpr> $known
+     * @param list<string> $path
+     */
+    private static function inPlace(TypeExpr $type, array $known, array $path): TypeExpr
+    {
+        if ($type->form === 'named') {
+            $name = $type->name ?? '';
+            $target = $known[$name] ?? null;
+            return $target === null || in_array($name, $path, true) ? $type : self::inPlace($target, $known, [$name, ...$path]);
+        }
+        $one = static fn (?TypeExpr $t): ?TypeExpr => $t === null ? null : self::inPlace($t, $known, $path);
+        $many = static fn (?array $ts): ?array => $ts === null ? null : array_map(static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, $path), $ts);
+        return $type->with([
+            'elem' => $one($type->elem),
+            'base' => $one($type->base),
+            'key' => $one($type->key),
+            'value' => $one($type->value),
+            'otherwise' => $one($type->otherwise),
+            'elems' => $many($type->elems),
+            'variants' => $many($type->variants),
+            'fields' => $type->fields === null ? null : array_map(static fn (Field $f): Field => self::comparable($f, $known), $type->fields),
+            'branches' => $type->branches === null ? null : array_map(static fn (array $b): array => [$b[0], self::inPlace($b[1], $known, $path)], $type->branches),
+            'particles' => $type->particles === null ? null : array_map(
+                static fn (Particle $p): Particle => $p->map(static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, $path)),
+                $type->particles,
+            ),
+            'constraints' => $type->constraints === null ? null : TypeExpr::withTypes($type->constraints, static fn (TypeExpr $t): TypeExpr => self::inPlace($t, $known, $path)),
+        ]);
+    }
+
+    /** @param list<array{0: 'extends'|'includes', 1: string, 2: ?int}> $bases */
+    private static function distinctBases(string $name, array $bases): void
+    {
+        foreach (array_count_values(array_column($bases, 1)) as $base => $count) {
+            if ($count > 1) {
+                throw new SchemaCompileError("\"{$name}\" names {$base} twice in its head");
+            }
+        }
+    }
+
+    /**
+     * The fields a built entry's body declares itself, compiled in the
+     * document's scope; whether a `{:case}` among them names a field is
+     * told once they are merged.
+     *
+     * @param array<string, TypeExpr> $scope
+     * @return list<Field>
+     */
+    private static function ownFields(string $name, DXNStruct $raw, array $scope): array
+    {
+        self::notFormat10($raw->pairs());
+        $fields = [];
+        $seen = [];
+        foreach ($raw->pairs() as [$key, $value]) {
+            try {
+                $field = self::compileField($key, $value, $scope);
+            } catch (SchemaCompileError $err) {
+                throw new SchemaCompileError("\"{$name}\": field \"{$key}\": {$err->getMessage()}");
+            }
+            if (isset($seen[$field->name])) {
+                throw new SchemaCompileError("\"{$name}\": field \"{$field->name}\" is named twice");
+            }
+            $seen[$field->name] = true;
+            $fields[] = $field;
+        }
+        return $fields;
+    }
+
+    /**
+     * A `{:case}` in a field names a field of the result (DXNS.md §4b), so
+     * one whose field was dropped, or that no base gives, is refused.
+     *
+     * @param list<Field> $fields
+     */
+    private static function builtCases(string $name, array $fields): void
+    {
+        $names = array_map(static fn (Field $f): string => $f->name, $fields);
+        foreach ($fields as $field) {
+            foreach (self::caseNames($field->type) as $missing) {
+                if (!in_array($missing, $names, true)) {
+                    throw new SchemaCompileError("\"{$name}\": {:case {$missing} ...} names no field of it");
+                }
+            }
+        }
+    }
+
+    /**
+     * The sibling fields every `{:case}` in `$type` names; a shape's cases
+     * name its own fields, so it is not looked into.
+     *
+     * @return list<string>
+     */
+    private static function caseNames(TypeExpr $type): array
+    {
+        if ($type->form === 'shape') {
+            return [];
+        }
+        $children = array_values(array_filter(
+            [$type->elem, $type->base, $type->key, $type->value, $type->otherwise],
+            static fn (?TypeExpr $t): bool => $t !== null,
+        ));
+        $children = [
+            ...$children,
+            ...($type->variants ?? []),
+            ...($type->elems ?? []),
+            ...array_map(static fn (array $b): TypeExpr => $b[1], $type->branches ?? []),
+            ...array_merge([], ...array_map(static fn (Particle $p): array => $p->types(), $type->particles ?? [])),
+            ...TypeExpr::heldTypes($type->constraints ?? []),
+        ];
+        $names = $type->form === 'case' ? [(string) $type->name] : [];
+        return array_merge($names, ...array_map(self::caseNames(...), $children));
+    }
+
+    /**
+     * Each base of the head, found: its fields and the version it was
+     * taken at. A base of the document that is itself built is built
+     * first.
+     *
+     * @param list<array{0: 'extends'|'includes', 1: string, 2: ?int}> $bases
+     * @param list<string> $path
+     * @param Lookup $lookup
+     * @param array<string, Built> $built
+     * @return list<array{kind: 'extends'|'includes', name: string, fields: list<Field>, version: ?int}>
+     */
+    private static function foundBases(string $name, array $bases, array $path, array $lookup, array &$built): array
+    {
+        $found = [];
+        foreach ($bases as [$kind, $base, $version]) {
+            $full = self::$names[$base] ?? $base;
+            $answer = array_key_exists($full, $lookup['document'])
+                ? self::documentBase($full, self::undoc($lookup['document'][$full]), $version, $path, $lookup, $built)
+                : self::loadedBase($full, $version, $lookup['registry']);
+            if (is_string($answer)) {
+                throw new SchemaCompileError("\"{$name}\": base {$base}: {$answer}");
+            }
+            $found[] = ['kind' => $kind, 'name' => $full, 'fields' => $answer[0], 'version' => $answer[1]];
+        }
+        return $found;
+    }
+
+    /**
+     * A base of the document: its fields and the version they are at, or
+     * why it is none.
+     *
+     * @param list<string> $path
+     * @param Lookup $lookup
+     * @param array<string, Built> $built
+     * @return array{0: list<Field>, 1: ?int}|string
+     */
+    private static function documentBase(string $base, mixed $raw, ?int $version, array $path, array $lookup, array &$built): array|string
+    {
+        if (!$raw instanceof DXNStruct || ($raw->name !== 'schema' && $raw->name !== 'shape')) {
+            return 'a base is a %schema or a %shape';
+        }
+        if ($raw->name === 'shape' && $version !== null) {
+            return "a shape has no versions, so {$base}({$version}) names none";
+        }
+        if (self::isBuiltFrom($raw)) {
+            self::build($base, $path, $lookup, $built);
+            return self::atVersion($base, $raw, $version, $built[$base]['fields'], $lookup['registry']);
+        }
+        if ($raw->name === 'shape') {
+            return [self::shapeFields($lookup['compiled'][$base]) ?? [], null];
+        }
+        try {
+            $fields = self::compileEntry($raw, $lookup['scope'])->fields;
+        } catch (SchemaCompileError $err) {
+            return $err->getMessage();
+        }
+        return self::atVersion($base, $raw, $version, $fields, $lookup['registry']);
+    }
+
+    /**
+     * A schema of the document, at the version the head asks for: its
+     * own, or one already loaded. Without a version, the latest of them --
+     * what is loaded asked for as any other base is, so a resolver's
+     * answer counts.
+     *
+     * @param list<Field> $fields
+     * @return array{0: list<Field>, 1: ?int}|string
+     */
+    private static function atVersion(string $base, DXNStruct $raw, ?int $version, array $fields, Registry $registry): array|string
+    {
+        if ($raw->name === 'shape') {
+            return [$fields, null];
+        }
+        $own = $raw->version ?? 1;
+        $loaded = $registry->fetchStructSchema($base)?->compiled->version;
+        $wanted = $version ?? max($own, $loaded ?? $own);
+        return $wanted === $own ? [$fields, $own] : self::loadedBase($base, $wanted, $registry);
+    }
+
+    /**
+     * A base already loaded: a schema at `$version`, or its latest
+     * without one; or a shape among the named types.
+     *
+     * @return array{0: list<Field>, 1: ?int}|string
+     */
+    private static function loadedBase(string $base, ?int $version, Registry $registry): array|string
+    {
+        $found = $registry->fetchStructSchema($base, $version);
+        if ($found !== null) {
+            return [$found->compiled->fields, $found->compiled->version];
+        }
+        $type = $registry->fetchTypeAlias($base);
+        if ($version !== null) {
+            return "{$base}({$version}) is not loaded";
+        }
+        if ($type === null) {
+            return "no schema or shape is named {$base}";
+        }
+        $shape = self::shapeFields($type);
+        return $shape === null ? 'a base is a %schema or a %shape' : [$shape, null];
+    }
+
+    /** @return list<Field>|null */
+    private static function shapeFields(?TypeExpr $type): ?array
+    {
+        return match ($type?->form) {
+            'shape' => $type->fields ?? [],
+            'doc' => self::shapeFields($type->elem),
+            default => null,
+        };
     }
 
     /**
@@ -591,6 +964,11 @@ final class Compiler
         // map's fields, as a schema's are written; no version, never
         // positional.
         if ($value instanceof DXNStruct && $value->name === 'shape') {
+            if ($value->isBuilt()) {
+                throw new SchemaCompileError(
+                    'a shape built from others is an entry of its own, Name: %shape extends Base {...}, used by its name',
+                );
+            }
             if (!$value->isKeyed()) {
                 throw new SchemaCompileError('a shape lists its fields by name: %shape{field: type, ...}');
             }

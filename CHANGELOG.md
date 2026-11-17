@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A schema or a shape can be built from others** (DXNS.md §4b), as in
+  dextrin: `%schema(1) extends User includes Audit {- password, role: :string}`
+  takes the fields of its bases, overrides those it declares again,
+  leaves out each `- field` and adds its own. The result is an ordinary
+  schema under its own name, and `Compiled::$bases` records what it was
+  built from. A struct of a schema that `extends` another is accepted
+  wherever that one is expected, when it is a valid one as well, on
+  decode and on encode; `includes` builds the same fields without that.
+  DXN text gains the head clauses and `- field` for `%schema` and
+  `%shape` (`DXNStruct::$bases`, `DXNStruct::$drops`); on any other
+  struct they are a syntax error, and a schema written with them has no
+  `.dxnb` form (`encode/unsupported`). The guides' grammar and DXNS.md
+  §4b say how.
+
 ### Documentation
 
 - The README's speed table has Elixir's numbers on ichor 0.7.3's parser: decoding 3.45 ms instead of 3.59, lexing 1.07 ms instead of 1.61.

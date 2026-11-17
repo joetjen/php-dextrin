@@ -280,7 +280,9 @@ final class Printer
             $struct->extra,
         );
         if ($struct->isKeyed()) {
-            $parts = [];
+            // A `%schema` or `%shape` built from others leaves its
+            // inherited fields out first: `- password` (DXNS.md §4b).
+            $parts = $struct->dropEntries();
             foreach ($struct->pairs() as [$name, $value]) {
                 $parts[] = self::printKeywordEntry($name, $value, $registry);
             }
@@ -295,12 +297,14 @@ final class Printer
     /**
      * How `$struct` opens when it is written: `%Name(3)` with the latest
      * loaded version of its schema, or with its own when there is no
-     * schema (DXNS.md §8). The formatter writes the same head.
+     * schema (DXNS.md §8), then the `extends` and `includes` clauses of a
+     * `%schema` or `%shape` built from others (§4b). The formatter writes
+     * the same head.
      */
     public static function writtenHead(DXNStruct $struct, ?Registry $registry): string
     {
         $written = $registry?->asWritten($struct) ?? $struct;
-        return DXNStruct::head($written->name, $written->version);
+        return $struct->opening($written->version);
     }
 
     /**
