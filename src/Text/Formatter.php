@@ -94,9 +94,8 @@ final class Formatter
             // above already caught the empty case -- $value here is
             // guaranteed non-empty (map-shaped) already.
             is_array($value) => self::bracketedEntries('%{', self::mapToDxnPairs($value), '}', $depth, $l),
-            $value instanceof DXNStruct && $value->isKeyed() && ($value->pairs() !== [] || $value->extra !== [])
-                => Printer::writtenHead($value, $l->registry)
-                    . self::bracketedEntries('{', [...self::keywordPairs($value->pairs()), ...self::extraPairs($value)], '}', $depth, $l),
+            $value instanceof DXNStruct && $value->isKeyed() && ($value->pairs() !== [] || $value->extra !== [] || $value->drops !== [])
+                => Printer::writtenHead($value, $l->registry) . self::keyedBody($value, $depth, $l),
             // A positional struct's items, then its extra fields as
             // entries, one per line like the items (DXN.md §1.2).
             $value instanceof DXNStruct && $value->isPositional() && ($value->values() !== [] || $value->extra !== [])
@@ -232,6 +231,24 @@ final class Formatter
             static fn (array $pair): array => [is_string($pair[0]) ? new DXNKeyword($pair[0]) : $pair[0], $pair[1]],
             $value->extra,
         );
+    }
+
+    /**
+     * A keyed struct's body: the `- field`s of a `%schema` or `%shape`
+     * built from others first (DXNS.md §4b), then its fields, then its
+     * extra fields, one per line.
+     */
+    private static function keyedBody(DXNStruct $value, int $depth, Layout $l): string
+    {
+        $innerDepth = $depth + 1;
+        $lines = [
+            ...$value->dropEntries(),
+            ...array_map(
+                static fn (array $pair): string => self::renderEntry($pair[0], $pair[1], $innerDepth, $l),
+                [...self::keywordPairs($value->pairs()), ...self::extraPairs($value)],
+            ),
+        ];
+        return self::joined('{', $lines, '}', $depth, $l);
     }
 
     private static function bracketedItemsAndEntries(DXNStruct $value, int $depth, Layout $l): string

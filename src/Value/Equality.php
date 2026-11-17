@@ -321,7 +321,10 @@ final class Equality
             $parts[] = $key . '=>' . self::canonicalKey($value);
         }
         sort($parts);
-        return "struct:{$struct->name}:keyed:{" . implode(',', $parts) . '}';
+        // What a `%schema` or `%shape` is built from (DXNS.md §4b) is part
+        // of it; any other struct has none, and its key is unchanged.
+        $built = $struct->isBuilt() ? ':built:' . $struct->opening(null) . implode(' ', $struct->dropEntries()) : '';
+        return "struct:{$struct->name}:keyed:{" . implode(',', $parts) . '}' . $built;
     }
 
     private static function durationKey(DXNDuration $duration): string

@@ -112,6 +112,10 @@ final class Lexer
             $c === '=' && ($this->cp[$this->i + 1] ?? null) === '>' => $this->arrow(),
             $this->isDigit($c) || ($c === '-' && $this->isDigit($this->cp[$this->i + 1] ?? null)) => $this->readNumber(),
             $c === '-' && $this->startsWith($this->i + 1, 'Infinity') => $this->readNumber(),
+            // Any other "-" stands alone: the `- field` of a `%schema` or
+            // `%shape` body (DXNS.md §4b), and refused by the parser
+            // anywhere else.
+            $c === '-' => $this->single('MINUS'),
             $this->isIdStart($c) => $this->readIdentifierOrKeywordLike($start),
             default => throw new LexError("unexpected character '{$c}' at offset {$start}", $start),
         };

@@ -135,7 +135,7 @@ final class Reader
         $value = $materializer === null
             ? DXNStruct::keyed($struct->name, $pairs, $latest->version, $extra)
             : self::built($registry, $materializer, $struct->name, $reading, $latest, $pairs, $extra);
-        return [new Validated($struct->name, $value), $registry];
+        return [new Validated($struct->name, $value, Validator::alsoValidAs($reading, $struct, $registry)), $registry];
     }
 
     /**
