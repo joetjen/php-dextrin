@@ -207,6 +207,9 @@ final class Encoder
      */
     private static function encodeStruct(DXNStruct $struct, ?Registry $registry): string
     {
+        if ($struct->isBuilt()) {
+            throw \JOetjen\Dextrin\UnsupportedValue::builtStruct($struct->name);
+        }
         $written = $registry?->asWritten($struct) ?? $struct;
         $items = [
             Writer::textItem(DXNStruct::typeName($written->name, $written->version)),

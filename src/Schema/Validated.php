@@ -26,12 +26,17 @@ use JOetjen\Dextrin\Value\DXNTuple;
  * successfully-checked struct's result in one of these; `strip()`
  * removes every occurrence, recursively, once the value reaches
  * somewhere that isn't itself another schema check.
+ *
+ * `also` names the schemas the value passes as besides its own: those its
+ * schema extends, and that it is a valid one of (DXNS.md §4b).
  */
 final class Validated
 {
+    /** @param list<string> $also */
     public function __construct(
         public readonly string $name,
         public readonly mixed $value,
+        public readonly array $also = [],
     ) {
     }
 

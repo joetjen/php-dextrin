@@ -19,25 +19,32 @@ namespace JOetjen\Dextrin\Schema;
  *
  * `annotations` are what a `{:doc %schema{...} %{...}}` around the entry
  * says about it (DXNS.md §1b), by name; `[]` without one.
+ *
+ * `bases` are what it was built from (DXNS.md §4b), as `[kind, name,
+ * version]` in head order -- each schema at the version it was built
+ * with, a shape with `null`: what an `extends` makes it acceptable as.
+ * `[]` for a schema written whole.
  */
 final class Compiled
 {
     /**
      * @param list<Field> $fields
      * @param array<string, mixed> $annotations
+     * @param list<array{0: 'extends'|'includes', 1: string, 2: ?int}> $bases
      */
     public function __construct(
         public readonly ?string $name = null,
         public readonly array $fields = [],
         public readonly int $version = 1,
         public readonly array $annotations = [],
+        public readonly array $bases = [],
     ) {
     }
 
     /** A schema's `name` is only known once {@see Compiler} finishes compiling its enclosing document -- returns a copy with it set. */
     public function withName(string $name): self
     {
-        return new self($name, $this->fields, $this->version, $this->annotations);
+        return new self($name, $this->fields, $this->version, $this->annotations, $this->bases);
     }
 
     /**
@@ -47,7 +54,7 @@ final class Compiled
      */
     public function withAnnotations(array $annotations): self
     {
-        return new self($this->name, $this->fields, $this->version, $annotations);
+        return new self($this->name, $this->fields, $this->version, $annotations, $this->bases);
     }
 
     /** @return list<string> */

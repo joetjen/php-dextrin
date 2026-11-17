@@ -25,7 +25,14 @@ namespace JOetjen\Dextrin\Value;
  * they are entries after the fields or the items; in `.dxnb`, one
  * trailing tag-215 map.
  *
+ * `bases` and `drops` are what a `%schema` or `%shape` is built from
+ * (DXNS.md §4b): `bases` the head's `extends` and `includes` names, as
+ * `[kind, name, version]` in the order written -- kind `'extends'` or
+ * `'includes'`, version `null` when none is named -- and `drops` the
+ * body's `- field` names. Every other struct has none.
+ *
  * @phpstan-type Pair array{0: string, 1: mixed}
+ * @phpstan-type Base array{0: 'extends'|'includes', 1: string, 2: ?int}
  */
 final class DXNStruct implements DXNValueInterface
 {
@@ -40,20 +47,36 @@ final class DXNStruct implements DXNValueInterface
     private readonly array $pairs;
     /** @var list<mixed> */
     private readonly array $values;
+    /** @var list<Base> */
+    public readonly array $bases;
+    /** @var list<string> */
+    public readonly array $drops;
 
     /**
      * @param list<Pair> $pairs
      * @param list<mixed> $values
      * @param list<array{0: mixed, 1: mixed}> $extra
+     * @param list<Base> $bases
+     * @param list<string> $drops
      */
-    private function __construct(string $name, string $kind, array $pairs, array $values, ?int $version, array $extra)
-    {
+    private function __construct(
+        string $name,
+        string $kind,
+        array $pairs,
+        array $values,
+        ?int $version,
+        array $extra,
+        array $bases = [],
+        array $drops = [],
+    ) {
         $this->name = $name;
         $this->kind = $kind;
         $this->pairs = $pairs;
         $this->values = $values;
         $this->version = $version;
         $this->extra = $extra;
+        $this->bases = $bases;
+        $this->drops = $drops;
     }
 
     /**
@@ -126,7 +149,64 @@ final class DXNStruct implements DXNValueInterface
     /** This struct carrying `$version` instead, and otherwise unchanged. */
     public function withVersion(?int $version): self
     {
-        return new self($this->name, $this->kind, $this->pairs, $this->values, $version, $this->extra);
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $version, $this->extra, $this->bases, $this->drops);
+    }
+
+    /**
+     * This struct built from `$bases`, leaving out `$drops` (DXNS.md §4b),
+     * and otherwise unchanged -- what the parser makes of a `%schema` or
+     * `%shape` head's clauses and its body's `- field`s.
+     *
+     * @param list<Base> $bases
+     * @param list<string> $drops
+     */
+    public function withBases(array $bases, array $drops = []): self
+    {
+        return new self($this->name, $this->kind, $this->pairs, $this->values, $this->version, $this->extra, $bases, $drops);
+    }
+
+    /** Whether this is a `%schema` or `%shape` built from others (DXNS.md §4b). */
+    public function isBuilt(): bool
+    {
+        return $this->bases !== [] || $this->drops !== [];
+    }
+
+    /**
+     * How this struct opens when written at `$version`: its {@see head()},
+     * then the `extends` and `includes` clauses a `%schema` or `%shape` is
+     * built from (DXNS.md §4b), in the order the bases were written, and
+     * one space before the body. Shared by every text writer.
+     *
+     * `%schema(2) extends User(3) includes Audit ` for a schema built
+     * from those two.
+     */
+    public function opening(?int $version): string
+    {
+        $head = self::head($this->name, $version);
+        if ($this->bases === []) {
+            return $head;
+        }
+        $clauses = [];
+        $kind = null;
+        foreach ($this->bases as [$baseKind, $base, $baseVersion]) {
+            if ($baseKind !== $kind) {
+                $clauses[] = $baseKind;
+                $kind = $baseKind;
+            }
+            $clauses[] = self::typeName($base, $baseVersion);
+        }
+        return $head . ' ' . implode(' ', $clauses) . ' ';
+    }
+
+    /**
+     * The `- field` entries of a `%schema` or `%shape` that leaves
+     * inherited fields out (DXNS.md §4b), as they are written.
+     *
+     * @return list<string>
+     */
+    public function dropEntries(): array
+    {
+        return array_map(static fn (string $field): string => "- {$field}", $this->drops);
     }
 
     /**
@@ -138,7 +218,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withPairs(array $pairs): self
     {
-        return self::keyed($this->name, $pairs, $this->version, $this->extra);
+        return new self($this->name, 'keyed', array_values($pairs), [], $this->version, $this->extra, $this->bases, $this->drops);
     }
 
     /**
@@ -149,7 +229,7 @@ final class DXNStruct implements DXNValueInterface
      */
     public function withValues(array $values): self
     {
-        return self::positional($this->name, $values, $this->version, $this->extra);
+        return new self($this->name, 'positional', [], array_values($values), $this->version, $this->extra, $this->bases, $this->drops);
     }
 
     public function isKeyed(): bool
@@ -192,6 +272,8 @@ final class DXNStruct implements DXNValueInterface
             || $this->name !== $other->name
             || $this->kind !== $other->kind
             || $this->version !== $other->version
+            || $this->bases !== $other->bases
+            || $this->drops !== $other->drops
             || count($this->extra) !== count($other->extra)
         ) {
             return false;

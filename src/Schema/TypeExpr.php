@@ -393,7 +393,7 @@ final class TypeExpr
 
         if ($value instanceof Validated) {
             $inner = $this->conform($value->value, $ctx);
-            return $inner === NoMatch::Instance ? NoMatch::Instance : new Validated($value->name, $inner);
+            return $inner === NoMatch::Instance ? NoMatch::Instance : new Validated($value->name, $inner, $value->also);
         }
 
         switch ($this->form) {
@@ -872,8 +872,10 @@ final class TypeExpr
         if ($value instanceof DXNStruct) {
             return $value->name === $name;
         }
+        // A value of a schema that extends `$name`, and is a valid `$name`
+        // as well, is accepted where a `$name` is (DXNS.md §4b).
         if ($value instanceof Validated) {
-            return $value->name === $name;
+            return $value->name === $name || in_array($name, $value->also, true);
         }
         // A struct is matched only by a struct (DXNS.md §7): past a
         // struct or checked value of the right name, only the class
