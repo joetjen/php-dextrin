@@ -285,7 +285,7 @@ abstract class AbstractSink
      */
     public function validate(string $deprecations = 'once', ?callable $onDeprecated = null): void
     {
-        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['first-name' => $this->firstName, 'count' => $this->count, 'scores' => $this->scores, 'both' => $this->both, 'odd' => $this->odd, 'pick' => $this->pick, 'tree' => $this->tree, 'closed' => $this->closed, 'gone' => $this->gone, 'at' => $this->at, 'seen' => $this->seen, 'when' => $this->when, 'anything' => $this->anything])));
+        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['first-name' => $this->firstName, 'count' => $this->count, 'scores' => $this->scores, 'both' => $this->both, 'odd' => $this->odd, 'pick' => $this->pick, 'tree' => $this->tree, 'closed' => $this->closed, 'gone' => $this->gone, 'at' => $this->at, 'seen' => $this->seen, 'when' => $this->when, 'anything' => $this->anything], ['first-name', 'count', 'scores', 'both', 'odd', 'pick', 'at', 'seen'])));
     }
 
     /**
@@ -296,7 +296,7 @@ abstract class AbstractSink
      */
     public function toDxn(): DXNStruct
     {
-        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['first-name' => $this->firstName, 'count' => $this->count, 'scores' => $this->scores, 'both' => $this->both, 'odd' => $this->odd, 'pick' => $this->pick, 'tree' => $this->tree, 'closed' => $this->closed, 'gone' => $this->gone, 'at' => $this->at, 'seen' => $this->seen, 'when' => $this->when, 'anything' => $this->anything]), self::DXN_LATEST);
+        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['first-name' => $this->firstName, 'count' => $this->count, 'scores' => $this->scores, 'both' => $this->both, 'odd' => $this->odd, 'pick' => $this->pick, 'tree' => $this->tree, 'closed' => $this->closed, 'gone' => $this->gone, 'at' => $this->at, 'seen' => $this->seen, 'when' => $this->when, 'anything' => $this->anything], ['first-name', 'count', 'scores', 'both', 'odd', 'pick', 'at', 'seen']), self::DXN_LATEST);
     }
 
     /**

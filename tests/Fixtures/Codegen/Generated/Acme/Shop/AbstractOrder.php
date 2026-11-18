@@ -192,7 +192,7 @@ abstract class AbstractOrder
      */
     public function validate(string $deprecations = 'once', ?callable $onDeprecated = null): void
     {
-        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['id' => $this->id, 'customer' => $this->customer, 'total' => $this->total, 'status' => $this->status, 'lines' => $this->lines, 'note' => $this->note])));
+        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['id' => $this->id, 'customer' => $this->customer, 'total' => $this->total, 'status' => $this->status, 'lines' => $this->lines, 'note' => $this->note], ['id', 'customer', 'total', 'status', 'lines'])));
     }
 
     /**
@@ -203,7 +203,7 @@ abstract class AbstractOrder
      */
     public function toDxn(): DXNStruct
     {
-        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['id' => $this->id, 'customer' => $this->customer, 'total' => $this->total, 'status' => $this->status, 'lines' => $this->lines, 'note' => $this->note]), self::DXN_LATEST);
+        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['id' => $this->id, 'customer' => $this->customer, 'total' => $this->total, 'status' => $this->status, 'lines' => $this->lines, 'note' => $this->note], ['id', 'customer', 'total', 'status', 'lines']), self::DXN_LATEST);
     }
 
     /**

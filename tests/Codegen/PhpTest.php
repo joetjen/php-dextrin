@@ -326,6 +326,21 @@ final class PhpTest extends TestCase
         self::assertSame('Ada', $ada->name);
     }
 
+    public function testARequiredFieldThatMayBeNullKeepsItsNullThroughValidateAndToDxn(): void
+    {
+        $root = $this->schemasDir(['a/Memo.dxns' => '%{Memo: %schema{note: {:nilable :string} done: :boolean tag?: :string}}']);
+        $ns = self::ns();
+        self::generate($root, $ns);
+        $this->autoload($root, $ns);
+        $memo = self::cls($ns, 'A\\Memo');
+
+        $read = $memo::read(self::dxn('%a/Memo{note: nil done: false}'));
+        self::assertNull($read->note);
+        $read->validate();
+        $struct = $read->toDxn();
+        self::assertSame([['note', null], ['done', false]], $struct->pairs());
+    }
+
     public function testAWithCopyOfASnakeCaseFieldIsNamedInCamelCase(): void
     {
         $root = $this->schemasDir(['a/Stamp.dxns' => '%{Stamp: %schema{signed_up_at: :string}}']);

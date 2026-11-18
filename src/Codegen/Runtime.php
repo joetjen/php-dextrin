@@ -263,16 +263,18 @@ final class Runtime
 
     /**
      * The fields given -- a validated object's properties by field name --
-     * without those holding `null`, which are absent.
+     * without the optional ones holding `null`, which are absent; a
+     * required field holds `null` as its value.
      *
      * @param array<int|string, mixed> $fields
+     * @param list<string> $required the fields that are never absent
      * @return array<string, mixed>
      */
-    public static function present(array $fields): array
+    public static function present(array $fields, array $required = []): array
     {
         $out = [];
         foreach ($fields as $name => $value) {
-            if ($value !== null) {
+            if ($value !== null || in_array((string) $name, $required, true)) {
                 $out[(string) $name] = $value;
             }
         }
@@ -281,15 +283,17 @@ final class Runtime
 
     /**
      * A generated object's fields as a struct's pairs, written back as DXN
-     * ({@see self::toDxn()}), those holding `null` left out.
+     * ({@see self::toDxn()}): an optional field holding `null` left out, a
+     * required one written with it.
      *
      * @param array<int|string, mixed> $fields by field name
+     * @param list<string> $required the fields that are never absent
      * @return list<array{0: string, 1: mixed}>
      */
-    public static function pairs(array $fields): array
+    public static function pairs(array $fields, array $required = []): array
     {
         $pairs = [];
-        foreach (self::present($fields) as $name => $value) {
+        foreach (self::present($fields, $required) as $name => $value) {
             $pairs[] = [$name, self::toDxn($value)];
         }
         return $pairs;

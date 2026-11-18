@@ -151,7 +151,7 @@ abstract class AbstractItem
      */
     public function validate(string $deprecations = 'once', ?callable $onDeprecated = null): void
     {
-        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['color' => $this->color, 'note' => $this->note, 'pet' => $this->pet])));
+        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['color' => $this->color, 'note' => $this->note, 'pet' => $this->pet], [])));
     }
 
     /**
@@ -162,7 +162,7 @@ abstract class AbstractItem
      */
     public function toDxn(): DXNStruct
     {
-        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['color' => $this->color, 'note' => $this->note, 'pet' => $this->pet]), self::DXN_LATEST);
+        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['color' => $this->color, 'note' => $this->note, 'pet' => $this->pet], []), self::DXN_LATEST);
     }
 
     /**

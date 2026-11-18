@@ -414,7 +414,7 @@ final class PhpClass
                  */
                 public function validate(string \$deprecations = 'once', ?callable \$onDeprecated = null): void
                 {
-                    Runtime::reading(\$deprecations, \$onDeprecated, fn (): array => self::fieldsV{$latest->version}(Runtime::present({$this->fieldArray($latest)})));
+                    Runtime::reading(\$deprecations, \$onDeprecated, fn (): array => self::fieldsV{$latest->version}(Runtime::present({$this->fieldArray($latest)}, {$this->requiredList($latest)})));
                 }
 
             PHP;
@@ -431,13 +431,25 @@ final class PhpClass
                  */
                 public function toDxn(): DXNStruct
                 {
-                    return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs({$this->fieldArray($latest)}), self::DXN_LATEST);
+                    return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs({$this->fieldArray($latest)}, {$this->requiredList($latest)}), self::DXN_LATEST);
                 }
 
             PHP;
     }
 
     /** `['name' => $this->name, ...]`: the properties by field name. */
+    /** The names of a version's required fields, as a PHP list literal. */
+    private function requiredList(Compiled $version): string
+    {
+        $names = [];
+        foreach ($version->fields as $field) {
+            if ($field->required) {
+                $names[] = self::str($field->name);
+            }
+        }
+        return '[' . implode(', ', $names) . ']';
+    }
+
     private function fieldArray(Compiled $latest): string
     {
         return self::list(array_map(

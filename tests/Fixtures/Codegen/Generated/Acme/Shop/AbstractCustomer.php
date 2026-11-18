@@ -136,7 +136,7 @@ abstract class AbstractCustomer
      */
     public function validate(string $deprecations = 'once', ?callable $onDeprecated = null): void
     {
-        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['name' => $this->name, 'code' => $this->code])));
+        Runtime::reading($deprecations, $onDeprecated, fn (): array => self::fieldsV1(Runtime::present(['name' => $this->name, 'code' => $this->code], ['name'])));
     }
 
     /**
@@ -147,7 +147,7 @@ abstract class AbstractCustomer
      */
     public function toDxn(): DXNStruct
     {
-        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['name' => $this->name, 'code' => $this->code]), self::DXN_LATEST);
+        return DXNStruct::keyed(self::DXN_SCHEMA, Runtime::pairs(['name' => $this->name, 'code' => $this->code], ['name']), self::DXN_LATEST);
     }
 
     /**
