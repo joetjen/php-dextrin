@@ -281,7 +281,6 @@ final class Html
             . "<head>\n"
             . "<meta charset=\"utf-8\">\n"
             . "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n"
-            . "<meta name=\"claude:viewport-fit-sides\" content=\"cover\">\n"
             . '<title>' . Markdown::escape($title) . "</title>\n"
             . "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
             . "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"

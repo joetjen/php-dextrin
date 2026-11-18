@@ -118,6 +118,8 @@ What DXNS lacked to say every TypeSpec type exactly, as in dextrin
 
 ### Fixed
 
+- `dextrin docs` no longer writes a viewer-specific `viewport-fit-sides` meta tag into
+  every page: a hint a documentation site does not need.
 - **`:map` takes a map PHP cannot hold as an array**: `%{}` decoded, or
   a map keyed by a uuid or a date, is a `DXNMap`, and `:map` refused it.
 - **`{:not T}` refuses nil when T takes nil**: a conformed nil was read

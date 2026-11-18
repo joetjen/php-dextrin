@@ -45,6 +45,13 @@ final class DocsTest extends TestCase
         return $pages;
     }
 
+    public function testAPageNamesNoToolInItsMarkup(): void
+    {
+        foreach (self::site(['a.dxns' => '%{T: :string}']) as $html) {
+            self::assertDoesNotMatchRegularExpression('/claude/i', $html);
+        }
+    }
+
     public function testItWritesTheExampleExactlyAsTheReferenceDoes(): void
     {
         $expected = self::filesUnder(__DIR__ . '/../../example/doc');
