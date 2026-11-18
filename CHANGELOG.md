@@ -67,6 +67,17 @@ What DXNS lacked to say every TypeSpec type exactly, as in dextrin
   its latest and `Color(1)` an older one (`Registry::putTypeVersion()`,
   `fetchTypeVersion()`, `typeVersions()`; `DXNTuple::pin()`,
   `pinned()`). `dextrin compat` checks named types' versions too.
+- **`dextrin docs` shows everything DXNS gained since it was written**:
+  a head's bases as links and the fields it leaves out; typed extras
+  (`* K => V`) and `- *` as rows of the body; a named type's versions
+  (`%type(N)`) beside a schema's; a pinned reference (`Tier(1)`,
+  `{:at Tier 1}`) linking to the version it pins; a deprecated version,
+  field or definition struck through, with its reason; a generic's
+  parameters with their bounds and defaults; chips for `key`, `secret`,
+  `visibility` and `discriminator`, and a list of `messages`; a computed
+  default; and, for a file a converter or emitter wrote, what generated
+  it from what, instead of its header as prose. The example gains
+  `acme.billing` and versions of `Customer` and `Tier` that use them.
 - A refusal now says why, where it can: `field "a" does not match its
   declared type: ...`, and `value does not match "T": ...` from
   `Schema::check` and `Schema::conform`.

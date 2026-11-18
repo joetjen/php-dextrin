@@ -6,6 +6,7 @@ namespace JOetjen\Dextrin\Schema\Docs;
 
 use JOetjen\Dextrin\Canonical;
 use JOetjen\Dextrin\Schema\Docs;
+use JOetjen\Dextrin\Value\DXNKeyword;
 use JOetjen\Dextrin\Value\DXNList;
 use JOetjen\Dextrin\Value\DXNMap;
 use JOetjen\Dextrin\Text\SyntaxNode;
@@ -216,6 +217,13 @@ final class Html
                     $refs[$ref] = true;
                 }
             }
+            foreach ($d->versions as $v) {
+                foreach ($v->bases as $group) {
+                    foreach ($group['names'] as [$name]) {
+                        $refs[Docs::resolve($name, $d->scope)] = true;
+                    }
+                }
+            }
             foreach (array_keys($refs) as $ref) {
                 $ref = (string) $ref;
                 if ($ref === $d->name || isset($seen["{$ref}\0{$d->name}"])) {
@@ -228,16 +236,31 @@ final class Html
         return $out;
     }
 
-    /** @return list<?At> */
+    /**
+     * Every type a definition's versions write: a named type's definition
+     * and its parameters' bounds and defaults, a body's field types and its
+     * extras' keys and values.
+     *
+     * @return list<?At>
+     */
     private static function typesOf(Definition $d): array
     {
         $out = [];
         foreach ($d->versions as $v) {
             if ($d->kind === 'type') {
                 $out[] = $v->value;
+                foreach ($v->params as $p) {
+                    $out[] = $p['bound'];
+                    $out[] = $p['default'];
+                }
             } else {
                 foreach ($v->fields as $f) {
-                    $out[] = $f->type;
+                    if ($f instanceof Field) {
+                        $out[] = $f->type;
+                    } elseif ($f->kind === 'extra') {
+                        $out[] = $f->key;
+                        $out[] = $f->type;
+                    }
                 }
             }
         }
@@ -470,7 +493,7 @@ final class Html
         $anchor = Markdown::escape(self::anchor($d));
         return "<article class=\"def kind-{$d->kind}\" id=\"{$anchor}\">\n"
             . "  <header class=\"def-head\">\n"
-            . "    <h2><a class=\"self\" href=\"#{$anchor}\"><code>" . Markdown::escape($d->short) . "</code></a></h2>\n"
+            . "    <h2><a class=\"self\" href=\"#{$anchor}\"><code>" . self::struck(Markdown::escape($d->short), $latest->annotations) . "</code></a></h2>\n"
             . '    <div class="chips">' . self::kindChip($d) . $this->internalChip($d) . self::versionChips($d) . self::annotationChips($latest->annotations) . "</div>\n"
             . '    ' . self::title($latest->annotations) . '<p class="full-name"><code>' . Markdown::escape($d->name) . "</code></p>\n"
             . "  </header>\n"
@@ -498,30 +521,86 @@ final class Html
             $this->prose($d->doc, $d),
             $this->values($notes, $d),
             self::examples($notes),
+            self::messages($notes),
             self::meta($notes),
         ];
         return implode("\n  ", array_values(array_filter($parts, static fn (string $p): bool => $p !== '')));
     }
 
     /**
-     * Deprecated (with its reason), read-only and write-only, as chips.
+     * Deprecated (with its reason), read-only, write-only, key, secret,
+     * visibility and discriminator, as chips.
      *
      * @param array<string, mixed> $notes
      */
     private static function annotationChips(array $notes): string
     {
-        $deprecated = $notes['deprecated'] ?? null;
-        $out = match (true) {
-            $deprecated === true => '<span class="chip chip-deprecated">deprecated</span>',
-            is_string($deprecated) => '<span class="chip chip-deprecated" title="' . Markdown::escape($deprecated) . '">deprecated: ' . Markdown::escape($deprecated) . '</span>',
-            default => '',
-        };
+        $out = self::deprecatedChip($notes);
         foreach (['read-only' => 'chip-read-only', 'write-only' => 'chip-write-only'] as $key => $class) {
             if (($notes[$key] ?? null) === true) {
                 $out .= "<span class=\"chip {$class}\">{$key}</span>";
             }
         }
+        $key = $notes['key'] ?? null;
+        $out .= match (true) {
+            $key === true => '<span class="chip chip-key">key</span>',
+            is_string($key) => '<span class="chip chip-key">key: ' . Markdown::escape($key) . '</span>',
+            default => '',
+        };
+        if (($notes['secret'] ?? null) === true) {
+            $out .= '<span class="chip chip-secret">secret</span>';
+        }
+        $out .= self::visibilityChip($notes['visibility'] ?? null);
+        $discriminator = $notes['discriminator'] ?? null;
+        if ($discriminator !== null) {
+            $out .= '<span class="chip chip-discriminator">discriminator: ' . Markdown::escape(self::stageName($discriminator)) . '</span>';
+        }
         return $out;
+    }
+
+    /** The stages that see a field (DXNS.md §1b); an empty list is none. */
+    private static function visibilityChip(mixed $stages): string
+    {
+        if (!$stages instanceof DXNList) {
+            return '';
+        }
+        if ($stages->items === []) {
+            return '<span class="chip chip-visibility">visible on no stage</span>';
+        }
+        $names = implode(', ', array_map(self::stageName(...), $stages->items));
+        return '<span class="chip chip-visibility">visible on ' . Markdown::escape($names) . '</span>';
+    }
+
+    /** A keyword's name; anything else as DXN writes it. */
+    private static function stageName(mixed $value): string
+    {
+        return $value instanceof DXNKeyword ? $value->name : self::written($value);
+    }
+
+    /**
+     * Deprecated, with its reason when it gives one.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private static function deprecatedChip(array $notes): string
+    {
+        $deprecated = $notes['deprecated'] ?? null;
+        return match (true) {
+            $deprecated === true => '<span class="chip chip-deprecated">deprecated</span>',
+            is_string($deprecated) => '<span class="chip chip-deprecated" title="' . Markdown::escape($deprecated) . '">deprecated: ' . Markdown::escape($deprecated) . '</span>',
+            default => '',
+        };
+    }
+
+    /**
+     * `$html` struck through when `$notes` deprecate what it names.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private static function struck(string $html, array $notes): string
+    {
+        $deprecated = $notes['deprecated'] ?? null;
+        return $deprecated === true || is_string($deprecated) ? "<s>{$html}</s>" : $html;
     }
 
     /**
@@ -589,6 +668,29 @@ final class Html
         return "<dl class=\"meta\"><p class=\"label\">Meta</p>{$out}</dl>";
     }
 
+    /**
+     * A refusal's own words, by the refine key that refuses.
+     *
+     * @param array<string, mixed> $notes
+     */
+    private static function messages(array $notes): string
+    {
+        $messages = $notes['messages'] ?? null;
+        if (!(is_array($messages) || $messages instanceof DXNMap) || Docs::pairsOf($messages) === []) {
+            return '';
+        }
+        $rows = array_map(
+            static fn (array $pair): array => [self::written($pair[0]), is_string($pair[1]) ? $pair[1] : (is_scalar($pair[1]) ? (string) $pair[1] : self::written($pair[1]))],
+            Docs::pairsOf($messages),
+        );
+        usort($rows, static fn (array $a, array $b): int => strcmp($a[0], $b[0]) ?: strcmp($a[1], $b[1]));
+        $out = '';
+        foreach ($rows as [$key, $message]) {
+            $out .= '<dt><code>' . Markdown::escape($key) . '</code></dt><dd>' . Markdown::escape($message) . '</dd>';
+        }
+        return "<dl class=\"messages\"><p class=\"label\">Messages</p>{$out}</dl>";
+    }
+
     /** A decoded value as DXN writes it; its PHP type when it has no DXN form. */
     private static function written(mixed $value): string
     {
@@ -614,7 +716,9 @@ final class Html
         return match ($d->kind) {
             'schema' => '<span class="chip chip-schema">struct schema</span>',
             'shape' => '<span class="chip chip-shape">shape</span>',
-            'type' => '<span class="chip chip-type">type</span>',
+            'type' => $d->versions[0]->params !== []
+                ? '<span class="chip chip-type">generic type</span>'
+                : '<span class="chip chip-type">type</span>',
         };
     }
 
@@ -629,20 +733,28 @@ final class Html
             : '<span class="chip chip-internal">internal</span>';
     }
 
+    /** Where version `$n` of a definition is: its own anchor and the version. */
+    private static function versionAnchor(Definition $d, ?int $n): string
+    {
+        return self::anchor($d) . "-v{$n}";
+    }
+
     private static function versionChips(Definition $d): string
     {
-        if ($d->kind !== 'schema') {
+        $n = $d->versions[0]->version;
+        if ($n === null) {
             return '';
         }
         $count = count($d->versions);
-        return '<span class="chip chip-version">v' . $d->versions[0]->version . '</span>'
+        return '<span class="chip chip-version" id="' . Markdown::escape(self::versionAnchor($d, $n)) . "\">v{$n}</span>"
             . ($count === 1 ? '' : "<span class=\"chip chip-quiet\">{$count} versions</span>");
     }
 
     private function olderVersion(Definition $d, Version $version): string
     {
-        return "<details class=\"older\">\n"
-            . "  <summary>Version {$version->version} <span class=\"file\">" . Markdown::escape($version->file) . "</span></summary>\n"
+        return '<details class="older" id="' . Markdown::escape(self::versionAnchor($d, $version->version)) . "\">\n"
+            . '  <summary>' . self::struck("Version {$version->version}", $version->annotations) . ' ' . self::deprecatedChip($version->annotations)
+            . '<span class="file">' . Markdown::escape($version->file) . "</span></summary>\n"
             . '  ' . $this->versionBody($d, $version) . "\n"
             . "</details>\n";
     }
@@ -651,9 +763,9 @@ final class Html
     {
         if ($d->kind === 'type') {
             return "<div class=\"type-def\">\n"
-                . "  <p class=\"label\">Definition</p>\n"
+                . '  ' . $this->paramsHtml($version->params, $d) . "<p class=\"label\">Definition</p>\n"
                 . '  <pre class="expr"><code>' . $this->typeHtml($version->value, $d) . "</code></pre>\n"
-                . '  <p class="file">' . Markdown::escape($version->file) . "</p>\n"
+                . '  ' . self::fileLine($version) . "\n"
                 . "</div>\n";
         }
         $note = $version->note !== null && $version->note !== ''
@@ -662,32 +774,111 @@ final class Html
         $positionHead = $d->kind === 'schema' ? '<th scope="col" class="pos" title="Position in the binary form">#</th>' : '';
         $rows = '';
         foreach ($version->fields as $f) {
-            $own = $f->annotations['description'] ?? null;
-            $notes = self::annotationChips($f->annotations);
-            foreach ([is_string($own) ? $own : null, $f->description, $f->doc] as $text) {
-                if ($text !== null && $text !== '') {
-                    $notes .= Markdown::toHtml($text, $this->linker($d->scope));
-                }
-            }
-            $notes .= $this->values($f->annotations, $d) . self::examples($f->annotations) . self::meta($f->annotations);
-            $default = $f->default !== null
-                ? '<div class="default"><span class="label">default</span> <code>' . $this->typeHtml($f->default, $d) . '</code></div>'
-                : '';
-            $rows .= "<tr>\n"
-                . '  ' . ($d->kind === 'schema' ? "<td class=\"pos\">{$f->position}</td>" : '') . "\n"
-                . '  <th scope="row" class="field"><code>' . Markdown::escape($f->name) . '</code>' . ($f->optional ? '<span class="opt">optional</span>' : '') . "</th>\n"
-                . '  <td class="type"><code>' . $this->typeHtml($f->type, $d) . "</code>{$default}</td>\n"
-                . "  <td class=\"notes\">{$notes}</td>\n"
-                . "</tr>\n";
+            $rows .= $this->fieldRow($f, $d);
         }
         return "{$note}\n"
-            . "<div class=\"table-wrap\">\n"
+            . $this->basesHtml($version->bases, $d) . "<div class=\"table-wrap\">\n"
             . "  <table class=\"fields\">\n"
             . "    <thead><tr>{$positionHead}<th scope=\"col\">Field</th><th scope=\"col\">Type</th><th scope=\"col\">Notes</th></tr></thead>\n"
             . "    <tbody>{$rows}</tbody>\n"
             . "  </table>\n"
             . "</div>\n"
-            . '<p class="file">' . Markdown::escape($version->file) . "</p>\n";
+            . self::fileLine($version) . "\n";
+    }
+
+    /** The file a version is in, and what generated it when a tool did. */
+    private static function fileLine(Version $version): string
+    {
+        $provenance = $version->provenance === null
+            ? ''
+            : ' <span class="provenance">generated by <code>' . Markdown::escape($version->provenance['tool'])
+                . '</code> from <code>' . Markdown::escape($version->provenance['source']) . '</code></span>';
+        return '<p class="file">' . Markdown::escape($version->file) . "{$provenance}</p>";
+    }
+
+    /**
+     * The bases a head names, each a link (DXNS.md §4b).
+     *
+     * @param list<array{relation: string, names: list<array{0: string, 1: ?int}>}> $groups
+     */
+    private function basesHtml(array $groups, Definition $d): string
+    {
+        if ($groups === []) {
+            return '';
+        }
+        $words = implode(' ', array_map(
+            fn (array $group): string => $group['relation'] . ' ' . implode(', ', array_map(
+                fn (array $base): string => $this->link($base[1] === null ? $base[0] : "{$base[0]}({$base[1]})", $base[0], $base[1], $d),
+                $group['names'],
+            )),
+            $groups,
+        ));
+        return "<p class=\"bases\">{$words}</p>\n";
+    }
+
+    /**
+     * A generic's parameters, each with its bound and default (DXNS.md §5).
+     *
+     * @param list<array{name: string, bound: ?At, default: ?At}> $params
+     */
+    private function paramsHtml(array $params, Definition $d): string
+    {
+        if ($params === []) {
+            return '';
+        }
+        $rows = '';
+        foreach ($params as $p) {
+            $about = match (true) {
+                $p['bound'] === null => 'any type',
+                $p['default'] === null => 'within <code>' . $this->typeHtml($p['bound'], $d) . '</code>',
+                default => 'within <code>' . $this->typeHtml($p['bound'], $d) . '</code>, default <code>' . $this->typeHtml($p['default'], $d) . '</code>',
+            };
+            $rows .= '<dt><code>' . Markdown::escape($p['name']) . "</code></dt><dd>{$about}</dd>";
+        }
+        return "<dl class=\"params\"><p class=\"label\">Parameters</p>{$rows}</dl>\n";
+    }
+
+    /**
+     * One row of a body: a field, a field left out of the bases, the
+     * extras, or the closing.
+     */
+    private function fieldRow(Field|Row $f, Definition $d): string
+    {
+        $pos = $d->kind === 'schema' ? '<td class="pos"></td>' : '';
+        if ($f instanceof Row) {
+            [$class, $field, $type, $notes] = match ($f->kind) {
+                'drop' => ['dropped', '<code><s>' . Markdown::escape((string) $f->name) . '</s></code>', '', 'left out of the bases'],
+                'closed' => ['closed', '<code>- *</code>', '', 'no entries beyond these'],
+                'extra' => ['extras', '<code>* ' . $this->typeHtml($f->key, $d) . '</code>', '<code>' . $this->typeHtml($f->type, $d) . '</code>', 'any other entry with such a key'],
+            };
+            $doc = $f->doc !== '' ? Markdown::toHtml($f->doc, $this->linker($d->scope)) : '';
+            return "<tr class=\"{$class}\">\n"
+                . "  {$pos}\n"
+                . "  <th scope=\"row\" class=\"field\">{$field}</th>\n"
+                . "  <td class=\"type\">{$type}</td>\n"
+                . "  <td class=\"notes\">{$notes}{$doc}</td>\n"
+                . "</tr>\n";
+        }
+        $own = $f->annotations['description'] ?? null;
+        $notes = self::annotationChips($f->annotations);
+        foreach ([is_string($own) ? $own : null, $f->description, $f->doc] as $text) {
+            if ($text !== null && $text !== '') {
+                $notes .= Markdown::toHtml($text, $this->linker($d->scope));
+            }
+        }
+        $notes .= $this->values($f->annotations, $d) . self::examples($f->annotations) . self::messages($f->annotations) . self::meta($f->annotations);
+        $default = $f->default !== null
+            ? '<div class="default"><span class="label">default</span> <code>' . $this->typeHtml($f->default, $d) . '</code></div>'
+            : '';
+        $computed = $f->computed !== null
+            ? '<div class="default"><span class="label">computed</span> <code>' . $this->typeHtml($f->computed, $d) . '</code></div>'
+            : '';
+        return "<tr>\n"
+            . '  ' . ($d->kind === 'schema' ? "<td class=\"pos\">{$f->position}</td>" : '') . "\n"
+            . '  <th scope="row" class="field"><code>' . self::struck(Markdown::escape($f->name), $f->annotations) . '</code>' . ($f->optional ? '<span class="opt">optional</span>' : '') . "</th>\n"
+            . '  <td class="type"><code>' . $this->typeHtml($f->type, $d) . "</code>{$default}{$computed}</td>\n"
+            . "  <td class=\"notes\">{$notes}</td>\n"
+            . "</tr>\n";
     }
 
     // ---- type expressions -------------------------------------------------------------
@@ -723,11 +914,8 @@ final class Html
     private function render(At $at, SyntaxNode $node, Definition $d): string
     {
         if (Docs::isSymbol($at, $node)) {
-            $written = Docs::text($at, $node);
-            $target = $this->known[Docs::resolve($written, $d->scope)] ?? null;
-            return $target !== null
-                ? '<a class="ref" href="' . self::href($target) . '">' . Markdown::escape($written) . '</a>'
-                : '<span class="sym">' . Markdown::escape($written) . '</span>';
+            [$name, $pin] = Docs::pinned($at, $node);
+            return $this->link(Docs::text($at, $node), $name, $pin, $d);
         }
         if ($node->kind === 'body' && $node->children === [] && $node->first === $node->last) {
             $type = $at->tokens[$node->first]->type;
@@ -743,16 +931,55 @@ final class Html
             if (count($values) === 3 && Docs::text($at, $values[0]) === ':case') {
                 return $this->caseHtml($at, $values[1], $values[2], $d);
             }
+            if (count($values) === 3 && Docs::text($at, $values[0]) === ':at') {
+                return $this->plain($at, $node, $d, $values[1], $this->atLink($at, $values[1], $values[2], $d));
+            }
         }
-        // Its tokens and its children in order, each piece the tokens it
-        // covers, joined by a space wherever the source has a gap.
+        return $this->plain($at, $node, $d);
+    }
+
+    /**
+     * `{:at Name N}`, what `Name(N)` writes (DXNS.md §5c): the name, linking
+     * to version N.
+     */
+    private function atLink(At $at, SyntaxNode $nameValue, SyntaxNode $versionValue, Definition $d): string
+    {
+        $body = Docs::bodyOf($nameValue);
+        $name = $body !== null && Docs::isSymbol($at, $body) ? Docs::pinned($at, $body)[0] : null;
+        $written = Docs::text($at, $versionValue);
+        $pin = preg_match('/\A[+-]?[0-9]+\z/', $written) === 1 ? (int) $written : null;
+        return $this->link(Docs::text($at, $nameValue), $name, $pin, $d);
+    }
+
+    /**
+     * `$written`, naming `$name` pinned to `$pin` (or null), as a link to that
+     * definition -- to that version of it when it has one -- or as a name.
+     */
+    private function link(string $written, ?string $name, ?int $pin, Definition $d): string
+    {
+        $target = $name === null ? null : ($this->known[Docs::resolve($name, $d->scope)] ?? null);
+        if ($target === null) {
+            return '<span class="sym">' . Markdown::escape($written) . '</span>';
+        }
+        $pinned = $pin !== null && array_filter($target->versions, static fn (Version $v): bool => $v->version === $pin) !== [];
+        $href = $pinned ? self::pageOf($target->namespace) . '#' . self::versionAnchor($target, $pin) : self::href($target);
+        return '<a class="ref" href="' . $href . '">' . Markdown::escape($written) . '</a>';
+    }
+
+    /**
+     * A node's tokens and its children in order, each piece the tokens it
+     * covers, joined by a space wherever the source has a gap; the child
+     * `$special`, when given, as `$specialHtml`.
+     */
+    private function plain(At $at, SyntaxNode $node, Definition $d, ?SyntaxNode $special = null, string $specialHtml = ''): string
+    {
         $pieces = [];
         $i = $node->first;
         foreach ($node->children as $child) {
             for (; $i < $child->first; $i++) {
                 $pieces[] = [$i, Markdown::escape(Docs::tokenText($at, $i))];
             }
-            $pieces[] = [$child->last, $this->render($at, $child, $d)];
+            $pieces[] = [$child->last, $child === $special ? $specialHtml : $this->render($at, $child, $d)];
             $i = $child->last + 1;
         }
         for (; $i <= $node->last; $i++) {

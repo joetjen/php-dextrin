@@ -140,4 +140,156 @@ final class DocsTest extends TestCase
         self::assertStringContainsString('Use red', $html);
         self::assertStringContainsString('<code>:old</code><span class="chip chip-deprecated">', $html);
     }
+
+    public function testTheExampleBuilds(): void
+    {
+        // index, acme, acme.billing, acme.common, acme.events, acme.shop, style.css
+        self::assertCount(7, Docs::site(__DIR__ . '/../../example/schemas', 'Acme schemas'));
+    }
+
+    // ---- what DXNS gained since 2026-10-20 (as dextrin T696) -------------------
+
+    public function testANamedTypesVersionsAreShownAsASchemasAreLatestFirst(): void
+    {
+        $html = self::pageWith(self::site([
+            'a/Tier.dxns' => '%{Tier: {:enum :bronze :silver}}',
+            'a/Tier-v2.dxns' => '%{Tier: %type(2)[{:enum :bronze :silver :gold}]}',
+        ]), 'Tier');
+        self::assertStringContainsString('<span class="chip chip-version" id="Tier-v2">v2</span>', $html);
+        self::assertStringContainsString('<details class="older" id="Tier-v1">', $html);
+        self::assertStringContainsString(':gold', $html);
+        self::assertStringNotContainsString('%type', $html);
+    }
+
+    public function testAPinnedReferenceLinksToTheVersionItPinsInEitherSpelling(): void
+    {
+        $pages = self::site([
+            'a/Tier.dxns' => '%{Tier: {:enum :bronze}}',
+            'a/Tier-v2.dxns' => '%{Tier: %type(2)[{:enum :bronze :gold}]}',
+            'a.dxns' => '%{C: %shape{t: a/Tier(1) u: {:at a/Tier 2}}}',
+        ]);
+        $html = $pages['a/index.html'];
+        self::assertStringContainsString('<a class="ref" href="../a/index.html#Tier-v1">a/Tier(1)</a>', $html);
+        self::assertStringContainsString('<a class="ref" href="../a/index.html#Tier-v2">', $html);
+        self::assertStringContainsString('Used by', self::pageWith($pages, 'Tier'));
+    }
+
+    public function testAHeadsBasesAreLinksAndADroppedFieldAndTheExtrasAreRows(): void
+    {
+        $html = self::site(['a.dxns' => <<<'DXN'
+            %{
+              P: %shape{name: :string nick: :string}
+              C: %schema(1) includes P {
+                - nick
+                id: :uuid
+                * :string => :integer
+                - *
+              }
+            }
+            DXN])['a/index.html'];
+        self::assertStringContainsString('<p class="bases">includes <a class="ref" href="../a/index.html#P">P</a></p>', $html);
+        self::assertStringContainsString('<tr class="dropped">', $html);
+        self::assertStringContainsString('<s>nick</s>', $html);
+        self::assertStringContainsString('<code>* <span class="kw">:string</span></code>', $html);
+        self::assertStringContainsString('<tr class="closed">', $html);
+    }
+
+    public function testACommentOnALeftOutFieldTheExtrasOrTheClosingIsItsNote(): void
+    {
+        $pages = self::site([
+            'a.dxns' => <<<'DXN'
+                %{
+                  P: %shape{a: :string nick: :string}
+                  C: %shape includes P {
+                    # why nick goes
+                    - nick
+                    # about id
+                    id: :uuid
+                    * :string => :integer # about the rest
+                    - * # nothing else
+                  }
+                }
+                DXN,
+        ]);
+        $html = $pages['a/index.html'];
+        self::assertStringContainsString('<td class="notes">left out of the bases<p>why nick goes</p></td>', $html);
+        self::assertStringContainsString('<td class="notes"><p>about id</p></td>', $html);
+        self::assertStringContainsString('<td class="notes">any other entry with such a key<p>about the rest</p></td>', $html);
+        self::assertStringContainsString('<td class="notes">no entries beyond these<p>nothing else</p></td>', $html);
+    }
+
+    public function testADeprecatedVersionIsStruckThroughWithItsReason(): void
+    {
+        $html = self::pageWith(self::site([
+            'a/C-v1.dxns' => '%{C: {:doc %schema{a: :string} %{deprecated: "use 2"}}}',
+            'a/C-v2.dxns' => '%{C: %schema(2){a: :string b?: {:doc :string %{deprecated: true}}}}',
+        ]), 'C');
+        self::assertStringContainsString('<summary><s>Version 1</s> <span class="chip chip-deprecated" title="use 2">deprecated: use 2</span>', $html);
+        self::assertStringContainsString('<code><s>b</s></code>', $html);
+    }
+
+    public function testAGenericsParametersAreListedWithTheirBoundsAndDefaults(): void
+    {
+        $html = self::site([
+            'a.dxns' => '%{Page: {:generic [T {S :integer :int32}] %shape{items: {:list-of T}}}}',
+        ])['a/index.html'];
+        self::assertStringContainsString('<span class="chip chip-type">generic type</span>', $html);
+        self::assertStringContainsString('<dl class="params">', $html);
+        self::assertStringContainsString('<dt><code>S</code></dt><dd>within <code><span class="kw">:integer</span></code>, default <code><span class="kw">:int32</span></code></dd>', $html);
+        self::assertStringNotContainsString(':generic', $html);
+    }
+
+    public function testAGenericInAVersionedFileTakesTheFilesVersion(): void
+    {
+        $html = self::pageWith(self::site([
+            'a/Page.dxns' => '%{Page: {:generic [T] {:list-of T}}}',
+            'a/Page-v2.dxns' => '%{Page: {:generic [T] %shape{items: {:list-of T}}}}',
+        ]), 'Page');
+        self::assertStringContainsString('<span class="chip chip-version" id="Page-v2">v2</span>', $html);
+        self::assertStringContainsString('<details class="older" id="Page-v1">', $html);
+    }
+
+    public function testAStructsVersionIsItsOwnNeverABasesPin(): void
+    {
+        $html = self::site(['a.dxns' => '%{Q: %shape{x: :string} C: %schema includes Q(2) {y: :string}}'])['a/index.html'];
+        self::assertStringContainsString('<span class="chip chip-version" id="C-v1">v1</span>', $html);
+    }
+
+    public function testDiscriminatorSecretKeyVisibilityAndMessagesAreShown(): void
+    {
+        $html = self::site(['a.dxns' => <<<'DXN'
+            %{
+              P: {:doc {:one-of A B} %{discriminator: :kind}}
+              A: %shape{kind: {:const "a"}}
+              B: %shape{kind: {:const "b"}}
+              S: %shape{
+                id: {:doc :string %{key: true}}
+                token: {:doc :string %{secret: true visibility: [:create :read]}}
+                code: {:doc {:refine :string %{min-length: 2}} %{messages: %{min-length: "too short"}}}
+              }
+            }
+            DXN])['a/index.html'];
+        self::assertStringContainsString('<span class="chip chip-discriminator">discriminator: kind</span>', $html);
+        self::assertStringContainsString('<span class="chip chip-key">key</span>', $html);
+        self::assertStringContainsString('<span class="chip chip-secret">secret</span>', $html);
+        self::assertStringContainsString('<span class="chip chip-visibility">visible on create, read</span>', $html);
+        self::assertStringContainsString('<dl class="messages">', $html);
+        self::assertStringContainsString('too short', $html);
+    }
+
+    public function testAComputedDefaultIsShownAsOne(): void
+    {
+        $html = self::site(['a.dxns' => '%{S: %schema{at: %field{type: :timestamp computed: :now}}}'])['a/index.html'];
+        self::assertStringContainsString('<span class="label">computed</span> <code><span class="kw">:now</span></code>', $html);
+    }
+
+    public function testAGeneratedFileSaysWhatGeneratedItAndThatIsNotItsProse(): void
+    {
+        $html = self::site([
+            'a.dxns' => "# Generated by some-tool from a.tsp; do not edit.\n\n# About a.\n\n%{T: :string}",
+        ])['a/index.html'];
+        self::assertStringContainsString('<span class="provenance">generated by <code>some-tool</code> from <code>a.tsp</code></span>', $html);
+        self::assertStringContainsString('About a.', $html);
+        self::assertStringNotContainsString('do not edit', $html);
+    }
 }
