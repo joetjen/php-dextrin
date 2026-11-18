@@ -184,7 +184,9 @@ final class Tree
     // ---- layout ------------------------------------------------------------------
 
     /**
-     * A versioned file holds its entry as the version its name says.
+     * A versioned file holds its entry as the version its name says: a
+     * `%schema(N)`, or a `%type(N)[T]` for a named type with versions
+     * (DXNS.md §5c), a `{:doc}` around either looked through.
      *
      * @param TreeFile $file
      * @return Problem|null
@@ -196,21 +198,40 @@ final class Tree
         if ($holder === null || $version === null) {
             return null;
         }
-        $value = self::held($file, $holder);
-        if ($value instanceof DXNStruct && $value->name === 'schema') {
+        $value = self::undoc(self::held($file, $holder));
+        if ($value instanceof DXNStruct && ($value->name === 'schema' || $value->name === 'type')) {
             $held = $value->version ?? 1;
             return $held === $version
                 ? null
                 : self::problem($file['file'], self::entryLine($file, $holder), "holds {$holder} as version {$held}, but its name says version {$version} (DXNS.md §6)");
         }
-        return self::problem($file['file'], self::entryLine($file, $holder), "a versioned file holds a %schema(N), not {$holder}'s kind");
+        return self::problem($file['file'], self::entryLine($file, $holder), "a versioned file holds a %schema(N) or a %type(N), not {$holder}'s kind");
     }
 
     // ---- names across files ------------------------------------------------------
 
+    /**
+     * A schema's version, or a named type's (Way B, DXNS.md §5c) as
+     * `type:N`: a plain definition is its version 1, `%type(N)[T]`
+     * version N.
+     */
     private static function versionOf(mixed $value): int|string
     {
-        return $value instanceof DXNStruct && $value->name === 'schema' ? ($value->version ?? 1) : 'type';
+        $value = self::undoc($value);
+        return match (true) {
+            $value instanceof DXNStruct && $value->name === 'schema' => $value->version ?? 1,
+            $value instanceof DXNStruct && $value->name === 'type' => 'type:' . ($value->version ?? 1),
+            default => 'type:1',
+        };
+    }
+
+    /** What a `{:doc T notes}` stands on: `T`; anything else itself. */
+    private static function undoc(mixed $value): mixed
+    {
+        return $value instanceof DXNTuple && count($value->items) === 3
+            && $value->items[0] instanceof DXNKeyword && $value->items[0]->name === 'doc'
+            ? $value->items[1]
+            : $value;
     }
 
     /**
@@ -250,7 +271,11 @@ final class Tree
                     continue;
                 }
                 sort($files);
-                $what = $version === 'type' ? $name : "{$name} version {$version}";
+                $what = match (true) {
+                    $version === 'type:1' => $name,
+                    str_starts_with((string) $version, 'type:') => "{$name} version " . substr((string) $version, 5),
+                    default => "{$name} version {$version}",
+                };
                 $found[] = self::problem($files[0], 1, "{$what} is in two files, " . implode(' and ', $files) . '; it is found once (DXNS.md §6)');
             }
         }

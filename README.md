@@ -458,7 +458,14 @@ vendor/bin/dextrin validate data.dxn [--format text|binary] [--schema s.dxns --a
 vendor/bin/dextrin compat old-schemas/ schemas/   # changed schemas need new versions
 vendor/bin/dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 vendor/bin/dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
+vendor/bin/dextrin from-typespec main.tsp [--out schemas/]          # TypeSpec to DXNS (Node 22)
 ```
+
+`from-typespec` runs TypeSpec's own compiler, through npx, with
+node-dextrin's TypeSpec emitter, `@joetjen/dextrin-typespec`, which
+writes one `.dxns` file per namespace -- per schema version in a
+versioned namespace -- into `--out`. It needs Node 22 and the emitter
+installed where the TypeSpec project is.
 
 `from-json-schema` converts JSON Schema -- drafts 04, 06, 07, 2019-09
 and 2020-12, and MongoDB's `$jsonSchema` -- to DXNS; the library call is

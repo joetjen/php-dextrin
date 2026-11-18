@@ -148,6 +148,30 @@ final class TreeTest extends TestCase
         self::assertTrue(\JOetjen\Dextrin\Schema::check(Dextrin::decode('%{a: 1, "x" => 2}'), $result['registry'], 's.aa/T'));
     }
 
+    public function testVersionsOfANamedTypeAndADocumentedSchemaEachInAVersionedFile(): void
+    {
+        $result = Tree::load([self::tree([
+            'a/Color.dxns' => '%{Color: {:enum :red}}',
+            'a/Color-v2.dxns' => '%{Color: {:doc %type(2)[{:enum :red :blue}] %{description: "v2"}}}',
+            'a/Pet-v2.dxns' => '%{Pet: {:doc %schema(2){c: a/Color(1)} %{description: "v2"}}}',
+        ])]);
+        self::assertTrue($result['ok'], json_encode($result['problems'] ?? []) ?: '');
+        self::assertNotNull($result['registry']->fetchTypeVersion('a/Color', 2));
+    }
+
+    public function testAVersionedFileWhoseTypeSaysAnotherVersion(): void
+    {
+        $messages = self::messages(Tree::load([self::tree(['a/Color-v2.dxns' => '%{Color: %type(3)[{:enum :red}]}'])]));
+        self::assertCount(1, $messages);
+        self::assertStringContainsString('version 3', $messages[0]);
+    }
+
+    public function testAVersionedFileHoldingNeitherKindSaysWhatItShouldHold(): void
+    {
+        $messages = self::messages(Tree::load([self::tree(['a/Color-v2.dxns' => '%{Color: {:enum :red}}'])]));
+        self::assertSame(["a versioned file holds a %schema(N) or a %type(N), not Color's kind"], $messages);
+    }
+
     public function testAVersionedFileHoldingAnotherVersionAndOneVersionInTwoFiles(): void
     {
         self::assertStringContainsString('version', self::messages(Tree::load([self::tree(['Customer-v2.dxns' => '%{Customer: %schema(3){name: :string}}'])]))[0]);

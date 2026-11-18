@@ -271,6 +271,7 @@ dextrin format data.dxn [--mode pretty|condense] [--in-place]   # pretty keeps c
 dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
+dextrin from-typespec main.tsp [--out schemas/]   # TypeSpec to DXNS, through npx (Node 22)
 ```
 
 ```php

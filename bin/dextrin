@@ -54,6 +54,7 @@ const USAGE = <<<'USAGE'
       docs SCHEMAS [--out DIR] [--title TITLE]     Write HTML documentation for a directory of .dxns schemas
       from-json-schema SCHEMA... [--out FILE] [--name N] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
                                                     Convert JSON Schema (drafts 04 to 2020-12, MongoDB's $jsonSchema) to DXNS
+      from-typespec MAIN.tsp [--out DIR]            Convert TypeSpec to DXNS with the @joetjen/dextrin-typespec emitter (Node 22, npx)
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
@@ -73,6 +74,7 @@ function main(array $argv): int
         'docs' => run(static fn () => cmdDocs($rest)),
         'check' => run(static fn () => cmdCheck($rest)),
         'from-json-schema' => run(static fn () => cmdFromJsonSchema($rest)),
+        'from-typespec' => run(static fn () => cmdFromTypespec($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
@@ -204,6 +206,70 @@ function cmdFromJsonSchema(array $argv): void
     } else {
         fwrite(STDOUT, $text);
     }
+}
+
+/**
+ * `dextrin from-typespec MAIN.tsp [--out DIR]`: TypeSpec to DXNS, as `mix
+ * dextrin.from_typespec` converts it -- TypeSpec's own compiler, run
+ * through npx with the `@joetjen/dextrin-typespec` emitter, which writes
+ * one `.dxns` file per namespace, and per schema version in a versioned
+ * namespace, into `DIR` (default `schemas`). It needs Node 22 or later,
+ * `npx`, and the emitter installed where the TypeSpec project is.
+ *
+ * @param list<string> $argv
+ */
+function cmdFromTypespec(array $argv): void
+{
+    ['positional' => $files, 'options' => $options] = parseArgs($argv, optionNames: ['out']);
+    if (count($files) !== 1) {
+        throw new \RuntimeException('usage: dextrin from-typespec MAIN.tsp [--out DIR]');
+    }
+    $emitter = '@joetjen/dextrin-typespec';
+    $out = absolutePath($options['out'] ?? 'schemas');
+    $npx = onPath('npx') ?? throw new \RuntimeException('npx was not found: TypeSpec needs Node 22 or later, with npx on the PATH');
+    $process = proc_open(
+        [$npx, '--no-install', 'tsp', 'compile', $files[0], '--emit', $emitter, '--option', "{$emitter}.emitter-output-dir={$out}"],
+        [1 => STDOUT, 2 => STDERR],
+        $pipes,
+    );
+    if ($process === false) {
+        throw new \RuntimeException('npx was not found: TypeSpec needs Node 22 or later, with npx on the PATH');
+    }
+    $status = proc_close($process);
+    if ($status !== 0) {
+        throw new \RuntimeException("tsp compile failed (exit {$status})");
+    }
+    fwrite(STDOUT, "wrote {$out}\n");
+}
+
+/** The executable `$name` in a directory of the PATH, or `null`. */
+function onPath(string $name): ?string
+{
+    foreach (explode(PATH_SEPARATOR, (string) getenv('PATH')) as $dir) {
+        $candidate = rtrim($dir === '' ? '.' : $dir, '/') . '/' . $name;
+        if (is_file($candidate) && is_executable($candidate)) {
+            return $candidate;
+        }
+    }
+    return null;
+}
+
+/** `$path` made absolute against the working directory, its `.` and `..` resolved. */
+function absolutePath(string $path): string
+{
+    $full = str_starts_with($path, '/') ? $path : getcwd() . '/' . $path;
+    $segments = [];
+    foreach (explode('/', $full) as $segment) {
+        if ($segment === '' || $segment === '.') {
+            continue;
+        }
+        if ($segment === '..') {
+            array_pop($segments);
+            continue;
+        }
+        $segments[] = $segment;
+    }
+    return '/' . implode('/', $segments);
 }
 
 /**
