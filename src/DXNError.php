@@ -13,8 +13,12 @@ namespace JOetjen\Dextrin;
  * JS port's own deliberate divergence, for the same reason) -- no
  * "divergence from tuples" note is needed the way the JS port's own
  * `DXNError` doc carries one.
+ *
+ * Not final: generated code refuses data with
+ * {@see \JOetjen\Dextrin\Codegen\InvalidData}, a `DXNError` that also
+ * names the field, so a caller catching `DXNError` catches it too.
  */
-final class DXNError extends \RuntimeException
+class DXNError extends \RuntimeException
 {
     public readonly string $stage;
     public readonly ?int $offset;

@@ -1,0 +1,6 @@
+%{
+  Color: {:doc {:enum :red :old} %{values: %{:old => %{deprecated: "use red"}}}}
+  Legacy: {:doc :string %{deprecated: "use text"}}
+  Cat: %shape{meows: :boolean}
+  Dog: {:doc %shape{barks: :boolean} %{deprecated: "no dogs"}}
+}

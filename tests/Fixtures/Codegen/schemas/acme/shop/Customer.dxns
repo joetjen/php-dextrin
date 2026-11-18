@@ -1,0 +1,1 @@
+%{Customer: %schema{name: :string, code?: acme.shop/Code}}

@@ -272,6 +272,21 @@ dextrin compat old-schemas/ schemas/     # changed schemas need new versions
 dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
 dextrin from-typespec main.tsp [--out schemas/]   # TypeSpec to DXNS, through npx (Node 22)
+dextrin gen-php schemas/ --namespace App\\Schemas --out src/Schemas [--check]   # PHP classes from DXNS
+```
+
+```php
+// After `dextrin gen-php`: App\Schemas\Acme\Shop\Order extends AbstractOrder.
+use App\Schemas\Acme\Shop\Order;
+use App\Schemas\Decoder;
+use JOetjen\Dextrin\Codegen\InvalidData;
+
+$order = Order::read(Dextrin::decode($text));      // any known version, upgraded; throws InvalidData
+$order = Order::read($struct, deprecations: 'error', onDeprecated: null);
+$order->validate();                                // throws InvalidData naming the field
+$cheaper = $order->withTotal($total);              // readonly properties, copies
+$struct = $order->toDxn();                         // a DXNStruct at the latest version
+$value = Decoder::decode($text);                   // every known struct read into its class
 ```
 
 ```php

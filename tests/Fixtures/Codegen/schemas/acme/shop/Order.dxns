@@ -1,0 +1,8 @@
+%{Order: %schema{
+  id: :uuid
+  customer: acme.shop/Customer
+  total: acme.shop/Money
+  status: %field{type: acme.shop/Status default: :open}
+  lines: {:list-of {:refine :string %{min-length: 1}}}
+  note?: {:nilable :string}
+}}

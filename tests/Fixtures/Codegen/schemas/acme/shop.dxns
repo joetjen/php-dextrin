@@ -1,0 +1,5 @@
+%{
+  Money: %shape{amount: {:refine :decimal %{min: 0M}} currency: %field{type: :string default: "EUR"}}
+  Code: {:refine :string %{pattern: @regex "^[A-Z]{3}$"}}
+  Status: {:enum :open :closed}
+}

@@ -4,8 +4,8 @@
 declare(strict_types=1);
 
 /**
- * `dextrin` CLI -- one executable, six subcommands (`decode`,
- * `encode`, `format`, `validate`, `compat`, `conformance`), the PHP analog of both the JS
+ * `dextrin` CLI -- one executable, many subcommands (`decode`,
+ * `encode`, `format`, `validate`, `compat`, `gen-php`, `conformance`, ...), the PHP analog of both the JS
  * port's `bin/dextrin.js` and `dextrin`'s own `mix dextrin.*` tasks.
  * One bin with subcommands rather than a separate script per task,
  * matching how CLIs are conventionally shaped (`git <subcommand>`),
@@ -55,6 +55,8 @@ const USAGE = <<<'USAGE'
       from-json-schema SCHEMA... [--out FILE] [--name N] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
                                                     Convert JSON Schema (drafts 04 to 2020-12, MongoDB's $jsonSchema) to DXNS
       from-typespec MAIN.tsp [--out DIR]            Convert TypeSpec to DXNS with the @joetjen/dextrin-typespec emitter (Node 22, npx)
+      gen-php SCHEMAS... --namespace NS --out DIR [--check]
+                                                    Generate PHP classes that read and check every version of the schemas
       conformance REQUEST ANSWER                   Answer a Dextrin Conformance Suite request
 
     Run with no PATH, or an unrecognized command, to see this message.
@@ -75,6 +77,7 @@ function main(array $argv): int
         'check' => run(static fn () => cmdCheck($rest)),
         'from-json-schema' => run(static fn () => cmdFromJsonSchema($rest)),
         'from-typespec' => run(static fn () => cmdFromTypespec($rest)),
+        'gen-php' => run(static fn () => cmdGenPhp($rest)),
         'conformance' => run(static fn () => cmdConformance($rest)),
         default => printUsageAndExit($command),
     };
@@ -142,6 +145,44 @@ function cmdCheck(array $argv): void
         fwrite(STDERR, "{$p['file']}:{$p['line']}: {$p['message']}\n");
     }
     throw new \RuntimeException(count($result['problems']) . ' problem(s)');
+}
+
+/**
+ * `dextrin gen-php SCHEMAS... --namespace NS --out DIR [--check]`: PHP
+ * classes from a tree of `.dxns` schemas ({@see \JOetjen\Dextrin\Codegen\Php},
+ * design/codegen-php.md), as `mix dextrin.gen.elixir` writes Elixir
+ * modules: per `%schema`, a class of the user's (`Order`), written once,
+ * and its generated parent (`AbstractOrder`), rewritten on every run,
+ * which reads and checks every version the schema has with no schema read
+ * at run time; and `NS\Decoder`.
+ *
+ * What is written by hand survives: the user's files are never
+ * rewritten, and the lines inside a generated file's `// dextrin:keep
+ * NAME` regions are put back. Class names and paths are kept as the
+ * user's files have them.
+ *
+ * `--check` writes nothing and fails when a generated file is out of date
+ * with the schemas, or holds an orphaned region: for CI.
+ *
+ * @param list<string> $argv
+ */
+function cmdGenPhp(array $argv): void
+{
+    ['positional' => $roots, 'flags' => $flags, 'options' => $options] = parseArgs($argv, ['check'], ['namespace', 'out']);
+    if ($roots === [] || !isset($options['namespace'], $options['out'])) {
+        throw new \RuntimeException('usage: dextrin gen-php SCHEMAS... --namespace NS --out DIR [--check]');
+    }
+    if (isset($flags['check'])) {
+        $problems = \JOetjen\Dextrin\Codegen\Php::check($roots, $options['namespace'], $options['out']);
+        if ($problems !== []) {
+            throw new \RuntimeException(implode("\n", $problems));
+        }
+        fwrite(STDOUT, "OK: the generated classes are up to date\n");
+        return;
+    }
+    foreach (\JOetjen\Dextrin\Codegen\Php::write($roots, $options['namespace'], $options['out']) as $path) {
+        fwrite(STDOUT, "wrote {$path}\n");
+    }
 }
 
 /**

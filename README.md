@@ -459,7 +459,22 @@ vendor/bin/dextrin compat old-schemas/ schemas/   # changed schemas need new ver
 vendor/bin/dextrin check schemas/ [--extern NAMESPACE]... [--warnings-as-errors]
 vendor/bin/dextrin from-json-schema schema.json [--out s.dxns] [--name Name] [--schemas DIR] [--draft D] [--mongo] [--structs] [--assert-formats] [--strict]
 vendor/bin/dextrin from-typespec main.tsp [--out schemas/]          # TypeSpec to DXNS (Node 22)
+vendor/bin/dextrin gen-php schemas/ --namespace App\\Schemas --out src/Schemas [--check]   # PHP classes from DXNS
 ```
+
+`gen-php` writes, per `%schema`, a class of yours (`Order extends
+AbstractOrder`, written once, never rewritten) and its generated parent
+(`AbstractOrder`, rewritten on every run), PSR-4 under `--out`, plus
+`Decoder`. The generated code reads and checks every version of the
+schema with code of its own -- no `.dxns` file or registry is loaded at
+run time -- upgrades older versions to the latest, and warns of what is
+deprecated as `Dextrin::decode()` does. Refused data throws
+`JOetjen\Dextrin\Codegen\InvalidData`, a `DXNError` naming the field.
+A change it can't upgrade by itself is an abstract `upgradeVN()` you
+write in your class; lines between `// dextrin:keep NAME` and `//
+dextrin:end NAME` in the generated file survive regenerating. `--check`
+writes nothing and fails when a generated file is stale or holds an
+orphaned region: for CI. See design/codegen-php.md.
 
 `from-typespec` runs TypeSpec's own compiler, through npx, with
 node-dextrin's TypeSpec emitter, `@joetjen/dextrin-typespec`, which

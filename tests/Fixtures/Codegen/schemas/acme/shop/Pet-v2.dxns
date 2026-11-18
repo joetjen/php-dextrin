@@ -1,0 +1,6 @@
+%{Pet: %schema(2){
+  name: :string
+  color: {:doc :string %{meta: %{"typespec.renamed-from" => "colour"}}}
+  born: :string
+  tag?: :string
+}}

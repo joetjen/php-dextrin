@@ -1,0 +1,1 @@
+%{Box: {:doc %schema(1){a: :string} %{deprecated: "use Box(2)"}}}

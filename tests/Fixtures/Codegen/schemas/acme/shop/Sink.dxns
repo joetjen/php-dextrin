@@ -1,0 +1,19 @@
+%{
+  Tree: %shape{label: :string children?: {:list-of Tree}}
+  Sink: %schema{
+    first-name: :string
+    count: {:one-of :integer :string}
+    scores: {:map-of :string :float}
+    both: {:all-of :integer {:refine :integer %{min: 1}}}
+    odd: {:not :string}
+    pick: {:if :integer {:refine :integer %{max: 9}} :string}
+    tree?: Tree
+    closed?: %shape{a: :string - *}
+    gone?: :never
+    at: %field{type: :timestamp computed: :now}
+    seen: %field{type: :boolean default: false}
+    when?: :date
+    anything?: :any
+    - *
+  }
+}

@@ -1,0 +1,1 @@
+%{Pet: {:doc %schema(1){name: :string colour: :string born: :integer} %{deprecated: "use Pet(2)"}}}

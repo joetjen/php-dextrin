@@ -1434,6 +1434,51 @@ final class TypeExpr
 
     // ---- primitives (dxn/DXN.md §1.3's 28 non-header types) ----------------
 
+    /**
+     * Whether `$value` is a value of the primitive type `$name` (`string`,
+     * `uuid`, `decimal`, ...): the check a `{:primitive}` makes, for code
+     * generated from a schema ({@see \JOetjen\Dextrin\Codegen\Php}), which
+     * holds no compiled type.
+     *
+     * @param string $name the primitive's name, as DXNS writes it without the colon
+     * @param mixed $value the value
+     * @return bool whether it is one; `false` for a name that is no primitive
+     */
+    public static function isPrimitive(string $name, mixed $value): bool
+    {
+        return self::primitiveMatches($name, $value);
+    }
+
+    /**
+     * Whether `$value` is one of `$literals`, as an `{:enum}` compares
+     * them: for generated code.
+     *
+     * @param list<mixed> $literals the enum's literals
+     * @param mixed $value the value
+     * @return bool whether it is equal to one of them
+     */
+    public static function isEnumMember(array $literals, mixed $value): bool
+    {
+        return self::enum($literals)->enumMatches($value);
+    }
+
+    /**
+     * Whether `$value` meets every one of a `{:refine}`'s `$constraints`,
+     * for generated code. `$primitive` is the primitive the refine stands
+     * on, when it stands on one: `bits` makes a length count bits. The
+     * keys whose argument is a type ({@see self::TYPE_KEYS}) need a
+     * registry and are not met here.
+     *
+     * @param mixed $value the value, already of the refined type
+     * @param array<string, mixed> $constraints the constraints by key
+     * @param string|null $primitive the primitive refined, if any
+     * @return bool whether all of them hold
+     */
+    public static function meetsConstraints(mixed $value, array $constraints, ?string $primitive = null): bool
+    {
+        return self::satisfiesConstraints($value, $constraints, $primitive === null ? null : self::primitive($primitive), new Context());
+    }
+
     private static function primitiveMatches(string $name, mixed $value): bool
     {
         return match ($name) {

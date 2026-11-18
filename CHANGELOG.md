@@ -35,6 +35,29 @@ What DXNS lacked to say every TypeSpec type exactly, as in dextrin
   strict decode or not. Both are inherited from bases.
 - **`min-count` and `max-count` on maps, shapes and structs** (DXNS.md
   §2): the entries present.
+- **`dextrin gen-php SCHEMAS --namespace NS --out DIR [--check]`**
+  (`Codegen\Php`, design/codegen-php.md): PHP classes from a tree of
+  `.dxns` schemas, the counterpart of dextrin's `mix dextrin.gen.elixir`.
+  Per `%schema`, the user's `Order extends AbstractOrder`, written once,
+  and the generated `AbstractOrder`, rewritten: readonly properties of
+  the latest version's fields (native types where exact) with
+  `with...()` copies, `readVN()`/`conformVN()` per version, generated
+  upgrades (added, dropped, made optional, renamed by `meta`
+  `typespec.renamed-from`) and abstract `upgradeVN()` for the rest,
+  `read()`, `validate()`, `toDxn()`, and `#[\Deprecated]` on a
+  deprecated version's methods; plus `NS\Decoder::decode()`. No schema
+  is loaded at run time (`Codegen\Runtime`). Refused data throws
+  `Codegen\InvalidData`, a `DXNError` with the field's path. What is
+  deprecated warns as decoding does (`deprecations:`, `onDeprecated:`).
+  A closed schema (`- *`) refuses a field its version does not declare.
+  `// dextrin:keep` regions and the user's class names survive
+  regenerating; `--check` fails on stale files and orphaned regions.
+  Forms not generated yet are refused, each naming its schema, version
+  and field.
+- **`TypeExpr::isPrimitive()`, `isEnumMember()` and
+  `meetsConstraints()`**: the checks a primitive, an enum and a refine
+  make, for generated code.
+- `DXNError` is no longer `final`, so `Codegen\InvalidData` is one.
 - **`dextrin from-typespec MAIN.tsp [--out DIR]`**: TypeSpec to DXNS,
   by TypeSpec's own compiler with the `@joetjen/dextrin-typespec` emitter
   (node-dextrin's packages/dextrin-typespec), through npx; one `.dxns` per

@@ -1,0 +1,1 @@
+%{Old: {:doc %schema{a: :string} %{deprecated: true}}}
